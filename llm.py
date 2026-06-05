@@ -24,39 +24,42 @@ Dữ liệu là bảng theo dõi LEAD (khách hàng tiềm năng) với các c�
 
 Quy tắc trả lời:
 - Luôn trả lời bằng tiếng Việt, rõ ràng, đi thẳng vào con số và insight.
-- Khi cần con số tổng hợp (đếm theo nguồn/trạng thái/dịch vụ/ngày/telesale),
+- Khi cần con số tổng hợp (đếm theo nguồn/trạng thái/dịch vụ/ngày/telesale,
+  hoặc bảng chéo nguồn×trạng thái, telesale×trạng thái),
   HÃY DÙNG phần "SỐ LIỆU TỔNG HỢP" đã tính sẵn bên dưới — chính xác hơn tự đếm.
-- Khi câu hỏi cần lọc/tìm theo điều kiện cụ thể, dùng phần "DỮ LIỆU CHI TIẾT".
+- Nếu có phần "DỮ LIỆU CHI TIẾT", dùng nó cho câu hỏi tìm/lọc theo từng khách.
+- Nếu KHÔNG có "DỮ LIỆU CHI TIẾT" mà câu hỏi cần thông tin từng khách cụ thể
+  (tên, số điện thoại, ghi chú...), hãy trả lời dựa trên số liệu tổng hợp và
+  gợi ý người dùng thêm từ "liệt kê" hoặc "danh sách" để xem chi tiết.
 - Nếu dữ liệu không đủ để trả lời, nói rõ là không đủ dữ liệu, đừng bịa.
 - Trình bày gọn: dùng gạch đầu dòng, số liệu kèm phần trăm khi hữu ích.
 - Có thể chủ động gợi ý insight (ví dụ nguồn nào hiệu quả, tỉ lệ chốt) khi phù hợp.
 """
 
 
-def _build_system(data_tsv: str, summary: str) -> list[dict]:
-    """System prompt: phần hướng dẫn + dữ liệu (được cache để tiết kiệm chi phí)."""
-    context = (
-        f"=== SỐ LIỆU TỔNG HỢP (đã tính sẵn, chính xác) ===\n{summary}\n\n"
-        f"=== DỮ LIỆU CHI TIẾT (bảng TSV) ===\n{data_tsv}"
-    )
+def _build_system(summary: str, data_tsv: str | None = None) -> list[dict]:
+    """System prompt: hướng dẫn + số liệu tổng hợp; chỉ kèm chi tiết khi cần."""
+    context = f"=== SỐ LIỆU TỔNG HỢP (đã tính sẵn, chính xác) ===\n{summary}"
+    if data_tsv:
+        context += f"\n\n=== DỮ LIỆU CHI TIẾT (bảng TSV) ===\n{data_tsv}"
     return [
         {"type": "text", "text": _INSTRUCTIONS},
-        # Khối dữ liệu lớn -> bật prompt caching để các câu hỏi sau rẻ và nhanh hơn.
+        # Bật prompt caching cho khối dữ liệu để các câu hỏi sau rẻ và nhanh hơn.
         {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
     ]
 
 
-def answer(history: list[dict], data_tsv: str, summary: str) -> str:
-    """Gọi Claude với lịch sử hội thoại và dữ liệu hiện tại, trả về câu trả lời."""
-    system = _build_system(data_tsv, summary)
+def answer(history: list[dict], summary: str, data_tsv: str | None = None) -> str:
+    """Gọi Claude với lịch sử hội thoại và dữ liệu hiện tại, trả về câu trả lời.
 
-    # Dùng streaming để tránh timeout khi dữ liệu lớn / câu trả lời dài.
+    Tắt thinking + giữ max_tokens nhỏ để tiết kiệm chi phí (số liệu đã tính sẵn).
+    """
+    system = _build_system(summary, data_tsv)
+
     with _client.messages.stream(
         model=config.CLAUDE_MODEL,
-        max_tokens=8000,
+        max_tokens=4000,
         system=system,
-        thinking={"type": "adaptive"},
-        output_config={"effort": "medium"},
         messages=history,
     ) as stream:
         message = stream.get_final_message()

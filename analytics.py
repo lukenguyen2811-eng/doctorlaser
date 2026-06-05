@@ -25,6 +25,23 @@ def _fmt(pairs: list[tuple[str, int]], total: int) -> str:
     return "\n".join(lines) if lines else "  (không có dữ liệu)"
 
 
+def _crosstab(records: list[dict], row_field: str, col_field: str) -> str:
+    """Bảng chéo gọn: với mỗi giá trị hàng, liệt kê số lượng theo cột."""
+    table: dict[str, Counter] = {}
+    for r in records:
+        row = (r.get(row_field) or "(trống)").strip() or "(trống)"
+        col = (r.get(col_field) or "(trống)").strip() or "(trống)"
+        table.setdefault(row, Counter())[col] += 1
+
+    lines = []
+    # Sắp theo tổng số lead của hàng, giảm dần.
+    for row in sorted(table, key=lambda k: -sum(table[k].values())):
+        total = sum(table[row].values())
+        detail = ", ".join(f"{col}: {n}" for col, n in table[row].most_common())
+        lines.append(f"  - {row} (tổng {total}): {detail}")
+    return "\n".join(lines) if lines else "  (không có dữ liệu)"
+
+
 def build_summary(records: list[dict]) -> str:
     """Tạo bản tóm tắt số liệu dạng text để đưa vào prompt."""
     total = len(records)
@@ -48,5 +65,18 @@ def build_summary(records: list[dict]) -> str:
 
     parts.append("Theo NGÀY:")
     parts.append(_fmt(_count_by(records, "ngay"), total))
+    parts.append("")
+
+    # Bảng chéo: giúp đánh giá hiệu quả mà không cần dữ liệu chi tiết.
+    parts.append("NGUỒN × TRẠNG THÁI (đánh giá hiệu quả từng nguồn):")
+    parts.append(_crosstab(records, "nguon", "trang_thai"))
+    parts.append("")
+
+    parts.append("TELESALE × TRẠNG THÁI (đánh giá hiệu quả từng telesale):")
+    parts.append(_crosstab(records, "telesale", "trang_thai"))
+    parts.append("")
+
+    parts.append("NGÀY × TRẠNG THÁI:")
+    parts.append(_crosstab(records, "ngay", "trang_thai"))
 
     return "\n".join(parts)

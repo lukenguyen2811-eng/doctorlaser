@@ -140,8 +140,12 @@ Ngoài ra cứ nhắn câu hỏi tự nhiên là bot trả lời.
 - Dữ liệu được cache `SHEET_CACHE_TTL` giây (mặc định 120s) để đỡ gọi Google liên tục.
   Muốn cập nhật ngay, dùng `/refresh`.
 - **Không commit** file `.env` và `service_account.json` lên Git (đã có trong `.gitignore`).
-- Mỗi câu hỏi sẽ gửi dữ liệu sheet cho Claude; chi phí phụ thuộc lượng dữ liệu.
-  Bot đã bật *prompt caching* để các câu hỏi liên tiếp rẻ và nhanh hơn.
+- Mỗi câu hỏi sẽ gửi dữ liệu cho Claude; chi phí phụ thuộc lượng dữ liệu.
+  Để tiết kiệm: bot dùng model **Haiku** (rẻ nhất), mặc định **chỉ gửi số liệu
+  tổng hợp** (đã tính sẵn), và chỉ gửi dữ liệu chi tiết từng khách khi câu hỏi
+  có từ như "liệt kê", "danh sách", "tìm", "số điện thoại"...
+- Đổi model bất cứ lúc nào bằng biến môi trường `CLAUDE_MODEL`
+  (ví dụ `claude-sonnet-4-6` hoặc `claude-opus-4-8`) — không cần sửa code.
 
 ---
 

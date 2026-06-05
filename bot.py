@@ -33,6 +33,18 @@ log = logging.getLogger("doctorlaser-bot")
 MAX_HISTORY_TURNS = 6
 TELEGRAM_LIMIT = 4096
 
+# Câu hỏi chứa các từ này thường cần dữ liệu chi tiết từng khách (gửi cả bảng TSV).
+# Mặc định chỉ gửi số liệu tổng hợp để tiết kiệm chi phí.
+DETAIL_KEYWORDS = (
+    "liệt kê", "danh sách", "tìm", "tên", "số điện thoại", "sđt", "sdt",
+    "khách nào", "ai ", "ghi chú", "liên hệ", "gọi cho", "chi tiết",
+)
+
+
+def _needs_detail(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in DETAIL_KEYWORDS)
+
 WELCOME = (
     "Xin chào! Tôi là bot phân tích dữ liệu khách hàng của Doctor Laser.\n\n"
     "Bạn cứ hỏi tự nhiên bằng tiếng Việt, ví dụ:\n"
@@ -152,14 +164,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await status.edit_text("Chưa đọc được dữ liệu nào từ Google Sheet.")
             return
 
-        data_tsv = sheets.to_tsv(records)
         summary = analytics.build_summary(records)
+        # Chỉ gửi dữ liệu chi tiết khi câu hỏi thực sự cần (tiết kiệm token).
+        data_tsv = sheets.to_tsv(records) if _needs_detail(question) else None
 
         # Lịch sử hội thoại lưu theo từng chat.
         history: list[dict] = context.chat_data.get("history", [])
         history.append({"role": "user", "content": question})
 
-        reply = await asyncio.to_thread(llm.answer, history, data_tsv, summary)
+        reply = await asyncio.to_thread(llm.answer, history, summary, data_tsv)
 
         history.append({"role": "assistant", "content": reply})
         # Giữ lịch sử trong giới hạn.
