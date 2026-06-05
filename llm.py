@@ -56,7 +56,7 @@ def answer(history: list[dict], data_tsv: str, summary: str) -> str:
         max_tokens=8000,
         system=system,
         thinking={"type": "adaptive"},
-        output_config={"effort": "high"},
+        output_config={"effort": "medium"},
         messages=history,
     ) as stream:
         message = stream.get_final_message()

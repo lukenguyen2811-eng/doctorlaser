@@ -143,13 +143,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     await update.message.chat.send_action(ChatAction.TYPING)
+    # Báo ngay là đã nhận câu hỏi (câu đầu tiên có thể mất vài chục giây).
+    status = await update.message.reply_text("⏳ Đang phân tích dữ liệu...")
 
     try:
         records = await asyncio.to_thread(sheets.get_records)
         if not records:
-            await update.message.reply_text(
-                "Chưa đọc được dữ liệu nào từ Google Sheet."
-            )
+            await status.edit_text("Chưa đọc được dữ liệu nào từ Google Sheet.")
             return
 
         data_tsv = sheets.to_tsv(records)
@@ -165,10 +165,15 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Giữ lịch sử trong giới hạn.
         context.chat_data["history"] = history[-MAX_HISTORY_TURNS * 2 :]
 
-        await _reply_long(update, reply)
+        # Ngắn -> sửa tin "Đang phân tích"; dài -> xoá rồi gửi nhiều phần.
+        if reply and len(reply) <= TELEGRAM_LIMIT:
+            await status.edit_text(reply)
+        else:
+            await status.delete()
+            await _reply_long(update, reply)
     except Exception as e:  # noqa: BLE001
         log.exception("answer failed")
-        await update.message.reply_text(f"Có lỗi xảy ra: {e}")
+        await status.edit_text(f"Có lỗi xảy ra: {e}")
 
 
 def main() -> None:
