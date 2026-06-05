@@ -24,6 +24,9 @@ CLAUDE_MODEL = _get("CLAUDE_MODEL", "claude-opus-4-8")
 # Google Sheet
 GOOGLE_SHEET_ID = _get("GOOGLE_SHEET_ID")
 GOOGLE_SHEET_GID = _get("GOOGLE_SHEET_GID")
+# Cách 1 (Railway/cloud): dán toàn bộ nội dung JSON vào biến môi trường này.
+GOOGLE_SERVICE_ACCOUNT_JSON = _get("GOOGLE_SERVICE_ACCOUNT_JSON")
+# Cách 2 (chạy máy cá nhân): đường dẫn tới file JSON.
 GOOGLE_SERVICE_ACCOUNT_FILE = _get("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
 SHEET_CACHE_TTL = int(_get("SHEET_CACHE_TTL", "120") or "120")
 
@@ -37,8 +40,12 @@ def check() -> list[str]:
         errors.append("Thiếu ANTHROPIC_API_KEY")
     if not GOOGLE_SHEET_ID:
         errors.append("Thiếu GOOGLE_SHEET_ID")
-    if not os.path.exists(GOOGLE_SERVICE_ACCOUNT_FILE):
+    # Cần MỘT trong hai: nội dung JSON qua biến môi trường, hoặc file JSON.
+    if not GOOGLE_SERVICE_ACCOUNT_JSON and not os.path.exists(
+        GOOGLE_SERVICE_ACCOUNT_FILE
+    ):
         errors.append(
-            f"Không tìm thấy file service account: {GOOGLE_SERVICE_ACCOUNT_FILE}"
+            "Thiếu thông tin Google Service Account: đặt GOOGLE_SERVICE_ACCOUNT_JSON "
+            f"(nội dung JSON) hoặc để file {GOOGLE_SERVICE_ACCOUNT_FILE}"
         )
     return errors

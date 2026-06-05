@@ -4,6 +4,7 @@ Dùng Google Service Account để đọc sheet (an toàn cho dữ liệu có s�
 Có cache trong bộ nhớ để tránh gọi Google liên tục.
 """
 
+import json
 import time
 
 import gspread
@@ -47,10 +48,18 @@ _SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 _cache: tuple[float, list[dict]] | None = None
 
 
-def _open_worksheet():
-    creds = Credentials.from_service_account_file(
+def _load_credentials() -> Credentials:
+    """Lấy credentials từ biến môi trường (Railway) hoặc từ file (máy cá nhân)."""
+    if config.GOOGLE_SERVICE_ACCOUNT_JSON:
+        info = json.loads(config.GOOGLE_SERVICE_ACCOUNT_JSON)
+        return Credentials.from_service_account_info(info, scopes=_SCOPES)
+    return Credentials.from_service_account_file(
         config.GOOGLE_SERVICE_ACCOUNT_FILE, scopes=_SCOPES
     )
+
+
+def _open_worksheet():
+    creds = _load_credentials()
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
     if config.GOOGLE_SHEET_GID:

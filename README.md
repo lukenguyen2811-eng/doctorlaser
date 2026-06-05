@@ -87,6 +87,42 @@ Khi thấy dòng "Bot đang chạy", mở Telegram, vào bot của bạn, gửi 
 
 ---
 
+## Deploy lên Railway (chạy 24/7 trên cloud)
+
+Bot chạy nền (polling) nên rất hợp với Railway. Repo đã có sẵn `railway.json` và `Procfile`.
+
+### Bước 1 — Đưa code lên GitHub
+Code đã nằm trên GitHub (branch của bạn). Railway sẽ deploy trực tiếp từ đó.
+
+### Bước 2 — Tạo project trên Railway
+1. Vào https://railway.app/ → đăng nhập (nên dùng GitHub).
+2. **New Project → Deploy from GitHub repo** → chọn repo `doctorlaser`.
+3. Railway tự nhận Python (qua `requirements.txt`) và chạy lệnh `python bot.py`.
+
+### Bước 3 — Khai báo biến môi trường (Variables)
+Trong project Railway → tab **Variables** → thêm các biến sau:
+
+| Biến | Giá trị |
+|------|---------|
+| `TELEGRAM_BOT_TOKEN` | token mới từ BotFather |
+| `ANTHROPIC_API_KEY` | key `sk-ant-...` |
+| `GOOGLE_SHEET_ID` | ID của sheet |
+| `GOOGLE_SHEET_GID` | gid của tab cần phân tích |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | **dán toàn bộ nội dung file `service_account.json`** vào đây |
+| `ALLOWED_TELEGRAM_IDS` | (tùy chọn) ID Telegram được phép dùng |
+
+> Lưu ý: Trên Railway **không upload file**, nên dùng `GOOGLE_SERVICE_ACCOUNT_JSON`
+> (dán cả nội dung JSON, gồm cả dấu ngoặc `{ ... }`). Đừng quên vẫn phải **Share sheet**
+> với email `client_email` trong JSON đó (quyền Viewer).
+
+### Bước 4 — Deploy
+Railway tự build và chạy. Vào tab **Deployments → Logs**, thấy dòng
+"Bot đang chạy" là thành công. Mở Telegram và bắt đầu hỏi.
+
+> Mỗi lần bạn push code mới lên branch, Railway sẽ tự deploy lại.
+
+---
+
 ## Các lệnh trong bot
 
 | Lệnh | Tác dụng |
