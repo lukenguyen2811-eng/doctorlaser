@@ -15,6 +15,12 @@ _TOKEN_URL = "https://id.kiotviet.vn/connect/token"
 _BASE_URL = "https://public.kiotviet.vn"
 _PAGE_SIZE = 100  # tối đa của KiotViet
 
+# Một số WAF của KiotViet chặn request không có User-Agent giống trình duyệt.
+_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 # Cache token và dữ liệu trong bộ nhớ.
 _token = {"value": None, "expires_at": 0.0}
 _data_cache: dict[str, tuple[float, object]] = {}
@@ -33,6 +39,7 @@ def _get_token() -> str:
             "client_id": config.KIOTVIET_CLIENT_ID,
             "client_secret": config.KIOTVIET_CLIENT_SECRET,
         },
+        headers={"User-Agent": _UA},
         timeout=30,
     )
     if resp.status_code != 200:
@@ -50,6 +57,8 @@ def _headers() -> dict:
     return {
         "Retailer": config.KIOTVIET_RETAILER,
         "Authorization": f"Bearer {_get_token()}",
+        "User-Agent": _UA,
+        "Accept": "application/json",
     }
 
 
