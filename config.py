@@ -47,6 +47,20 @@ def kiotviet_enabled() -> bool:
     )
 
 
+# Sheet doanh thu/ads theo dịch vụ (bảng giao dịch + ROAS theo dịch vụ)
+ADS_SERVICE_SHEET_ID = _get(
+    "ADS_SERVICE_SHEET_ID", "1OD5UXzOQ1ukZ0LQlcZZ806QdC_FZrlDbbWR1sdTer3g"
+)
+ADS_SERVICE_GID = _get("ADS_SERVICE_GID", "1272703772")
+
+# Model dùng cho phân tích chiến lược (/chienluoc) - mạnh hơn model trả lời thường.
+STRATEGY_MODEL = _get("STRATEGY_MODEL", "claude-sonnet-4-6")
+
+
+def strategy_enabled() -> bool:
+    return bool(ADS_SERVICE_SHEET_ID)
+
+
 def check() -> list[str]:
     """Trả về danh sách lỗi cấu hình (rỗng nghĩa là OK)."""
     errors = []

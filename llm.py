@@ -33,6 +33,52 @@ Quy tắc trả lời:
 """
 
 
+_STRATEGY_INSTRUCTIONS = """\
+Bạn là CỐ VẤN CHIẾN LƯỢC marketing & kinh doanh cho phòng khám da liễu/thẩm mỹ
+"Doctor Laser". Bạn được cung cấp số liệu đã tính sẵn: lead/telesale, doanh thu
+bán hàng, và chi phí ads + ROAS theo dịch vụ/kênh/nhân viên.
+
+Nhiệm vụ: đưa ra PHÂN TÍCH CHIẾN LƯỢC sắc bén và KẾ HOẠCH HÀNH ĐỘNG cụ thể.
+
+Hãy trình bày theo cấu trúc:
+1. BỨC TRANH TỔNG QUAN: vài chỉ số quan trọng nhất (doanh thu, chi phí ads,
+   ROAS chung, tỉ lệ chốt).
+2. PHÁT HIỆN CHÍNH: 3-5 insight quan trọng — kênh/dịch vụ nào hiệu quả (ROAS cao)
+   hay đang lãng phí, điểm rò rỉ ở phễu (lấy SĐT, tỉ lệ chốt), chênh lệch hiệu
+   suất nhân viên.
+3. KẾ HOẠCH HÀNH ĐỘNG: việc cần làm, sắp theo mức độ tác động (tiền), kèm mục
+   tiêu số đo được. Cụ thể về tái phân bổ ngân sách ads theo dịch vụ/kênh.
+
+Nguyên tắc: dùng đúng con số đã cho (đừng bịa); nêu rõ giả định nếu dữ liệu chưa
+đủ; ưu tiên đề xuất có tác động doanh thu/lợi nhuận lớn; viết gọn, dễ hành động,
+bằng tiếng Việt; dùng đơn vị tiền Việt (đ).
+"""
+
+
+def strategy(context: str) -> str:
+    """Phân tích chiến lược chuyên sâu (dùng model mạnh + suy luận)."""
+    system = [
+        {"type": "text", "text": _STRATEGY_INSTRUCTIONS},
+        {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
+    ]
+    with _client.messages.stream(
+        model=config.STRATEGY_MODEL,
+        max_tokens=8000,
+        system=system,
+        thinking={"type": "adaptive"},
+        output_config={"effort": "high"},
+        messages=[
+            {
+                "role": "user",
+                "content": "Hãy phân tích chiến lược toàn diện và lập kế hoạch "
+                "hành động dựa trên toàn bộ số liệu trên.",
+            }
+        ],
+    ) as stream:
+        message = stream.get_final_message()
+    return "".join(b.text for b in message.content if b.type == "text").strip()
+
+
 def answer(history: list[dict], context: str) -> str:
     """Trả lời câu hỏi dựa trên phần dữ liệu (context) đã được lắp sẵn.
 

@@ -26,6 +26,7 @@ import kiotviet
 import llm
 import sales
 import sheets
+import strategy
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
@@ -62,6 +63,18 @@ def _is_sales_question(question: str) -> bool:
     return any(kw in q for kw in SALES_KEYWORDS)
 
 
+# Câu hỏi về hiệu quả ads/dịch vụ/nhân viên -> kèm dữ liệu ROAS theo dịch vụ.
+STRATEGY_KEYWORDS = (
+    "roas", "ads", "quảng cáo", "chi phí", "dịch vụ", "nhân viên", "saler",
+    "sale", "hiệu quả", "kênh", "nguồn nào", "lời", "lãi", "ngân sách",
+)
+
+
+def _is_strategy_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in STRATEGY_KEYWORDS)
+
+
 WELCOME = (
     "Xin chào! Tôi là bot phân tích dữ liệu của Doctor Laser.\n\n"
     "Tôi nắm 2 nguồn dữ liệu:\n"
@@ -75,6 +88,7 @@ WELCOME = (
     "Lệnh:\n"
     "/stats - số liệu lead tổng hợp\n"
     "/doanhthu - số liệu bán hàng (KiotViet)\n"
+    "/chienluoc - phân tích chiến lược & kế hoạch (ROAS, ngân sách ads...)\n"
     "/refresh - tải lại dữ liệu mới nhất\n"
     "/help - hướng dẫn"
 )
@@ -177,6 +191,51 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"Lỗi: {e}")
 
 
+async def cmd_chienluoc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _allowed(update):
+        return
+    status = await update.message.reply_text(
+        "⏳ Đang tổng hợp dữ liệu và lập phân tích chiến lược... (~30-60 giây)"
+    )
+    try:
+        parts: list[str] = []
+
+        records = await asyncio.to_thread(sheets.get_records)
+        if records:
+            parts.append("# DỮ LIỆU LEAD (telesale)\n" + analytics.build_summary(records))
+
+        if config.strategy_enabled():
+            data = await asyncio.to_thread(strategy.get_data)
+            parts.append(
+                "# DOANH THU & ROAS THEO DỊCH VỤ/KÊNH/NHÂN VIÊN\n"
+                + strategy.build_summary(data)
+            )
+
+        if config.kiotviet_enabled():
+            invoices = await asyncio.to_thread(kiotviet.get_invoices)
+            customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
+            parts.append(
+                f"# DỮ LIỆU BÁN HÀNG (KiotViet, {config.KIOTVIET_INVOICE_DAYS} ngày)\n"
+                + sales.build_summary(invoices, customer_total)
+            )
+
+        if not parts:
+            await status.edit_text("Chưa có dữ liệu để phân tích.")
+            return
+
+        reply = await asyncio.to_thread(llm.strategy, "\n\n".join(parts))
+        await status.delete()
+        await _reply_long(update, reply)
+    except anthropic.RateLimitError:
+        await status.edit_text(
+            "⚠️ Bị giới hạn tốc độ. Thử lại sau ~1 phút (phân tích chiến lược "
+            "tốn nhiều token hơn)."
+        )
+    except Exception as e:  # noqa: BLE001
+        log.exception("chienluoc failed")
+        await status.edit_text(f"Có lỗi xảy ra: {e}")
+
+
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Trong nhóm: chỉ phản hồi khi được @nhắc tên hoặc reply vào tin của bot,
     # để bot không trả lời mọi tin nhắn trong nhóm.
@@ -214,6 +273,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # Chỉ gửi dữ liệu chi tiết khi câu hỏi thực sự cần (tiết kiệm token).
             if _needs_detail(question):
                 parts.append("## LEAD CHI TIẾT (bảng TSV)\n" + sheets.to_tsv(records))
+
+        # --- Doanh thu & ROAS theo dịch vụ — khi câu hỏi liên quan ads/dịch vụ ---
+        if config.strategy_enabled() and _is_strategy_question(question):
+            data = await asyncio.to_thread(strategy.get_data)
+            parts.append(
+                "# DOANH THU & ROAS THEO DỊCH VỤ/KÊNH/NHÂN VIÊN\n"
+                + strategy.build_summary(data)
+            )
 
         # --- Dữ liệu BÁN HÀNG (KiotViet) — chỉ khi câu hỏi liên quan ---
         if config.kiotviet_enabled() and _is_sales_question(question):
@@ -277,6 +344,7 @@ def main() -> None:
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
+    app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
     log.info("Bot đang chạy. Nhấn Ctrl+C để dừng.")

@@ -162,6 +162,7 @@ Railway tự build và chạy. Vào tab **Deployments → Logs**, thấy dòng
 | `/start`, `/help` | Hướng dẫn sử dụng |
 | `/stats` | Xem nhanh số liệu lead tổng hợp (theo nguồn, trạng thái, dịch vụ, ngày, telesale) |
 | `/doanhthu` | Xem nhanh số liệu bán hàng từ KiotViet (nếu đã kết nối) |
+| `/chienluoc` | Phân tích chiến lược: ROAS theo dịch vụ/kênh, hiệu suất nhân viên, kế hoạch hành động |
 | `/refresh` | Tải lại dữ liệu mới nhất từ Google Sheet (và KiotViet nếu có) |
 
 Ngoài ra cứ nhắn câu hỏi tự nhiên là bot trả lời.

@@ -58,13 +58,18 @@ def _load_credentials() -> Credentials:
     )
 
 
-def _open_worksheet():
+def open_worksheet(sheet_id: str, gid: str | None = None):
+    """Mở 1 worksheet bất kỳ theo sheet_id + gid (dùng chung cho các module khác)."""
     creds = _load_credentials()
     client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
-    if config.GOOGLE_SHEET_GID:
-        return spreadsheet.get_worksheet_by_id(int(config.GOOGLE_SHEET_GID))
+    spreadsheet = client.open_by_key(sheet_id)
+    if gid:
+        return spreadsheet.get_worksheet_by_id(int(gid))
     return spreadsheet.get_worksheet(0)
+
+
+def _open_worksheet():
+    return open_worksheet(config.GOOGLE_SHEET_ID, config.GOOGLE_SHEET_GID)
 
 
 def _is_empty_row(values: list[str]) -> bool:
