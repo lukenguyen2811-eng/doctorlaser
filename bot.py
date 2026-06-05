@@ -248,6 +248,11 @@ async def _run_strategy(
             return
 
         reply = await asyncio.to_thread(llm.strategy, "\n\n".join(parts))
+        if not reply:
+            await status.edit_text(
+                "Mình chưa tạo được nội dung (có thể do giới hạn token). Thử lại sau ít phút nhé."
+            )
+            return
         await status.delete()
         await _reply_long(update, reply)
     except anthropic.RateLimitError:
@@ -345,8 +350,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Giữ lịch sử trong giới hạn.
         context.chat_data["history"] = history[-MAX_HISTORY_TURNS * 2 :]
 
+        if not reply:
+            await status.edit_text(
+                "Mình chưa tạo được câu trả lời. Bạn thử hỏi lại nhé."
+            )
+            return
         # Ngắn -> sửa tin "Đang phân tích"; dài -> xoá rồi gửi nhiều phần.
-        if reply and len(reply) <= TELEGRAM_LIMIT:
+        if len(reply) <= TELEGRAM_LIMIT:
             await status.edit_text(reply)
         else:
             await status.delete()
