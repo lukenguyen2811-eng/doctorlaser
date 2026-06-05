@@ -35,7 +35,11 @@ def _get_token() -> str:
         },
         timeout=30,
     )
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        # KiotViet trả lý do cụ thể trong body (invalid_client / invalid_scope...).
+        raise RuntimeError(
+            f"Xin token KiotViet thất bại ({resp.status_code}): {resp.text[:300]}"
+        )
     body = resp.json()
     _token["value"] = body["access_token"]
     _token["expires_at"] = now + int(body.get("expires_in", 3600))
