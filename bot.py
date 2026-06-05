@@ -21,6 +21,7 @@ from telegram.ext import (
     filters,
 )
 
+import adspend
 import analytics
 import config
 import kiotviet
@@ -229,12 +230,29 @@ async def _run_strategy(
     try:
         parts: list[str] = []
 
+        data = None
         if config.strategy_enabled():
             data = await asyncio.to_thread(strategy.get_data)
             parts.append(
                 f"# DOANH THU THEO THỜI GIAN (tháng {from_m}–{to_m})\n"
                 + strategy.build_time_summary(data, from_m, to_m)
             )
+
+        # Chi phí ads theo tháng -> ROAS theo tháng (sheet ads tháng).
+        if config.adspend_enabled() and data is not None:
+            try:
+                spend = await asyncio.to_thread(adspend.get_data)
+                rev_m = strategy.revenue_by_month(data, from_m, to_m)
+                parts.append(
+                    "# CHI PHÍ ADS & ROAS THEO THÁNG\n"
+                    + adspend.build_roas(spend, rev_m, from_m, to_m)
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("adspend failed: %s", e)
+                parts.append(
+                    "# CHI PHÍ ADS THEO THÁNG\n(Chưa đọc được sheet chi phí ads "
+                    f"tháng — kiểm tra đã share cho service account chưa. Lỗi: {e})"
+                )
 
         records = await asyncio.to_thread(sheets.get_records)
         if records:

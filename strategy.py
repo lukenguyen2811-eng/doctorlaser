@@ -208,3 +208,12 @@ def build_time_summary(data: dict, from_m: int, to_m: int) -> str:
     parts.extend(_roas_block(data["pivot"]))
 
     return "\n".join(parts).strip()
+
+
+def revenue_by_month(data: dict, from_m: int, to_m: int) -> dict[int, int]:
+    """Tổng doanh thu (từ giao dịch) theo từng tháng trong khoảng."""
+    out: dict[int, int] = defaultdict(int)
+    for t in data["transactions"]:
+        if from_m <= t["thang"] <= to_m:
+            out[t["thang"]] += t["doanh_thu"]
+    return dict(out)

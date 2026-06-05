@@ -58,11 +58,16 @@ def _load_credentials() -> Credentials:
     )
 
 
-def open_worksheet(sheet_id: str, gid: str | None = None):
-    """Mở 1 worksheet bất kỳ theo sheet_id + gid (dùng chung cho các module khác)."""
+def open_spreadsheet(sheet_id: str):
+    """Mở cả spreadsheet (để duyệt nhiều tab)."""
     creds = _load_credentials()
     client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(sheet_id)
+    return client.open_by_key(sheet_id)
+
+
+def open_worksheet(sheet_id: str, gid: str | None = None):
+    """Mở 1 worksheet bất kỳ theo sheet_id + gid (dùng chung cho các module khác)."""
+    spreadsheet = open_spreadsheet(sheet_id)
     if gid:
         return spreadsheet.get_worksheet_by_id(int(gid))
     return spreadsheet.get_worksheet(0)

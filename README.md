@@ -162,7 +162,7 @@ Railway tự build và chạy. Vào tab **Deployments → Logs**, thấy dòng
 | `/start`, `/help` | Hướng dẫn sử dụng |
 | `/stats` | Xem nhanh số liệu lead tổng hợp (theo nguồn, trạng thái, dịch vụ, ngày, telesale) |
 | `/doanhthu` | Xem nhanh số liệu bán hàng từ KiotViet (nếu đã kết nối) |
-| `/chienluoc` | Phân tích chiến lược: bot hỏi khoảng tháng (vd `4-6`), lọc dữ liệu theo thời gian, rồi đưa ROAS + kế hoạch **theo tuần và theo tháng**. Có thể gõ nhanh `/chienluoc 4-6` |
+| `/chienluoc` | Phân tích chiến lược: bot hỏi khoảng tháng (vd `4-6`), lọc dữ liệu theo thời gian, ghép chi phí ads theo tháng để ra **ROAS theo từng tháng**, rồi đưa kế hoạch **theo tuần và theo tháng**. Có thể gõ nhanh `/chienluoc 4-6` |
 | `/refresh` | Tải lại dữ liệu mới nhất từ Google Sheet (và KiotViet nếu có) |
 
 Ngoài ra cứ nhắn câu hỏi tự nhiên là bot trả lời.

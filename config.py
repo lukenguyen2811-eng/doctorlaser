@@ -56,9 +56,18 @@ ADS_SERVICE_GID = _get("ADS_SERVICE_GID", "1272703772")
 # Model dùng cho phân tích chiến lược (/chienluoc) - mạnh hơn model trả lời thường.
 STRATEGY_MODEL = _get("STRATEGY_MODEL", "claude-sonnet-4-6")
 
+# Sheet chi phí ads theo THÁNG (mỗi tab là 1 tháng, có Facebook/Tiktok/Youtube).
+ADS_MONTHLY_SHEET_ID = _get(
+    "ADS_MONTHLY_SHEET_ID", "18pxTeTp8jGUkztD-CaHh6zmgBkvGCzNyxl979Au29L0"
+)
+
 
 def strategy_enabled() -> bool:
     return bool(ADS_SERVICE_SHEET_ID)
+
+
+def adspend_enabled() -> bool:
+    return bool(ADS_MONTHLY_SHEET_ID)
 
 
 def check() -> list[str]:
