@@ -69,10 +69,10 @@ def strategy(context: str) -> str:
     ]
     with _client.messages.stream(
         model=config.STRATEGY_MODEL,
-        max_tokens=8000,
+        max_tokens=6000,
         system=system,
         thinking={"type": "adaptive"},
-        output_config={"effort": "high"},
+        output_config={"effort": "medium"},
         messages=[
             {
                 "role": "user",

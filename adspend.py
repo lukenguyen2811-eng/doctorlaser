@@ -12,7 +12,7 @@ import config
 import sheets
 
 _CHANNELS = {"facebook": "Facebook", "tiktok": "Tiktok", "youtube": "Youtube"}
-_cache: tuple[float, dict] | None = None
+_cache: dict = {}  # key -> (timestamp, data)
 
 
 def _money(s: str) -> int:
@@ -31,14 +31,14 @@ def _month_from_title(title: str) -> int | None:
     return None
 
 
-def _fetch() -> dict:
-    """Trả về {tháng: {kênh: chi_phí}} cho mọi tab đọc được."""
+def _fetch(months: set[int] | None = None) -> dict:
+    """Trả về {tháng: {kênh: chi_phí}}. Chỉ đọc các tab có tháng trong `months`."""
     ss = sheets.open_spreadsheet(config.ADS_MONTHLY_SHEET_ID)
     result: dict[int, dict[str, int]] = {}
     for ws in ss.worksheets():
         month = _month_from_title(ws.title)
-        if month is None:
-            continue
+        if month is None or (months and month not in months):
+            continue  # bỏ qua tab không cần -> nhanh hơn nhiều
         try:
             rows = ws.get_all_values()
         except Exception:  # noqa: BLE001
@@ -56,13 +56,14 @@ def _fetch() -> dict:
     return result
 
 
-def get_data(force: bool = False) -> dict:
-    global _cache
+def get_data(months: set[int] | None = None, force: bool = False) -> dict:
+    key = tuple(sorted(months)) if months else "all"
     now = time.time()
-    if not force and _cache and (now - _cache[0]) < config.SHEET_CACHE_TTL:
-        return _cache[1]
-    data = _fetch()
-    _cache = (now, data)
+    hit = _cache.get(key)
+    if not force and hit and (now - hit[0]) < config.SHEET_CACHE_TTL:
+        return hit[1]
+    data = _fetch(months)
+    _cache[key] = (now, data)
     return data
 
 

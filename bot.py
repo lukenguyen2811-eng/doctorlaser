@@ -241,7 +241,8 @@ async def _run_strategy(
         # Chi phí ads theo tháng -> ROAS theo tháng (sheet ads tháng).
         if config.adspend_enabled() and data is not None:
             try:
-                spend = await asyncio.to_thread(adspend.get_data)
+                wanted = set(range(from_m, to_m + 1))
+                spend = await asyncio.to_thread(adspend.get_data, wanted)
                 rev_m = strategy.revenue_by_month(data, from_m, to_m)
                 parts.append(
                     "# CHI PHÍ ADS & ROAS THEO THÁNG\n"
