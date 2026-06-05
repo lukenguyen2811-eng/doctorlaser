@@ -30,6 +30,20 @@ GOOGLE_SERVICE_ACCOUNT_JSON = _get("GOOGLE_SERVICE_ACCOUNT_JSON")
 GOOGLE_SERVICE_ACCOUNT_FILE = _get("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
 SHEET_CACHE_TTL = int(_get("SHEET_CACHE_TTL", "120") or "120")
 
+# KiotViet (tùy chọn) - dữ liệu hóa đơn & khách hàng
+KIOTVIET_CLIENT_ID = _get("KIOTVIET_CLIENT_ID")
+KIOTVIET_CLIENT_SECRET = _get("KIOTVIET_CLIENT_SECRET")
+KIOTVIET_RETAILER = _get("KIOTVIET_RETAILER")
+# Số ngày hóa đơn lấy về (KiotViet có thể rất nhiều dữ liệu). Mặc định 30 ngày.
+KIOTVIET_INVOICE_DAYS = int(_get("KIOTVIET_INVOICE_DAYS", "30") or "30")
+KIOTVIET_CACHE_TTL = int(_get("KIOTVIET_CACHE_TTL", "300") or "300")
+
+
+def kiotviet_enabled() -> bool:
+    return bool(
+        KIOTVIET_CLIENT_ID and KIOTVIET_CLIENT_SECRET and KIOTVIET_RETAILER
+    )
+
 
 def check() -> list[str]:
     """Trả về danh sách lỗi cấu hình (rỗng nghĩa là OK)."""

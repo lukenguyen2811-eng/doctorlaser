@@ -22,7 +22,9 @@ from telegram.ext import (
 
 import analytics
 import config
+import kiotviet
 import llm
+import sales
 import sheets
 
 logging.basicConfig(
@@ -46,17 +48,34 @@ def _needs_detail(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in DETAIL_KEYWORDS)
 
+
+# Câu hỏi liên quan bán hàng/doanh thu -> kèm dữ liệu KiotViet.
+SALES_KEYWORDS = (
+    "doanh thu", "doanh số", "hóa đơn", "hoá đơn", "bill", "bán", "mua",
+    "chi tiêu", "khách mua", "sản phẩm", "dịch vụ bán", "đơn hàng",
+    "revenue", "tiền", "thu", "chốt đơn", "kiotviet", "kiot",
+)
+
+
+def _is_sales_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in SALES_KEYWORDS)
+
+
 WELCOME = (
-    "Xin chào! Tôi là bot phân tích dữ liệu khách hàng của Doctor Laser.\n\n"
+    "Xin chào! Tôi là bot phân tích dữ liệu của Doctor Laser.\n\n"
+    "Tôi nắm 2 nguồn dữ liệu:\n"
+    "• LEAD (telesale) từ Google Sheet\n"
+    "• BÁN HÀNG (hóa đơn, doanh thu, khách hàng) từ KiotViet\n\n"
     "Bạn cứ hỏi tự nhiên bằng tiếng Việt, ví dụ:\n"
-    "• Hôm nay có bao nhiêu lead?\n"
-    "• Nguồn nào ra nhiều khách nhất?\n"
-    "• Tỉ lệ khách ĐÃ ĐẾN trên tổng lead là bao nhiêu?\n"
-    "• Telesale nào đang phụ trách nhiều khách nhất?\n"
-    "• Dịch vụ nào được quan tâm nhất tuần này?\n\n"
+    "• Hôm nay có bao nhiêu lead? Nguồn nào hiệu quả nhất?\n"
+    "• Doanh thu hôm nay/tuần này bao nhiêu?\n"
+    "• Sản phẩm/dịch vụ nào bán chạy nhất?\n"
+    "• Top khách hàng chi tiêu nhiều nhất?\n\n"
     "Lệnh:\n"
-    "/stats - xem nhanh số liệu tổng hợp\n"
-    "/refresh - tải lại dữ liệu mới nhất từ Google Sheet\n"
+    "/stats - số liệu lead tổng hợp\n"
+    "/doanhthu - số liệu bán hàng (KiotViet)\n"
+    "/refresh - tải lại dữ liệu mới nhất\n"
     "/help - hướng dẫn"
 )
 
@@ -116,12 +135,34 @@ async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     try:
         records = await asyncio.to_thread(sheets.get_records, True)
-        await update.message.reply_text(
-            f"Đã tải lại dữ liệu: {len(records)} lead."
-        )
+        msg = f"Đã tải lại dữ liệu: {len(records)} lead."
+        if config.kiotviet_enabled():
+            invoices = await asyncio.to_thread(kiotviet.get_invoices, None, True)
+            msg += f"\nKiotViet: {len(invoices)} hóa đơn ({config.KIOTVIET_INVOICE_DAYS} ngày gần nhất)."
+        await update.message.reply_text(msg)
     except Exception as e:  # noqa: BLE001
         log.exception("refresh failed")
         await update.message.reply_text(f"Lỗi khi tải dữ liệu: {e}")
+
+
+async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _allowed(update):
+        return
+    if not config.kiotviet_enabled():
+        await update.message.reply_text(
+            "Chưa kết nối KiotViet. Cần đặt KIOTVIET_CLIENT_ID, "
+            "KIOTVIET_CLIENT_SECRET, KIOTVIET_RETAILER trong cấu hình."
+        )
+        return
+    status = await update.message.reply_text("⏳ Đang lấy dữ liệu bán hàng...")
+    try:
+        invoices = await asyncio.to_thread(kiotviet.get_invoices)
+        customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
+        summary = sales.build_summary(invoices, customer_total)
+        await status.edit_text(summary[:TELEGRAM_LIMIT])
+    except Exception as e:  # noqa: BLE001
+        log.exception("doanhthu failed")
+        await status.edit_text(f"Lỗi khi lấy dữ liệu KiotViet: {e}")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -160,20 +201,40 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     status = await update.message.reply_text("⏳ Đang phân tích dữ liệu...")
 
     try:
+        parts: list[str] = []
+
+        # --- Dữ liệu LEAD (Google Sheet) ---
         records = await asyncio.to_thread(sheets.get_records)
-        if not records:
-            await status.edit_text("Chưa đọc được dữ liệu nào từ Google Sheet.")
+        if records:
+            parts.append(
+                "# DỮ LIỆU LEAD (telesale)\n"
+                + "## SỐ LIỆU TỔNG HỢP (đã tính sẵn, chính xác)\n"
+                + analytics.build_summary(records)
+            )
+            # Chỉ gửi dữ liệu chi tiết khi câu hỏi thực sự cần (tiết kiệm token).
+            if _needs_detail(question):
+                parts.append("## LEAD CHI TIẾT (bảng TSV)\n" + sheets.to_tsv(records))
+
+        # --- Dữ liệu BÁN HÀNG (KiotViet) — chỉ khi câu hỏi liên quan ---
+        if config.kiotviet_enabled() and _is_sales_question(question):
+            invoices = await asyncio.to_thread(kiotviet.get_invoices)
+            customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
+            parts.append(
+                f"# DỮ LIỆU BÁN HÀNG (KiotViet, {config.KIOTVIET_INVOICE_DAYS} "
+                "ngày gần nhất)\n" + sales.build_summary(invoices, customer_total)
+            )
+
+        if not parts:
+            await status.edit_text("Chưa đọc được dữ liệu nào.")
             return
 
-        summary = analytics.build_summary(records)
-        # Chỉ gửi dữ liệu chi tiết khi câu hỏi thực sự cần (tiết kiệm token).
-        data_tsv = sheets.to_tsv(records) if _needs_detail(question) else None
+        context_text = "\n\n".join(parts)
 
         # Lịch sử hội thoại lưu theo từng chat.
         history: list[dict] = context.chat_data.get("history", [])
         history.append({"role": "user", "content": question})
 
-        reply = await asyncio.to_thread(llm.answer, history, summary, data_tsv)
+        reply = await asyncio.to_thread(llm.answer, history, context_text)
 
         history.append({"role": "assistant", "content": reply})
         # Giữ lịch sử trong giới hạn.
@@ -215,6 +276,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
     log.info("Bot đang chạy. Nhấn Ctrl+C để dừng.")

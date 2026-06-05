@@ -1,0 +1,120 @@
+"""Kết nối KiotViet Public API để lấy hóa đơn & khách hàng.
+
+Cơ chế: OAuth2 client_credentials -> access token (1 giờ) -> gọi API kèm
+header Retailer + Bearer. Tài liệu: KiotViet Public API v1.2.
+"""
+
+import time
+from datetime import datetime, timedelta
+
+import requests
+
+import config
+
+_TOKEN_URL = "https://id.kiotviet.vn/connect/token"
+_BASE_URL = "https://public.kiotviet.vn"
+_PAGE_SIZE = 100  # tối đa của KiotViet
+
+# Cache token và dữ liệu trong bộ nhớ.
+_token = {"value": None, "expires_at": 0.0}
+_data_cache: dict[str, tuple[float, object]] = {}
+
+
+def _get_token() -> str:
+    now = time.time()
+    if _token["value"] and now < _token["expires_at"] - 60:
+        return _token["value"]
+
+    resp = requests.post(
+        _TOKEN_URL,
+        data={
+            "scopes": "PublicApi.Access",
+            "grant_type": "client_credentials",
+            "client_id": config.KIOTVIET_CLIENT_ID,
+            "client_secret": config.KIOTVIET_CLIENT_SECRET,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    _token["value"] = body["access_token"]
+    _token["expires_at"] = now + int(body.get("expires_in", 3600))
+    return _token["value"]
+
+
+def _headers() -> dict:
+    return {
+        "Retailer": config.KIOTVIET_RETAILER,
+        "Authorization": f"Bearer {_get_token()}",
+    }
+
+
+def _get_all(path: str, params: dict, max_items: int = 5000) -> list[dict]:
+    """Gọi 1 endpoint và gom toàn bộ trang (có phân trang)."""
+    items: list[dict] = []
+    current = 0
+    while True:
+        page_params = dict(params)
+        page_params["pageSize"] = _PAGE_SIZE
+        page_params["currentItem"] = current
+        resp = requests.get(
+            f"{_BASE_URL}{path}", headers=_headers(), params=page_params, timeout=60
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        data = body.get("data") or []
+        items.extend(data)
+        total = body.get("total", 0)
+        current += _PAGE_SIZE
+        if not data or current >= total or len(items) >= max_items:
+            break
+    return items
+
+
+def _cached(key: str, ttl: int, loader):
+    now = time.time()
+    hit = _data_cache.get(key)
+    if hit and (now - hit[0]) < ttl:
+        return hit[1]
+    value = loader()
+    _data_cache[key] = (now, value)
+    return value
+
+
+def get_invoices(days: int | None = None, force: bool = False) -> list[dict]:
+    """Lấy hóa đơn trong N ngày gần nhất."""
+    days = days or config.KIOTVIET_INVOICE_DAYS
+    from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00:00")
+    key = f"invoices:{days}"
+    if force:
+        _data_cache.pop(key, None)
+
+    def loader():
+        return _get_all(
+            "/invoices",
+            {
+                "fromPurchaseDate": from_date,
+                "orderBy": "purchaseDate",
+                "orderDirection": "Desc",
+                "includePayment": "true",
+                "includeInvoiceDelivery": "false",
+            },
+        )
+
+    return _cached(key, config.KIOTVIET_CACHE_TTL, loader)
+
+
+def get_customer_total() -> int:
+    """Đếm tổng số khách hàng (gọi nhẹ, chỉ đọc trường total)."""
+
+    def loader():
+        resp = requests.get(
+            f"{_BASE_URL}/customers",
+            headers=_headers(),
+            params={"pageSize": 1, "currentItem": 0},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json().get("total", 0)
+
+    return _cached("customer_total", config.KIOTVIET_CACHE_TTL, loader)

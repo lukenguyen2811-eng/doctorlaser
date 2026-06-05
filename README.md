@@ -87,6 +87,38 @@ Khi thấy dòng "Bot đang chạy", mở Telegram, vào bot của bạn, gửi 
 
 ---
 
+## Kết nối KiotViet (tùy chọn — dữ liệu hóa đơn & doanh thu)
+
+Khi bật, bot trả lời được cả câu hỏi về **doanh thu, hóa đơn, sản phẩm bán chạy,
+khách hàng** (dữ liệu thực tế từ KiotViet), bên cạnh dữ liệu lead từ Google Sheet.
+
+### Lấy thông tin kết nối
+1. Đăng nhập KiotViet → **Thiết lập cửa hàng → Thiết lập kết nối API**.
+2. Tạo một kết nối, lấy: **Client ID**, **Client Secret**, và **Tên gian hàng**
+   (phần `xxx` trong địa chỉ `xxx.kiotviet.vn`).
+
+### Khai báo (trong `.env` hoặc Variables trên Railway)
+| Biến | Giá trị |
+|------|---------|
+| `KIOTVIET_CLIENT_ID` | Client ID |
+| `KIOTVIET_CLIENT_SECRET` | Client Secret |
+| `KIOTVIET_RETAILER` | Tên gian hàng |
+| `KIOTVIET_INVOICE_DAYS` | (tùy chọn) số ngày hóa đơn lấy về, mặc định 30 |
+
+Để trống 3 biến đầu nếu chưa dùng — bot vẫn chạy bình thường với dữ liệu lead.
+
+### Dùng
+- Lệnh `/doanhthu` → xem nhanh số liệu bán hàng.
+- Hoặc hỏi tự nhiên (bot tự nhận biết câu hỏi bán hàng):
+  - *"Doanh thu tuần này bao nhiêu?"*
+  - *"Sản phẩm/dịch vụ nào bán chạy nhất?"*
+  - *"Top khách hàng chi tiêu nhiều nhất?"*
+
+> Bot chỉ gửi **số liệu tổng hợp** (đã tính sẵn) cho Claude để tiết kiệm chi phí,
+> không gửi toàn bộ hóa đơn.
+
+---
+
 ## Deploy lên Railway (chạy 24/7 trên cloud)
 
 Bot chạy nền (polling) nên rất hợp với Railway. Repo đã có sẵn `railway.json` và `Procfile`.
@@ -128,8 +160,9 @@ Railway tự build và chạy. Vào tab **Deployments → Logs**, thấy dòng
 | Lệnh | Tác dụng |
 |------|----------|
 | `/start`, `/help` | Hướng dẫn sử dụng |
-| `/stats` | Xem nhanh số liệu tổng hợp (theo nguồn, trạng thái, dịch vụ, ngày, telesale) |
-| `/refresh` | Tải lại dữ liệu mới nhất từ Google Sheet |
+| `/stats` | Xem nhanh số liệu lead tổng hợp (theo nguồn, trạng thái, dịch vụ, ngày, telesale) |
+| `/doanhthu` | Xem nhanh số liệu bán hàng từ KiotViet (nếu đã kết nối) |
+| `/refresh` | Tải lại dữ liệu mới nhất từ Google Sheet (và KiotViet nếu có) |
 
 Ngoài ra cứ nhắn câu hỏi tự nhiên là bot trả lời.
 
