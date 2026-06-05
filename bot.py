@@ -8,6 +8,7 @@ Chạy:  python bot.py
 
 import asyncio
 import logging
+import re
 
 import anthropic
 from telegram import Update
@@ -88,7 +89,7 @@ WELCOME = (
     "Lệnh:\n"
     "/stats - số liệu lead tổng hợp\n"
     "/doanhthu - số liệu bán hàng (KiotViet)\n"
-    "/chienluoc - phân tích chiến lược & kế hoạch (ROAS, ngân sách ads...)\n"
+    "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
     "/refresh - tải lại dữ liệu mới nhất\n"
     "/help - hướng dẫn"
 )
@@ -191,32 +192,55 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"Lỗi: {e}")
 
 
+def _parse_month_range(text: str) -> tuple[int, int] | None:
+    """Tách khoảng tháng từ câu trả lời, vd '4-6', '5', 'tháng 4 đến 6'."""
+    nums = [int(x) for x in re.findall(r"\d+", text) if 1 <= int(x) <= 12]
+    if not nums:
+        return None
+    return (min(nums), max(nums))
+
+
 async def cmd_chienluoc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
+    # Cho phép truyền sẵn khoảng tháng: /chienluoc 4-6
+    rng = _parse_month_range(" ".join(context.args)) if context.args else None
+    if rng:
+        await _run_strategy(update, context, rng)
+        return
+    # Hỏi khoảng tháng, chờ câu trả lời tiếp theo của chính người này.
+    context.chat_data["awaiting_range"] = update.effective_user.id if update.effective_user else 0
+    await update.message.reply_text(
+        "Bạn muốn phân tích chiến lược từ THÁNG mấy tới THÁNG mấy?\n"
+        "Trả lời ví dụ:\n"
+        "• 4-6  (từ tháng 4 đến tháng 6)\n"
+        "• 5    (chỉ tháng 5)"
+    )
+
+
+async def _run_strategy(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, rng: tuple[int, int]
+) -> None:
+    from_m, to_m = rng
     status = await update.message.reply_text(
-        "⏳ Đang tổng hợp dữ liệu và lập phân tích chiến lược... (~30-60 giây)"
+        f"⏳ Đang phân tích chiến lược tháng {from_m}–{to_m} (theo tuần & tháng)... "
+        "(~30-60 giây)"
     )
     try:
         parts: list[str] = []
 
-        records = await asyncio.to_thread(sheets.get_records)
-        if records:
-            parts.append("# DỮ LIỆU LEAD (telesale)\n" + analytics.build_summary(records))
-
         if config.strategy_enabled():
             data = await asyncio.to_thread(strategy.get_data)
             parts.append(
-                "# DOANH THU & ROAS THEO DỊCH VỤ/KÊNH/NHÂN VIÊN\n"
-                + strategy.build_summary(data)
+                f"# DOANH THU THEO THỜI GIAN (tháng {from_m}–{to_m})\n"
+                + strategy.build_time_summary(data, from_m, to_m)
             )
 
-        if config.kiotviet_enabled():
-            invoices = await asyncio.to_thread(kiotviet.get_invoices)
-            customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
+        records = await asyncio.to_thread(sheets.get_records)
+        if records:
             parts.append(
-                f"# DỮ LIỆU BÁN HÀNG (KiotViet, {config.KIOTVIET_INVOICE_DAYS} ngày)\n"
-                + sales.build_summary(invoices, customer_total)
+                "# DỮ LIỆU LEAD (tổng thể, tham khảo về tỉ lệ chốt/nguồn)\n"
+                + analytics.build_summary(records)
             )
 
         if not parts:
@@ -237,6 +261,20 @@ async def cmd_chienluoc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Đang chờ người này nhập khoảng tháng cho /chienluoc?
+    pending = context.chat_data.get("awaiting_range")
+    uid = update.effective_user.id if update.effective_user else None
+    if pending is not None and uid == pending:
+        context.chat_data.pop("awaiting_range", None)
+        rng = _parse_month_range(update.message.text or "")
+        if not rng:
+            await update.message.reply_text(
+                "Mình chưa hiểu khoảng tháng. Gõ lại /chienluoc rồi nhập ví dụ: 4-6"
+            )
+            return
+        await _run_strategy(update, context, rng)
+        return
+
     # Trong nhóm: chỉ phản hồi khi được @nhắc tên hoặc reply vào tin của bot,
     # để bot không trả lời mọi tin nhắn trong nhóm.
     if _is_group(update):

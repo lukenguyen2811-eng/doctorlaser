@@ -41,13 +41,19 @@ bán hàng, và chi phí ads + ROAS theo dịch vụ/kênh/nhân viên.
 Nhiệm vụ: đưa ra PHÂN TÍCH CHIẾN LƯỢC sắc bén và KẾ HOẠCH HÀNH ĐỘNG cụ thể.
 
 Hãy trình bày theo cấu trúc:
-1. BỨC TRANH TỔNG QUAN: vài chỉ số quan trọng nhất (doanh thu, chi phí ads,
-   ROAS chung, tỉ lệ chốt).
-2. PHÁT HIỆN CHÍNH: 3-5 insight quan trọng — kênh/dịch vụ nào hiệu quả (ROAS cao)
-   hay đang lãng phí, điểm rò rỉ ở phễu (lấy SĐT, tỉ lệ chốt), chênh lệch hiệu
-   suất nhân viên.
-3. KẾ HOẠCH HÀNH ĐỘNG: việc cần làm, sắp theo mức độ tác động (tiền), kèm mục
-   tiêu số đo được. Cụ thể về tái phân bổ ngân sách ads theo dịch vụ/kênh.
+1. BỨC TRANH TỔNG QUAN: vài chỉ số quan trọng nhất của kỳ được chọn (doanh thu,
+   chi phí ads, ROAS, tỉ lệ chốt), kèm xu hướng tăng/giảm giữa các tháng.
+2. PHÁT HIỆN CHÍNH: 3-5 insight — kênh/dịch vụ nào hiệu quả (ROAS cao) hay đang
+   lãng phí, điểm rò rỉ ở phễu (lấy SĐT, tỉ lệ chốt), chênh lệch hiệu suất nhân
+   viên, biến động theo tuần/tháng.
+3. KẾ HOẠCH THEO THÁNG: cho từng tháng (hoặc tháng tới), mục tiêu doanh thu/ngân
+   sách ads theo dịch vụ-kênh, trọng tâm cần làm.
+4. KẾ HOẠCH THEO TUẦN: chia nhỏ thành việc làm hằng tuần (Tuần 1→4): chỉ tiêu
+   số đo được (số lead, tỉ lệ lấy SĐT, tỉ lệ chốt, doanh thu), ai phụ trách.
+
+Khi dữ liệu được lọc theo khoảng tháng, hãy bám sát đúng khoảng đó. Lưu ý: bảng
+ROAS là số LŨY KẾ toàn bộ (không lọc tháng) — dùng để tham chiếu mức hiệu quả
+tương đối giữa các dịch vụ, đừng coi là số của riêng kỳ.
 
 Nguyên tắc: dùng đúng con số đã cho (đừng bịa); nêu rõ giả định nếu dữ liệu chưa
 đủ; ưu tiên đề xuất có tác động doanh thu/lợi nhuận lớn; viết gọn, dễ hành động,

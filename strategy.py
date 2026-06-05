@@ -46,7 +46,8 @@ def _fetch() -> dict:
         if c[0].isdigit() and c[5] and _money(c[7]) > 0:
             transactions.append(
                 {
-                    "thang": c[0],
+                    "thang": int(c[0]),
+                    "ngay": int(c[1]) if c[1].isdigit() else 0,
                     "saler": c[4] or "(không rõ)",
                     "dich_vu": c[5],
                     "nguon": c[6] or "(không rõ)",
@@ -98,9 +99,9 @@ def build_summary(data: dict) -> str:
 
     if tx:
         total = sum(t["doanh_thu"] for t in tx)
-        months = sorted({t["thang"] for t in tx}, key=lambda m: int(m))
+        months = sorted({t["thang"] for t in tx})
         parts.append(
-            f"DOANH THU THEO ĐƠN (tháng {', '.join(months)}): "
+            f"DOANH THU THEO ĐƠN (tháng {', '.join(str(m) for m in months)}): "
             f"{len(tx)} đơn, tổng {_vnd(total)}"
         )
         parts.append("")
@@ -138,3 +139,72 @@ def build_summary(data: dict) -> str:
             )
 
     return "\n".join(parts).strip() or "Chưa có dữ liệu doanh thu theo dịch vụ."
+
+
+def _week_of(day: int) -> int:
+    """Chia ngày trong tháng thành tuần 1-4 (1-7, 8-14, 15-21, 22+)."""
+    if not day:
+        return 0
+    return min((day - 1) // 7 + 1, 4)
+
+
+def _roas_block(pivot: dict) -> list[str]:
+    lines = ["ROAS THEO DỊCH VỤ (lũy kế toàn bộ sheet, không lọc theo tháng):"]
+    rows = []
+    for sv, e in pivot.items():
+        chi = e.get("chi_tong", 0)
+        thu = e.get("thu_tong", 0)
+        rows.append((sv, chi, thu, (thu / chi) if chi else None))
+    rows.sort(key=lambda x: (x[3] is None, -(x[3] or 0)))
+    for sv, chi, thu, roas in rows:
+        rt = f"ROAS {roas:.1f}x" if roas else "ROAS n/a"
+        lines.append(f"  - {sv}: chi {_vnd(chi)} | thu {_vnd(thu)} | {rt}")
+    return lines
+
+
+def build_time_summary(data: dict, from_m: int, to_m: int) -> str:
+    """Số liệu doanh thu lọc theo khoảng tháng, chia THEO THÁNG và THEO TUẦN."""
+    tx = [t for t in data["transactions"] if from_m <= t["thang"] <= to_m]
+    if not tx:
+        return f"Không có đơn nào trong khoảng tháng {from_m}–{to_m}."
+
+    total = sum(t["doanh_thu"] for t in tx)
+    parts = [
+        f"KỲ PHÂN TÍCH: tháng {from_m}–{to_m} | {len(tx)} đơn | tổng {_vnd(total)}",
+        "",
+        "=== THEO THÁNG (kèm chia tuần) ===",
+    ]
+    for m in sorted({t["thang"] for t in tx}):
+        mtx = [t for t in tx if t["thang"] == m]
+        mtot = sum(t["doanh_thu"] for t in mtx)
+        parts.append(f"• Tháng {m}: {len(mtx)} đơn, {_vnd(mtot)}")
+        wk: dict[int, int] = defaultdict(int)
+        wc: dict[int, int] = defaultdict(int)
+        for t in mtx:
+            wk[_week_of(t["ngay"])] += t["doanh_thu"]
+            wc[_week_of(t["ngay"])] += 1
+        for w in sorted(wk):
+            label = f"Tuần {w}" if w else "Không rõ ngày"
+            parts.append(f"    - {label}: {_vnd(wk[w])} ({wc[w]} đơn)")
+        top_sv = _sum_by(mtx, "dich_vu")[:5]
+        parts.append(
+            "    Dịch vụ chính: "
+            + ", ".join(f"{k} {_vnd(r)}" for k, r, _ in top_sv)
+        )
+
+    parts.append("")
+    parts.append("=== TỔNG TRONG KỲ ===")
+    parts.append("Theo DỊCH VỤ:")
+    for k, r, c in _sum_by(tx, "dich_vu"):
+        parts.append(f"  - {k}: {_vnd(r)} ({c} đơn)")
+    parts.append("Theo KÊNH (nguồn):")
+    for k, r, c in _sum_by(tx, "nguon"):
+        parts.append(f"  - {k}: {_vnd(r)} ({c} đơn)")
+    parts.append("Theo NHÂN VIÊN SALE:")
+    for k, r, c in _sum_by(tx, "saler"):
+        parts.append(f"  - {k}: {_vnd(r)} ({c} đơn)")
+
+    parts.append("")
+    parts.extend(_roas_block(data["pivot"]))
+
+    return "\n".join(parts).strip()
