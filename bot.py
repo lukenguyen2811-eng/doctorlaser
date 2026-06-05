@@ -63,9 +63,37 @@ async def _reply_long(update: Update, text: str) -> None:
         await update.message.reply_text(text[i : i + TELEGRAM_LIMIT])
 
 
+def _is_group(update: Update) -> bool:
+    chat = update.effective_chat
+    return bool(chat and chat.type in ("group", "supergroup"))
+
+
+def _addressed_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str]:
+    """Trong nhóm: chỉ coi là gọi bot khi @nhắc tên hoặc reply vào tin của bot.
+
+    Trả về (có_gọi_bot, câu_hỏi_đã_bỏ_phần_@nhắc).
+    """
+    message = update.message
+    text = (message.text or "").strip()
+
+    # Reply vào một tin nhắn của chính bot.
+    reply = message.reply_to_message
+    if reply and reply.from_user and reply.from_user.id == context.bot.id:
+        return True, text
+
+    # Có @nhắc tên bot.
+    username = context.bot.username
+    if username and f"@{username}".lower() in text.lower():
+        cleaned = text.replace(f"@{username}", "").replace(f"@{username}".lower(), "")
+        return True, cleaned.strip()
+
+    return False, text
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
-        await update.message.reply_text("Xin lỗi, bạn không có quyền dùng bot này.")
+        if not _is_group(update):
+            await update.message.reply_text("Xin lỗi, bạn không có quyền dùng bot này.")
         return
     await update.message.reply_text(WELCOME)
 
@@ -96,11 +124,21 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Trong nhóm: chỉ phản hồi khi được @nhắc tên hoặc reply vào tin của bot,
+    # để bot không trả lời mọi tin nhắn trong nhóm.
+    if _is_group(update):
+        addressed, question = _addressed_in_group(update, context)
+        if not addressed:
+            return
+    else:
+        question = (update.message.text or "").strip()
+
     if not _allowed(update):
-        await update.message.reply_text("Xin lỗi, bạn không có quyền dùng bot này.")
+        if not _is_group(update):
+            await update.message.reply_text("Xin lỗi, bạn không có quyền dùng bot này.")
         return
 
-    question = (update.message.text or "").strip()
+    question = question.strip()
     if not question:
         return
 
