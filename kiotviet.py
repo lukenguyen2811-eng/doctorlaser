@@ -12,7 +12,6 @@ import requests
 import config
 
 _TOKEN_URL = "https://id.kiotviet.vn/connect/token"
-_BASE_URL = "https://public.kiotviet.vn"
 _PAGE_SIZE = 100  # tối đa của KiotViet
 
 # Một số WAF của KiotViet chặn request không có User-Agent giống trình duyệt.
@@ -67,7 +66,10 @@ def _api_get(path: str, params: dict, attempts: int = 4) -> dict:
     last = None
     for i in range(attempts):
         resp = requests.get(
-            f"{_BASE_URL}{path}", headers=_headers(), params=params, timeout=60
+            f"{config.KIOTVIET_BASE_URL}{path}",
+            headers=_headers(),
+            params=params,
+            timeout=60,
         )
         if resp.status_code == 200:
             return resp.json()

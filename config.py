@@ -37,6 +37,8 @@ KIOTVIET_RETAILER = _get("KIOTVIET_RETAILER")
 # Số ngày hóa đơn lấy về (KiotViet có thể rất nhiều dữ liệu). Mặc định 30 ngày.
 KIOTVIET_INVOICE_DAYS = int(_get("KIOTVIET_INVOICE_DAYS", "30") or "30")
 KIOTVIET_CACHE_TTL = int(_get("KIOTVIET_CACHE_TTL", "300") or "300")
+# Base URL API: bán lẻ = public.kiotapi.com ; F&B = publicfnb.kiotapi.com
+KIOTVIET_BASE_URL = _get("KIOTVIET_BASE_URL", "https://public.kiotapi.com")
 
 
 def kiotviet_enabled() -> bool:
