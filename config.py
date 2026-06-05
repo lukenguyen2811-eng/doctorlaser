@@ -19,7 +19,7 @@ ALLOWED_TELEGRAM_IDS = {
 
 # Claude
 ANTHROPIC_API_KEY = _get("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = _get("CLAUDE_MODEL", "claude-opus-4-8")
+CLAUDE_MODEL = _get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # Google Sheet
 GOOGLE_SHEET_ID = _get("GOOGLE_SHEET_ID")
