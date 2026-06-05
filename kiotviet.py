@@ -53,6 +53,25 @@ def _headers() -> dict:
     }
 
 
+def _api_get(path: str, params: dict, attempts: int = 4) -> dict:
+    """GET một endpoint KiotViet, tự thử lại khi gặp lỗi 5xx (server tạm trục trặc)."""
+    last = None
+    for i in range(attempts):
+        resp = requests.get(
+            f"{_BASE_URL}{path}", headers=_headers(), params=params, timeout=60
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        last = resp
+        if resp.status_code >= 500:
+            time.sleep(2 * (i + 1))  # 2s, 4s, 6s...
+            continue
+        break  # lỗi 4xx -> không thử lại
+    raise RuntimeError(
+        f"KiotViet trả lỗi ({last.status_code}) tại {path}: {last.text[:300]}"
+    )
+
+
 def _get_all(path: str, params: dict, max_items: int = 5000) -> list[dict]:
     """Gọi 1 endpoint và gom toàn bộ trang (có phân trang)."""
     items: list[dict] = []
@@ -61,11 +80,7 @@ def _get_all(path: str, params: dict, max_items: int = 5000) -> list[dict]:
         page_params = dict(params)
         page_params["pageSize"] = _PAGE_SIZE
         page_params["currentItem"] = current
-        resp = requests.get(
-            f"{_BASE_URL}{path}", headers=_headers(), params=page_params, timeout=60
-        )
-        resp.raise_for_status()
-        body = resp.json()
+        body = _api_get(path, page_params)
         data = body.get("data") or []
         items.extend(data)
         total = body.get("total", 0)
@@ -112,13 +127,7 @@ def get_customer_total() -> int:
     """Đếm tổng số khách hàng (gọi nhẹ, chỉ đọc trường total)."""
 
     def loader():
-        resp = requests.get(
-            f"{_BASE_URL}/customers",
-            headers=_headers(),
-            params={"pageSize": 1, "currentItem": 0},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.json().get("total", 0)
+        body = _api_get("/customers", {"pageSize": 1, "currentItem": 0})
+        return body.get("total", 0)
 
     return _cached("customer_total", config.KIOTVIET_CACHE_TTL, loader)
