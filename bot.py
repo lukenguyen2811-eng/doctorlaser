@@ -9,6 +9,7 @@ Chạy:  python bot.py
 import asyncio
 import logging
 
+import anthropic
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -184,6 +185,21 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             await status.delete()
             await _reply_long(update, reply)
+    except anthropic.RateLimitError:
+        log.warning("rate limited")
+        await status.edit_text(
+            "⚠️ Bot đang bị giới hạn tốc độ (gửi quá nhiều yêu cầu/dữ liệu lớn "
+            "trong 1 phút). Bạn thử lại sau khoảng 1 phút nhé."
+        )
+    except anthropic.APIStatusError as e:
+        log.exception("anthropic error")
+        if "credit balance is too low" in str(e):
+            await status.edit_text(
+                "⚠️ Tài khoản Claude đã hết credit. Vui lòng nạp thêm tại "
+                "console.anthropic.com (Plans & Billing)."
+            )
+        else:
+            await status.edit_text(f"Có lỗi từ Claude: {e}")
     except Exception as e:  # noqa: BLE001
         log.exception("answer failed")
         await status.edit_text(f"Có lỗi xảy ra: {e}")
