@@ -121,6 +121,19 @@ def build_summary(data: dict) -> str:
             parts.append(f"  - {name}: {_vnd(rev)} ({cnt} đơn)")
         parts.append("")
 
+        # Doanh thu theo DỊCH VỤ × THÁNG -> nhìn được xu hướng tăng/giảm.
+        months = sorted({t["thang"] for t in tx})
+        if len(months) > 1:
+            sm: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+            for t in tx:
+                sm[t["dich_vu"]][t["thang"]] += t["doanh_thu"]
+            totals = {sv: sum(m.values()) for sv, m in sm.items()}
+            parts.append("Doanh thu theo DỊCH VỤ × THÁNG (xu hướng tăng/giảm):")
+            for sv in sorted(totals, key=lambda s: -totals[s]):
+                cells = " | ".join(f"T{m}: {_vnd(sm[sv].get(m, 0))}" for m in months)
+                parts.append(f"  - {sv}: {cells}")
+            parts.append("")
+
     # ROAS theo dịch vụ (từ bảng pivot Chi/Thu)
     if pivot:
         parts.append("CHI PHÍ ADS & ROAS THEO DỊCH VỤ (từ bảng tổng hợp):")

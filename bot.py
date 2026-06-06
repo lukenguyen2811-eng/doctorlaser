@@ -69,6 +69,7 @@ def _is_sales_question(question: str) -> bool:
 STRATEGY_KEYWORDS = (
     "roas", "ads", "quảng cáo", "chi phí", "dịch vụ", "nhân viên", "saler",
     "sale", "hiệu quả", "kênh", "nguồn nào", "lời", "lãi", "ngân sách",
+    "quý", "tăng trưởng", "phát triển", "xu hướng", "so sánh",
 )
 
 
