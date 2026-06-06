@@ -24,12 +24,42 @@ def build_summary(invoices: list[dict], customer_total: int | None = None) -> st
     avg = total_rev / n if n else 0
 
     parts = [
+        "BÁO CÁO DOANH THU (KiotViet - hóa đơn thực tế)",
         f"SỐ HÓA ĐƠN: {n}",
         f"TỔNG DOANH THU: {_vnd(total_rev)}",
         f"GIÁ TRỊ TRUNG BÌNH/HÓA ĐƠN: {_vnd(avg)}",
     ]
     if customer_total is not None:
         parts.append(f"TỔNG SỐ KHÁCH HÀNG (toàn hệ thống): {customer_total}")
+    parts.append("")
+
+    # Doanh thu theo DỊCH VỤ (từ chi tiết hóa đơn) — phần quan trọng nhất.
+    prod_rev: dict[str, float] = defaultdict(float)
+    prod_qty: Counter = Counter()
+    has_detail = False
+    for inv in invoices:
+        for d in inv.get("invoiceDetails") or []:
+            has_detail = True
+            name = (
+                d.get("categoryName")
+                or d.get("productName")
+                or d.get("productCode")
+                or "(không rõ)"
+            )
+            prod_rev[name] += float(d.get("subTotal") or 0)
+            prod_qty[name] += float(d.get("quantity") or 0)
+    parts.append("DOANH THU THEO DỊCH VỤ:")
+    if has_detail:
+        for name, v in sorted(prod_rev.items(), key=lambda x: -x[1]):
+            pct = (v / total_rev * 100) if total_rev else 0
+            parts.append(
+                f"  - {name}: {_vnd(v)} ({pct:.1f}%, SL: {int(prod_qty[name])})"
+            )
+    else:
+        parts.append(
+            "  (Hóa đơn KiotViet không kèm chi tiết dịch vụ — không tách được "
+            "theo dịch vụ. Cần kiểm tra cấu hình API/đơn hàng.)"
+        )
     parts.append("")
 
     # Doanh thu theo ngày
@@ -60,21 +90,5 @@ def build_summary(invoices: list[dict], customer_total: int | None = None) -> st
     parts.append("TOP 10 KHÁCH HÀNG (theo chi tiêu trong kỳ):")
     for name, v in top_customers:
         parts.append(f"  - {name}: {_vnd(v)}")
-    parts.append("")
-
-    # Top sản phẩm/dịch vụ (nếu hóa đơn có chi tiết)
-    prod_rev: dict[str, float] = defaultdict(float)
-    prod_qty: Counter = Counter()
-    has_detail = False
-    for inv in invoices:
-        for d in inv.get("invoiceDetails") or []:
-            has_detail = True
-            name = d.get("productName") or d.get("productCode") or "(không rõ)"
-            prod_rev[name] += float(d.get("subTotal") or 0)
-            prod_qty[name] += float(d.get("quantity") or 0)
-    if has_detail:
-        parts.append("TOP 10 SẢN PHẨM/DỊCH VỤ (theo doanh thu):")
-        for name, v in sorted(prod_rev.items(), key=lambda x: -x[1])[:10]:
-            parts.append(f"  - {name}: {_vnd(v)} (SL: {int(prod_qty[name])})")
 
     return "\n".join(parts).strip()
