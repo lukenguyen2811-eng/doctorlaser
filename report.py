@@ -92,36 +92,31 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
     return lines
 
 
-def _lead_block(records: list[dict], today: dt.date, yesterday: dt.date) -> list[str]:
-    lines = [f"📞 LEAD HÔM NAY ({today:%d/%m}, tính đến lúc gửi):"]
-    tleads = _leads_on(records, today)
-    lines.append(f"  - Tổng lead: {len(tleads)}")
-    if tleads:
-        src = Counter((r.get("nguon") or "(trống)").strip() for r in tleads)
+def _lead_block(records: list[dict], day: dt.date) -> list[str]:
+    lines = [f"📞 LEAD HÔM QUA ({day:%d/%m}):"]
+    leads = _leads_on(records, day)
+    n = len(leads)
+    lines.append(f"  - Tổng lead: {n}")
+    if leads:
+        src = Counter((r.get("nguon") or "(trống)").strip() for r in leads)
         lines.append(
-            "  - Theo kênh: "
-            + ", ".join(f"{k} {v}" for k, v in src.most_common())
+            "  - Theo kênh: " + ", ".join(f"{k} {v}" for k, v in src.most_common())
         )
         # Phân loại theo TRẠNG THÁI
         st = Counter(
             (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
-            for r in tleads
+            for r in leads
         )
         lines.append("  - Theo trạng thái:")
         for k, v in st.most_common():
-            pct = v / len(tleads) * 100
-            lines.append(f"      • {k}: {v} ({pct:.0f}%)")
-
-    # Kết quả chốt từ lead NGÀY HÔM QUA (đủ 1 ngày để đánh giá)
-    yleads = _leads_on(records, yesterday)
-    if yleads:
-        n = len(yleads)
-        den_y = sum(1 for r in yleads if _status_has(r, _STATUS_DEN))
-        hen_y = sum(1 for r in yleads if _status_has(r, _STATUS_HEN))
-        lines.append("")
-        lines.append(f"📈 KẾT QUẢ LEAD NGÀY {yesterday:%d/%m} (tổng {n} lead):")
-        lines.append(f"  - Đã đặt hẹn: {hen_y} ({hen_y / n * 100:.1f}%)")
-        lines.append(f"  - Đã đến khám: {den_y} ({den_y / n * 100:.1f}%)")
+            lines.append(f"      • {k}: {v} ({v / n * 100:.0f}%)")
+        # Nhấn mạnh kết quả chốt
+        den = sum(1 for r in leads if _status_has(r, _STATUS_DEN))
+        hen = sum(1 for r in leads if _status_has(r, _STATUS_HEN))
+        lines.append(
+            f"  - Kết quả: đã đặt hẹn {hen} ({hen / n * 100:.1f}%), "
+            f"đã đến khám {den} ({den / n * 100:.1f}%)"
+        )
     return lines
 
 
@@ -167,7 +162,7 @@ def build_daily() -> str:
         parts.append(f"📞 LEAD: lỗi đọc Google Sheet: {e}")
         return "\n".join(parts)
 
-    parts += _lead_block(records, today, yesterday)
+    parts += _lead_block(records, yesterday)
     parts.append("")
     parts += _month_block(records, today)
     return "\n".join(parts)
