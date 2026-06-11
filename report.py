@@ -143,7 +143,16 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
             lines.append(f"  - Doanh thu: lỗi KiotViet: {e}")
     else:
         lines.append("  - Doanh thu: (chưa kết nối KiotViet)")
-    lines.append(f"  - Tổng lead: {len(_leads_in_month(records, today))}")
+    mleads = _leads_in_month(records, today)
+    lines.append(f"  - Tổng lead: {len(mleads)}")
+    if mleads:
+        st = Counter(
+            (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
+            for r in mleads
+        )
+        lines.append("  - Lead theo trạng thái:")
+        for k, v in st.most_common():
+            lines.append(f"      • {k}: {v} ({v / len(mleads) * 100:.0f}%)")
     return lines
 
 
