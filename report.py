@@ -153,6 +153,13 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
         lines.append("  - Lead theo trạng thái:")
         for k, v in st.most_common():
             lines.append(f"      • {k}: {v} ({v / len(mleads) * 100:.0f}%)")
+        nm = len(mleads)
+        den = sum(1 for r in mleads if _status_has(r, _STATUS_DEN))
+        hen = sum(1 for r in mleads if _status_has(r, _STATUS_HEN))
+        lines.append(
+            f"  - Kết quả: đã đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
+            f"đã đến khám {den} ({den / nm * 100:.1f}%)"
+        )
     return lines
 
 
