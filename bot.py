@@ -464,13 +464,10 @@ def main() -> None:
     # Lịch gửi báo cáo tự động mỗi sáng (giờ VN).
     if config.DAILY_REPORT_CHAT_ID and app.job_queue:
         import datetime as _dt
-        from zoneinfo import ZoneInfo
 
         app.job_queue.run_daily(
             _send_daily_report,
-            time=_dt.time(
-                hour=config.DAILY_REPORT_HOUR, tzinfo=ZoneInfo(config.TIMEZONE)
-            ),
+            time=_dt.time(hour=config.DAILY_REPORT_HOUR, tzinfo=report.tzinfo()),
             name="daily_report",
         )
         log.info(

@@ -7,10 +7,19 @@ Dùng để gửi tự động lúc 8h sáng hoặc gọi thủ công bằng /ba
 import datetime as dt
 import re
 from collections import Counter, defaultdict
-from zoneinfo import ZoneInfo
 
 import config
 import sheets
+
+
+def tzinfo() -> dt.tzinfo:
+    """Múi giờ VN; nếu container thiếu dữ liệu timezone thì lùi về UTC+7 cố định."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(config.TIMEZONE)
+    except Exception:  # noqa: BLE001
+        return dt.timezone(dt.timedelta(hours=7))
 
 # Trạng thái thể hiện khách đã đến / đã đặt hẹn (để đếm trong báo cáo).
 _STATUS_DEN = ("đã đến",)
@@ -22,7 +31,7 @@ def _vnd(x: float) -> str:
 
 
 def _today() -> dt.date:
-    return dt.datetime.now(ZoneInfo(config.TIMEZONE)).date()
+    return dt.datetime.now(tzinfo()).date()
 
 
 def _parse_lead_date(s: str) -> dt.date | None:
