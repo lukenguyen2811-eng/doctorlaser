@@ -102,9 +102,15 @@ def _lead_block(records: list[dict], today: dt.date, yesterday: dt.date) -> list
             "  - Theo kênh: "
             + ", ".join(f"{k} {v}" for k, v in src.most_common())
         )
-        den = sum(1 for r in tleads if _status_has(r, _STATUS_DEN))
-        hen = sum(1 for r in tleads if _status_has(r, _STATUS_HEN))
-        lines.append(f"  - Đã đặt hẹn: {hen} | Đã đến: {den}")
+        # Phân loại theo TRẠNG THÁI
+        st = Counter(
+            (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
+            for r in tleads
+        )
+        lines.append("  - Theo trạng thái:")
+        for k, v in st.most_common():
+            pct = v / len(tleads) * 100
+            lines.append(f"      • {k}: {v} ({pct:.0f}%)")
 
     # Tỷ lệ chốt từ lead HÔM QUA (đủ 1 ngày để đánh giá)
     yleads = _leads_on(records, yesterday)
