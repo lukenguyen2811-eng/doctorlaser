@@ -70,6 +70,13 @@ def adspend_enabled() -> bool:
     return bool(ADS_MONTHLY_SHEET_ID)
 
 
+# Báo cáo tự động hằng ngày
+TIMEZONE = _get("TIMEZONE", "Asia/Ho_Chi_Minh")
+DAILY_REPORT_HOUR = int(_get("DAILY_REPORT_HOUR", "8") or "8")
+# Chat ID nơi gửi báo cáo tự động. Lấy bằng cách gõ /chatid trong nhóm.
+DAILY_REPORT_CHAT_ID = _get("DAILY_REPORT_CHAT_ID")
+
+
 def check() -> list[str]:
     """Trả về danh sách lỗi cấu hình (rỗng nghĩa là OK)."""
     errors = []

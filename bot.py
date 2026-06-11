@@ -26,6 +26,7 @@ import analytics
 import config
 import kiotviet
 import llm
+import report
 import sales
 import sheets
 import strategy
@@ -89,8 +90,9 @@ WELCOME = (
     "• Sản phẩm/dịch vụ nào bán chạy nhất?\n"
     "• Top khách hàng chi tiêu nhiều nhất?\n\n"
     "Lệnh:\n"
+    "/baocaongay - báo cáo ngày (doanh thu hôm qua + lead hôm nay)\n"
     "/stats - số liệu lead tổng hợp\n"
-    "/doanhthu - số liệu bán hàng (KiotViet)\n"
+    "/doanhthu - doanh thu tháng này (KiotViet)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
     "/refresh - tải lại dữ liệu mới nhất\n"
     "/help - hướng dẫn"
@@ -183,6 +185,42 @@ async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:  # noqa: BLE001
         log.exception("doanhthu failed")
         await status.edit_text(f"Lỗi khi lấy dữ liệu KiotViet: {e}")
+
+
+async def cmd_chatid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Trả về Chat ID hiện tại (để đặt DAILY_REPORT_CHAT_ID)."""
+    chat = update.effective_chat
+    await update.message.reply_text(
+        f"Chat ID của nơi này là: {chat.id}\n"
+        "Đặt giá trị này vào biến DAILY_REPORT_CHAT_ID trên Railway để nhận "
+        "báo cáo tự động mỗi sáng."
+    )
+
+
+async def cmd_baocaongay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _allowed(update):
+        return
+    status = await update.message.reply_text("⏳ Đang lập báo cáo ngày...")
+    try:
+        text = await asyncio.to_thread(report.build_daily)
+        await status.delete()
+        await _reply_long(update, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("baocaongay failed")
+        await status.edit_text(f"Lỗi khi lập báo cáo: {e}")
+
+
+async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job tự động: gửi báo cáo ngày vào chat đã cấu hình."""
+    chat_id = config.DAILY_REPORT_CHAT_ID
+    if not chat_id:
+        return
+    try:
+        text = await asyncio.to_thread(report.build_daily)
+        for i in range(0, len(text), TELEGRAM_LIMIT):
+            await context.bot.send_message(chat_id, text[i : i + TELEGRAM_LIMIT])
+    except Exception:  # noqa: BLE001
+        log.exception("daily report job failed")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -419,7 +457,28 @@ def main() -> None:
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
+    app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
+    app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+
+    # Lịch gửi báo cáo tự động mỗi sáng (giờ VN).
+    if config.DAILY_REPORT_CHAT_ID and app.job_queue:
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+
+        app.job_queue.run_daily(
+            _send_daily_report,
+            time=_dt.time(
+                hour=config.DAILY_REPORT_HOUR, tzinfo=ZoneInfo(config.TIMEZONE)
+            ),
+            name="daily_report",
+        )
+        log.info(
+            "Đã lên lịch báo cáo ngày lúc %sh (%s) gửi tới chat %s",
+            config.DAILY_REPORT_HOUR,
+            config.TIMEZONE,
+            config.DAILY_REPORT_CHAT_ID,
+        )
 
     log.info("Bot đang chạy. Nhấn Ctrl+C để dừng.")
     app.run_polling()

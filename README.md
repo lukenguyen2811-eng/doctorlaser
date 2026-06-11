@@ -160,6 +160,8 @@ Railway tự build và chạy. Vào tab **Deployments → Logs**, thấy dòng
 | Lệnh | Tác dụng |
 |------|----------|
 | `/start`, `/help` | Hướng dẫn sử dụng |
+| `/baocaongay` | Báo cáo ngày: doanh thu **hôm qua** (KiotViet) + lead **hôm nay** (thời gian thực) + tỷ lệ chốt. Tự gửi mỗi sáng nếu đặt `DAILY_REPORT_CHAT_ID` |
+| `/chatid` | Hiện Chat ID hiện tại (để đặt `DAILY_REPORT_CHAT_ID` cho báo cáo tự động) |
 | `/stats` | Xem nhanh số liệu lead tổng hợp (theo nguồn, trạng thái, dịch vụ, ngày, telesale) |
 | `/doanhthu` | Xem nhanh số liệu bán hàng từ KiotViet (nếu đã kết nối) |
 | `/chienluoc` | Phân tích chiến lược: bot hỏi khoảng tháng (vd `4-6`), lọc dữ liệu theo thời gian, ghép chi phí ads theo tháng để ra **ROAS theo từng tháng**, rồi đưa kế hoạch **theo tuần và theo tháng**. Có thể gõ nhanh `/chienluoc 4-6` |

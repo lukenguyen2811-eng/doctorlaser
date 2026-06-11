@@ -111,16 +111,32 @@ def _cached(key: str, ttl: int, loader):
     return value
 
 
+def _fetch_invoices(from_date: str, to_date: str | None = None) -> list[dict]:
+    params = {
+        "fromPurchaseDate": from_date,
+        "orderBy": "purchaseDate",
+        "orderDirection": "Desc",
+        "includePayment": "true",
+        "includeInvoiceDelivery": "false",
+    }
+    if to_date:
+        params["toPurchaseDate"] = to_date
+    return _get_all("/invoices", params)
+
+
 def _fetch_invoices_from(from_date: str) -> list[dict]:
-    return _get_all(
-        "/invoices",
-        {
-            "fromPurchaseDate": from_date,
-            "orderBy": "purchaseDate",
-            "orderDirection": "Desc",
-            "includePayment": "true",
-            "includeInvoiceDelivery": "false",
-        },
+    return _fetch_invoices(from_date)
+
+
+def get_invoices_for_date(d, force: bool = False) -> list[dict]:
+    """Lấy hóa đơn của đúng 1 ngày (d là datetime.date)."""
+    from_date = f"{d:%Y-%m-%d} 00:00:00"
+    to_date = f"{d:%Y-%m-%d} 23:59:59"
+    key = f"invoices_day:{d.isoformat()}"
+    if force:
+        _data_cache.pop(key, None)
+    return _cached(
+        key, config.KIOTVIET_CACHE_TTL, lambda: _fetch_invoices(from_date, to_date)
     )
 
 
