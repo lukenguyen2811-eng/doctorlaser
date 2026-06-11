@@ -112,16 +112,16 @@ def _lead_block(records: list[dict], today: dt.date, yesterday: dt.date) -> list
             pct = v / len(tleads) * 100
             lines.append(f"      • {k}: {v} ({pct:.0f}%)")
 
-    # Tỷ lệ chốt từ lead HÔM QUA (đủ 1 ngày để đánh giá)
+    # Kết quả chốt từ lead NGÀY HÔM QUA (đủ 1 ngày để đánh giá)
     yleads = _leads_on(records, yesterday)
     if yleads:
+        n = len(yleads)
         den_y = sum(1 for r in yleads if _status_has(r, _STATUS_DEN))
-        rate = den_y / len(yleads) * 100
+        hen_y = sum(1 for r in yleads if _status_has(r, _STATUS_HEN))
         lines.append("")
-        lines.append(
-            f"📈 Tỷ lệ chốt từ lead HÔM QUA: {den_y}/{len(yleads)} đến khám "
-            f"= {rate:.1f}%"
-        )
+        lines.append(f"📈 KẾT QUẢ LEAD NGÀY {yesterday:%d/%m} (tổng {n} lead):")
+        lines.append(f"  - Đã đặt hẹn: {hen_y} ({hen_y / n * 100:.1f}%)")
+        lines.append(f"  - Đã đến khám: {den_y} ({den_y / n * 100:.1f}%)")
     return lines
 
 

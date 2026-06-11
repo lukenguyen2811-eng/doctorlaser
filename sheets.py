@@ -5,6 +5,7 @@ Có cache trong bộ nhớ để tránh gọi Google liên tục.
 """
 
 import json
+import re
 import time
 
 import gspread
@@ -98,8 +99,9 @@ def _fetch_rows() -> list[dict]:
 
         record = dict(zip(COLUMNS, values))
 
-        # Một số dòng để trống ô NGÀY (gộp ô) -> kế thừa ngày của dòng trước.
-        if record["ngay"]:
+        # Ô NGÀY: chỉ coi là ngày thật nếu đúng dạng d/m/yyyy. Các giá trị khác
+        # (trống, "sau 22h"...) -> kế thừa ngày thực của dòng trước.
+        if re.match(r"^\d{1,2}/\d{1,2}/\d{4}", record["ngay"]):
             last_date = record["ngay"]
         else:
             record["ngay"] = last_date
