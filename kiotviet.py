@@ -111,6 +111,19 @@ def _cached(key: str, ttl: int, loader):
     return value
 
 
+def _fetch_invoices_from(from_date: str) -> list[dict]:
+    return _get_all(
+        "/invoices",
+        {
+            "fromPurchaseDate": from_date,
+            "orderBy": "purchaseDate",
+            "orderDirection": "Desc",
+            "includePayment": "true",
+            "includeInvoiceDelivery": "false",
+        },
+    )
+
+
 def get_invoices(days: int | None = None, force: bool = False) -> list[dict]:
     """Lấy hóa đơn trong N ngày gần nhất."""
     days = days or config.KIOTVIET_INVOICE_DAYS
@@ -118,20 +131,19 @@ def get_invoices(days: int | None = None, force: bool = False) -> list[dict]:
     key = f"invoices:{days}"
     if force:
         _data_cache.pop(key, None)
+    return _cached(key, config.KIOTVIET_CACHE_TTL, lambda: _fetch_invoices_from(from_date))
 
-    def loader():
-        return _get_all(
-            "/invoices",
-            {
-                "fromPurchaseDate": from_date,
-                "orderBy": "purchaseDate",
-                "orderDirection": "Desc",
-                "includePayment": "true",
-                "includeInvoiceDelivery": "false",
-            },
-        )
 
-    return _cached(key, config.KIOTVIET_CACHE_TTL, loader)
+def get_current_month_invoices(force: bool = False) -> list[dict]:
+    """Lấy hóa đơn của THÁNG HIỆN TẠI (từ ngày 1 đến hôm nay)."""
+    now = datetime.now()
+    from_date = now.replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    ).strftime("%Y-%m-%d 00:00:00")
+    key = f"invoices_month:{now.year}-{now.month:02d}"
+    if force:
+        _data_cache.pop(key, None)
+    return _cached(key, config.KIOTVIET_CACHE_TTL, lambda: _fetch_invoices_from(from_date))
 
 
 def get_customer_total() -> int:

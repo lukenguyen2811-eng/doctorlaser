@@ -15,16 +15,27 @@ def _invoice_date(inv: dict) -> str:
     return d[:10]  # phần ngày YYYY-MM-DD
 
 
-def build_summary(invoices: list[dict], customer_total: int | None = None) -> str:
+def build_summary(
+    invoices: list[dict],
+    customer_total: int | None = None,
+    period_label: str | None = None,
+) -> str:
     n = len(invoices)
     if n == 0:
-        return "Không có hóa đơn nào trong khoảng thời gian đã chọn."
+        return (
+            f"Không có hóa đơn nào trong {period_label}."
+            if period_label
+            else "Không có hóa đơn nào trong khoảng thời gian đã chọn."
+        )
 
     total_rev = sum(float(inv.get("total") or 0) for inv in invoices)
     avg = total_rev / n if n else 0
 
+    title = "BÁO CÁO DOANH THU (KiotViet - hóa đơn thực tế)"
+    if period_label:
+        title += f" — {period_label}"
     parts = [
-        "BÁO CÁO DOANH THU (KiotViet - hóa đơn thực tế)",
+        title,
         f"SỐ HÓA ĐƠN: {n}",
         f"TỔNG DOANH THU: {_vnd(total_rev)}",
         f"GIÁ TRỊ TRUNG BÌNH/HÓA ĐƠN: {_vnd(avg)}",

@@ -171,11 +171,14 @@ async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "KIOTVIET_CLIENT_SECRET, KIOTVIET_RETAILER trong cấu hình."
         )
         return
-    status = await update.message.reply_text("⏳ Đang lấy dữ liệu bán hàng...")
+    status = await update.message.reply_text("⏳ Đang lấy doanh thu tháng này...")
     try:
-        invoices = await asyncio.to_thread(kiotviet.get_invoices)
+        import datetime as _dt
+
+        label = f"tháng {_dt.date.today().month}"
+        invoices = await asyncio.to_thread(kiotviet.get_current_month_invoices)
         customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
-        summary = sales.build_summary(invoices, customer_total)
+        summary = sales.build_summary(invoices, customer_total, label)
         await status.edit_text(summary[:TELEGRAM_LIMIT])
     except Exception as e:  # noqa: BLE001
         log.exception("doanhthu failed")
@@ -345,13 +348,16 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 + strategy.build_summary(data)
             )
 
-        # --- Dữ liệu BÁN HÀNG (KiotViet) — chỉ khi câu hỏi liên quan ---
+        # --- Doanh thu (KiotViet) — mặc định lấy THÁNG NÀY khi hỏi doanh thu ---
         if config.kiotviet_enabled() and _is_sales_question(question):
-            invoices = await asyncio.to_thread(kiotviet.get_invoices)
+            import datetime as _dt
+
+            label = f"tháng {_dt.date.today().month}"
+            invoices = await asyncio.to_thread(kiotviet.get_current_month_invoices)
             customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
             parts.append(
-                f"# DỮ LIỆU BÁN HÀNG (KiotViet, {config.KIOTVIET_INVOICE_DAYS} "
-                "ngày gần nhất)\n" + sales.build_summary(invoices, customer_total)
+                f"# DOANH THU (KiotViet, {label})\n"
+                + sales.build_summary(invoices, customer_total, label)
             )
 
         if not parts:
