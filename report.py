@@ -125,6 +125,33 @@ def _lead_block(records: list[dict], today: dt.date, yesterday: dt.date) -> list
     return lines
 
 
+def _leads_in_month(records: list[dict], today: dt.date) -> list[dict]:
+    out = []
+    for r in records:
+        d = _parse_lead_date(r.get("ngay", ""))
+        if d and d.year == today.year and d.month == today.month:
+            out.append(r)
+    return out
+
+
+def _month_block(records: list[dict], today: dt.date) -> list[str]:
+    import kiotviet
+
+    lines = [f"📅 LŨY KẾ THÁNG {today.month}/{today.year} (đến {today:%d/%m}):"]
+    if config.kiotviet_enabled():
+        try:
+            inv = kiotviet.get_current_month_invoices()
+            total = sum(float(i.get("total") or 0) for i in inv)
+            lines.append(f"  - Doanh thu tổng: {_vnd(total)}")
+            lines.append(f"  - Tổng khách chốt (hóa đơn): {len(inv)}")
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"  - Doanh thu: lỗi KiotViet: {e}")
+    else:
+        lines.append("  - Doanh thu: (chưa kết nối KiotViet)")
+    lines.append(f"  - Tổng lead: {len(_leads_in_month(records, today))}")
+    return lines
+
+
 def build_daily() -> str:
     today = _today()
     yesterday = today - dt.timedelta(days=1)
@@ -141,4 +168,6 @@ def build_daily() -> str:
         return "\n".join(parts)
 
     parts += _lead_block(records, today, yesterday)
+    parts.append("")
+    parts += _month_block(records, today)
     return "\n".join(parts)
