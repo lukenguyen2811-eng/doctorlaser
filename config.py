@@ -76,6 +76,14 @@ DAILY_REPORT_HOUR = int(_get("DAILY_REPORT_HOUR", "8") or "8")
 # Chat ID nơi gửi báo cáo tự động. Lấy bằng cách gõ /chatid trong nhóm.
 DAILY_REPORT_CHAT_ID = _get("DAILY_REPORT_CHAT_ID")
 
+# Sheet nhân viên điền chi phí ads & doanh thu theo nguồn/kênh.
+CHANNEL_SHEET_ID = _get("CHANNEL_SHEET_ID", "18DCX4in2XkgIlcnmxxqYhMvb2GoWMCqMdnquTtFwgZ0")
+CHANNEL_GID = _get("CHANNEL_GID", "")
+
+
+def channel_enabled() -> bool:
+    return bool(CHANNEL_SHEET_ID)
+
 
 def check() -> list[str]:
     """Trả về danh sách lỗi cấu hình (rỗng nghĩa là OK)."""

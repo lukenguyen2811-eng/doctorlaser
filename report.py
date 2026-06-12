@@ -87,8 +87,20 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
             lines.append(f"      • {name}: {_vnd(v)}")
     else:
         lines.append("  - (Hóa đơn không kèm chi tiết dịch vụ)")
-    lines.append("  - Doanh thu theo kênh marketing: (cần bổ sung nguồn — KiotViet "
-                 "không lưu kênh)")
+
+    # Doanh thu / ROAS theo kênh marketing (từ form nhân viên điền)
+    if config.channel_enabled():
+        try:
+            import channel
+
+            rows = channel.get_data()
+            agg = channel.by_channel(rows, yesterday, yesterday)
+            lines.append("  - Doanh thu theo kênh marketing (form nhập tay):")
+            lines += channel.build_lines(agg)
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"  - Doanh thu theo kênh: lỗi đọc form ({e})")
+    else:
+        lines.append("  - Doanh thu theo kênh marketing: (cần bổ sung nguồn)")
     return lines
 
 
@@ -173,6 +185,19 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
             f"  - Kết quả: đã đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
             f"đã đến khám {den} ({den / nm * 100:.1f}%)"
         )
+
+    # Doanh thu / ROAS theo kênh trong tháng (form nhân viên điền)
+    if config.channel_enabled():
+        try:
+            import channel
+
+            first = today.replace(day=1)
+            agg = channel.by_channel(channel.get_data(), first, today)
+            if agg:
+                lines.append("  - Doanh thu theo kênh (form nhập tay):")
+                lines += channel.build_lines(agg)
+        except Exception:  # noqa: BLE001
+            pass
     return lines
 
 
