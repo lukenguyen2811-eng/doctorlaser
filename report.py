@@ -92,6 +92,21 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
     return lines
 
 
+def _status_lines(counter: Counter, total: int, top: int = 6) -> list[str]:
+    """Hiện top N trạng thái, gộp phần còn lại thành 'Khác' cho gọn."""
+    items = counter.most_common()
+    lines = []
+    for k, v in items[:top]:
+        lines.append(f"      • {k}: {v} ({v / total * 100:.0f}%)")
+    rest = items[top:]
+    if rest:
+        rv = sum(v for _, v in rest)
+        lines.append(
+            f"      • Khác ({len(rest)} loại): {rv} ({rv / total * 100:.0f}%)"
+        )
+    return lines
+
+
 def _lead_block(records: list[dict], day: dt.date) -> list[str]:
     lines = [f"📞 LEAD HÔM QUA ({day:%d/%m}):"]
     leads = _leads_on(records, day)
@@ -108,8 +123,7 @@ def _lead_block(records: list[dict], day: dt.date) -> list[str]:
             for r in leads
         )
         lines.append("  - Theo trạng thái:")
-        for k, v in st.most_common():
-            lines.append(f"      • {k}: {v} ({v / n * 100:.0f}%)")
+        lines += _status_lines(st, n, top=7)
         # Nhấn mạnh kết quả chốt
         den = sum(1 for r in leads if _status_has(r, _STATUS_DEN))
         hen = sum(1 for r in leads if _status_has(r, _STATUS_HEN))
@@ -150,10 +164,9 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
             (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
             for r in mleads
         )
-        lines.append("  - Lead theo trạng thái:")
-        for k, v in st.most_common():
-            lines.append(f"      • {k}: {v} ({v / len(mleads) * 100:.0f}%)")
         nm = len(mleads)
+        lines.append("  - Lead theo trạng thái:")
+        lines += _status_lines(st, nm, top=6)
         den = sum(1 for r in mleads if _status_has(r, _STATUS_DEN))
         hen = sum(1 for r in mleads if _status_has(r, _STATUS_HEN))
         lines.append(
