@@ -76,9 +76,9 @@ DAILY_REPORT_HOUR = int(_get("DAILY_REPORT_HOUR", "8") or "8")
 # Chat ID nơi gửi báo cáo tự động. Lấy bằng cách gõ /chatid trong nhóm.
 DAILY_REPORT_CHAT_ID = _get("DAILY_REPORT_CHAT_ID")
 
-# Sheet nhân viên điền chi phí ads & doanh thu theo nguồn/kênh.
-CHANNEL_SHEET_ID = _get("CHANNEL_SHEET_ID", "18DCX4in2XkgIlcnmxxqYhMvb2GoWMCqMdnquTtFwgZ0")
-CHANNEL_GID = _get("CHANNEL_GID", "")
+# Sheet nhân viên điền chi phí ads & doanh thu: mỗi TAB là 1 kênh
+# (TikTok/Facebook/Google), trong tab chia theo dịch vụ.
+CHANNEL_SHEET_ID = _get("CHANNEL_SHEET_ID", "1EWAWcW6l_RPW58F8j5CCWAWyAPmneLJCk5R1opwXsns")
 
 
 def channel_enabled() -> bool:
