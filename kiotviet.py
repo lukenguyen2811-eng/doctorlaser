@@ -111,6 +111,22 @@ def _cached(key: str, ttl: int, loader):
     return value
 
 
+def invoice_revenue(inv: dict) -> float:
+    """Doanh thu 1 hóa đơn = TỔNG TIỀN HÀNG (trước VAT).
+
+    Cộng 'subTotal' của chi tiết hóa đơn (giống cột 'Tổng tiền hàng' của KiotViet).
+    Nếu không có chi tiết -> dùng 'total' (đã gồm VAT) làm phương án dự phòng.
+    """
+    details = inv.get("invoiceDetails") or []
+    if details:
+        return sum(float(d.get("subTotal") or 0) for d in details)
+    return float(inv.get("total") or 0)
+
+
+def total_revenue(invoices: list[dict]) -> float:
+    return sum(invoice_revenue(i) for i in invoices)
+
+
 def _counts_as_revenue(inv: dict) -> bool:
     """Tính vào doanh thu nếu KHÔNG phải hóa đơn hủy (giống KiotViet)."""
     sv = (inv.get("statusValue") or "").strip().lower()

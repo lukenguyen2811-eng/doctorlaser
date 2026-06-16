@@ -5,6 +5,8 @@
 
 from collections import Counter, defaultdict
 
+import kiotviet
+
 
 def _vnd(x: float) -> str:
     return f"{int(round(x)):,}".replace(",", ".") + "đ"
@@ -28,7 +30,7 @@ def build_summary(
             else "Không có hóa đơn nào trong khoảng thời gian đã chọn."
         )
 
-    total_rev = sum(float(inv.get("total") or 0) for inv in invoices)
+    total_rev = kiotviet.total_revenue(invoices)
     avg = total_rev / n if n else 0
 
     title = "BÁO CÁO DOANH THU (KiotViet - hóa đơn thực tế)"
@@ -76,7 +78,7 @@ def build_summary(
     # Doanh thu theo ngày
     by_day: dict[str, float] = defaultdict(float)
     for inv in invoices:
-        by_day[_invoice_date(inv)] += float(inv.get("total") or 0)
+        by_day[_invoice_date(inv)] += kiotviet.invoice_revenue(inv)
     parts.append("DOANH THU THEO NGÀY:")
     for day in sorted(by_day, reverse=True):
         parts.append(f"  - {day}: {_vnd(by_day[day])}")
@@ -85,7 +87,7 @@ def build_summary(
     # Doanh thu theo chi nhánh
     by_branch: dict[str, float] = defaultdict(float)
     for inv in invoices:
-        by_branch[inv.get("branchName") or "(không rõ)"] += float(inv.get("total") or 0)
+        by_branch[inv.get("branchName") or "(không rõ)"] += kiotviet.invoice_revenue(inv)
     if len(by_branch) > 1:
         parts.append("DOANH THU THEO CHI NHÁNH:")
         for b, v in sorted(by_branch.items(), key=lambda x: -x[1]):
@@ -96,7 +98,7 @@ def build_summary(
     by_customer: dict[str, float] = defaultdict(float)
     for inv in invoices:
         name = inv.get("customerName") or "Khách lẻ"
-        by_customer[name] += float(inv.get("total") or 0)
+        by_customer[name] += kiotviet.invoice_revenue(inv)
     top_customers = sorted(by_customer.items(), key=lambda x: -x[1])[:10]
     parts.append("TOP 10 KHÁCH HÀNG (theo chi tiêu trong kỳ):")
     for name, v in top_customers:

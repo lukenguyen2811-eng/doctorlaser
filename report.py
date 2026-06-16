@@ -71,7 +71,7 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
         lines.append("  - Chưa có hóa đơn nào hôm qua.")
         return lines
 
-    total = sum(float(i.get("total") or 0) for i in inv)
+    total = kiotviet.total_revenue(inv)
     lines.append(f"  - Tổng doanh thu: {_vnd(total)}")
     lines.append(f"  - Số khách chốt (hóa đơn): {len(inv)}")
 
@@ -165,7 +165,7 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
     if config.kiotviet_enabled():
         try:
             inv = kiotviet.get_current_month_invoices()
-            total = sum(float(i.get("total") or 0) for i in inv)
+            total = kiotviet.total_revenue(inv)
             lines.append(f"  - Doanh thu tổng: {_vnd(total)}")
             lines.append(f"  - Tổng khách chốt (hóa đơn): {len(inv)}")
         except Exception as e:  # noqa: BLE001

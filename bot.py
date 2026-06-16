@@ -251,13 +251,13 @@ async def cmd_kvdebug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return f"{int(round(x)):,}".replace(",", ".") + "đ"
 
         total, pay, disc = s("total"), s("totalPayment"), s("discount")
+        pre_vat = kiotviet.total_revenue(inv)
         text = (
             f"KiotViet ngày {d:%d/%m/%Y} — {len(inv)} hóa đơn (đã loại hủy)\n"
-            f"• total: {f(total)}\n"
+            f"• tổng tiền hàng (trước VAT, đang dùng): {f(pre_vat)}\n"
+            f"• total (có VAT): {f(total)}\n"
             f"• totalPayment: {f(pay)}\n"
-            f"• discount: {f(disc)}\n"
-            f"• total - discount: {f(total - disc)}\n\n"
-            "So với KiotViet xem trường nào khớp, báo mình để khóa đúng."
+            f"• discount: {f(disc)}"
         )
         await status.edit_text(text)
     except Exception as e:  # noqa: BLE001
