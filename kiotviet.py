@@ -111,13 +111,19 @@ def _cached(key: str, ttl: int, loader):
     return value
 
 
-def _is_cancelled(inv: dict) -> bool:
-    """Hóa đơn đã hủy (không tính vào doanh thu)."""
-    sv = (inv.get("statusValue") or "").lower()
-    if "hủy" in sv or "huỷ" in sv:
-        return True
-    # status: 1=Hoàn thành, 2=Đã hủy (theo KiotViet)
-    return inv.get("status") == 2
+def _counts_as_revenue(inv: dict) -> bool:
+    """Chỉ tính hóa đơn HOÀN THÀNH vào doanh thu (giống KiotViet)."""
+    sv = (inv.get("statusValue") or "").strip().lower()
+    if sv:
+        if "hoàn thành" in sv:
+            return True
+        if "hủy" in sv or "huỷ" in sv:
+            return False
+        return False  # đang xử lý / đang giao... -> không tính doanh thu
+    st = inv.get("status")
+    if st is not None:
+        return st == 1  # 1 = Hoàn thành
+    return True  # không có thông tin trạng thái -> tạm tính
 
 
 def _fetch_invoices(from_date: str, to_date: str | None = None) -> list[dict]:
@@ -131,8 +137,8 @@ def _fetch_invoices(from_date: str, to_date: str | None = None) -> list[dict]:
     if to_date:
         params["toPurchaseDate"] = to_date
     invoices = _get_all("/invoices", params)
-    # Loại hóa đơn đã hủy để doanh thu khớp với KiotViet.
-    return [i for i in invoices if not _is_cancelled(i)]
+    # Chỉ giữ hóa đơn hoàn thành để doanh thu khớp KiotViet.
+    return [i for i in invoices if _counts_as_revenue(i)]
 
 
 def _fetch_invoices_from(from_date: str) -> list[dict]:
