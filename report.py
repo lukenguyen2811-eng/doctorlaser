@@ -98,7 +98,10 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
             lines.append("  - Doanh thu theo kênh marketing (form nhập tay):")
             lines += channel.build_lines(agg)
         except Exception as e:  # noqa: BLE001
-            lines.append(f"  - Doanh thu theo kênh: lỗi đọc form ({e})")
+            lines.append(
+                "  - Doanh thu theo kênh: (chưa đọc được sheet form — kiểm tra "
+                f"đã share cho service account & tạo tab chưa) [{type(e).__name__}]"
+            )
     else:
         lines.append("  - Doanh thu theo kênh marketing: (cần bổ sung nguồn)")
     return lines

@@ -112,18 +112,13 @@ def _cached(key: str, ttl: int, loader):
 
 
 def _counts_as_revenue(inv: dict) -> bool:
-    """Chỉ tính hóa đơn HOÀN THÀNH vào doanh thu (giống KiotViet)."""
+    """Tính vào doanh thu nếu KHÔNG phải hóa đơn hủy (giống KiotViet)."""
     sv = (inv.get("statusValue") or "").strip().lower()
-    if sv:
-        if "hoàn thành" in sv:
-            return True
-        if "hủy" in sv or "huỷ" in sv:
-            return False
-        return False  # đang xử lý / đang giao... -> không tính doanh thu
-    st = inv.get("status")
-    if st is not None:
-        return st == 1  # 1 = Hoàn thành
-    return True  # không có thông tin trạng thái -> tạm tính
+    if "hủy" in sv or "huỷ" in sv:
+        return False
+    if inv.get("status") == 2:  # 2 = Đã hủy
+        return False
+    return True
 
 
 def _fetch_invoices(from_date: str, to_date: str | None = None) -> list[dict]:
