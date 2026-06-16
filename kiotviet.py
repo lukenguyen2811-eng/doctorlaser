@@ -4,6 +4,7 @@ Cơ chế: OAuth2 client_credentials -> access token (1 giờ) -> gọi API kèm
 header Retailer + Bearer. Tài liệu: KiotViet Public API v1.2.
 """
 
+import calendar
 import time
 from datetime import datetime, timedelta
 
@@ -193,6 +194,19 @@ def get_current_month_invoices(force: bool = False) -> list[dict]:
     ).strftime("%Y-%m-%d 00:00:00")
     to_date = now.strftime("%Y-%m-%d 23:59:59")
     key = f"invoices_month:{now.year}-{now.month:02d}"
+    if force:
+        _data_cache.pop(key, None)
+    return _cached(
+        key, config.KIOTVIET_CACHE_TTL, lambda: _fetch_invoices(from_date, to_date)
+    )
+
+
+def get_invoices_for_month(year: int, month: int, force: bool = False) -> list[dict]:
+    """Lấy hóa đơn của một THÁNG bất kỳ (cả tháng)."""
+    last_day = calendar.monthrange(year, month)[1]
+    from_date = f"{year:04d}-{month:02d}-01 00:00:00"
+    to_date = f"{year:04d}-{month:02d}-{last_day:02d} 23:59:59"
+    key = f"invoices_m:{year}-{month:02d}"
     if force:
         _data_cache.pop(key, None)
     return _cached(

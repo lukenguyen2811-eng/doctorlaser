@@ -173,12 +173,20 @@ async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "KIOTVIET_CLIENT_SECRET, KIOTVIET_RETAILER trong cấu hình."
         )
         return
-    status = await update.message.reply_text("⏳ Đang lấy doanh thu tháng này...")
-    try:
-        import datetime as _dt
+    import datetime as _dt
 
-        label = f"tháng {_dt.date.today().month}"
-        invoices = await asyncio.to_thread(kiotviet.get_current_month_invoices)
+    today = _dt.date.today()
+    m = re.search(r"\d{1,2}", " ".join(context.args))
+    if m and 1 <= int(m.group()) <= 12 and int(m.group()) != today.month:
+        mon = int(m.group())
+        label = f"tháng {mon}/{today.year}"
+        fetch = lambda: kiotviet.get_invoices_for_month(today.year, mon)  # noqa: E731
+    else:
+        label = f"tháng {today.month}"
+        fetch = kiotviet.get_current_month_invoices
+    status = await update.message.reply_text(f"⏳ Đang lấy doanh thu {label}...")
+    try:
+        invoices = await asyncio.to_thread(fetch)
         customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
         summary = sales.build_summary(invoices, customer_total, label)
         await status.edit_text(summary[:TELEGRAM_LIMIT])
@@ -428,12 +436,21 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 + strategy.build_summary(data)
             )
 
-        # --- Doanh thu (KiotViet) — mặc định lấy THÁNG NÀY khi hỏi doanh thu ---
+        # --- Doanh thu (KiotViet) — nhận "tháng N", mặc định THÁNG NÀY ---
         if config.kiotviet_enabled() and _is_sales_question(question):
             import datetime as _dt
 
-            label = f"tháng {_dt.date.today().month}"
-            invoices = await asyncio.to_thread(kiotviet.get_current_month_invoices)
+            today = _dt.date.today()
+            mq = re.search(r"tháng\s*(\d{1,2})", question.lower())
+            if mq and 1 <= int(mq.group(1)) <= 12 and int(mq.group(1)) != today.month:
+                mon = int(mq.group(1))
+                label = f"tháng {mon}/{today.year}"
+                invoices = await asyncio.to_thread(
+                    kiotviet.get_invoices_for_month, today.year, mon
+                )
+            else:
+                label = f"tháng {today.month}"
+                invoices = await asyncio.to_thread(kiotviet.get_current_month_invoices)
             customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
             parts.append(
                 f"# DOANH THU (KiotViet, {label})\n"
