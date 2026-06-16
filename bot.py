@@ -223,6 +223,48 @@ async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
         log.exception("daily report job failed")
 
 
+async def cmd_kvdebug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """So sánh các trường tiền của KiotViet cho 1 ngày: /kvdebug 12/06"""
+    if not _allowed(update):
+        return
+    if not config.kiotviet_enabled():
+        await update.message.reply_text("Chưa kết nối KiotViet.")
+        return
+    import datetime as _dt
+
+    arg = " ".join(context.args).strip()
+    m = re.match(r"(\d{1,2})/(\d{1,2})(?:/(\d{4}))?", arg)
+    if m:
+        dd, mm, yy = m.groups()
+        d = _dt.date(int(yy) if yy else _dt.date.today().year, int(mm), int(dd))
+    else:
+        d = _dt.date.today() - _dt.timedelta(days=1)
+
+    status = await update.message.reply_text(f"⏳ Đang kiểm tra ngày {d:%d/%m}...")
+    try:
+        inv = await asyncio.to_thread(kiotviet.get_invoices_for_date, d)
+
+        def s(field: str) -> float:
+            return sum(float(i.get(field) or 0) for i in inv)
+
+        def f(x: float) -> str:
+            return f"{int(round(x)):,}".replace(",", ".") + "đ"
+
+        total, pay, disc = s("total"), s("totalPayment"), s("discount")
+        text = (
+            f"KiotViet ngày {d:%d/%m/%Y} — {len(inv)} hóa đơn (đã loại hủy)\n"
+            f"• total: {f(total)}\n"
+            f"• totalPayment: {f(pay)}\n"
+            f"• discount: {f(disc)}\n"
+            f"• total - discount: {f(total - disc)}\n\n"
+            "So với KiotViet xem trường nào khớp, báo mình để khóa đúng."
+        )
+        await status.edit_text(text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("kvdebug failed")
+        await status.edit_text(f"Lỗi: {e}")
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
@@ -456,6 +498,7 @@ def main() -> None:
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
+    app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
