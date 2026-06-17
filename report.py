@@ -132,14 +132,58 @@ def _group_source(nguon: str) -> str:
     return "Còn lại"
 
 
-def _source_lines(leads: list[dict]) -> list[str]:
+def _fmt_table(header: list[str], rows: list[list[str]], aligns: list[str]) -> list[str]:
+    """Bảng monospace canh cột (cột 'l' canh trái, 'r' canh phải)."""
+    cols = len(header)
+    widths = [
+        max(len(header[i]), max((len(r[i]) for r in rows), default=0))
+        for i in range(cols)
+    ]
+
+    def fmt(cells: list[str]) -> str:
+        out = []
+        for i, c in enumerate(cells):
+            out.append(c.ljust(widths[i]) if aligns[i] == "l" else c.rjust(widths[i]))
+        return " ".join(out).rstrip()
+
+    return [fmt(header)] + [fmt(r) for r in rows]
+
+
+def _source_table(leads: list[dict]) -> list[str]:
     """Bảng lead theo nguồn (Facebook/TikTok/Còn lại) kèm số lượng và %."""
     n = len(leads) or 1
     grp = Counter(_group_source(r.get("nguon", "")) for r in leads)
-    return [
-        f"      • {name}: {grp.get(name, 0)} ({grp.get(name, 0) / n * 100:.0f}%)"
+    rows = [
+        [name, str(grp.get(name, 0)), f"{grp.get(name, 0) / n * 100:.0f}%"]
         for name in ("Facebook", "TikTok", "Còn lại")
     ]
+    return _fmt_table(["Nguồn", "SL", "%"], rows, ["l", "r", "r"])
+
+
+def _status_source_table(leads: list[dict], top: int = 7) -> list[str]:
+    """Bảng chéo Trạng thái × Nguồn (FB/TikTok/Còn lại) + cột Tổng."""
+    grid: dict[str, Counter] = defaultdict(Counter)
+    stot: Counter = Counter()
+    for r in leads:
+        st = (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
+        grid[st][_group_source(r.get("nguon", ""))] += 1
+        stot[st] += 1
+    ordered = [s for s, _ in stot.most_common()]
+    top_s, rest = ordered[:top], ordered[top:]
+
+    def row(label: str, statuses: list[str]) -> list[str]:
+        fb = sum(grid[s].get("Facebook", 0) for s in statuses)
+        tk = sum(grid[s].get("TikTok", 0) for s in statuses)
+        cl = sum(grid[s].get("Còn lại", 0) for s in statuses)
+        return [label[:16], str(fb), str(tk), str(cl), str(fb + tk + cl)]
+
+    rows = [row(s, [s]) for s in top_s]
+    if rest:
+        rows.append(row(f"Khác ({len(rest)})", rest))
+    rows.append(row("TỔNG", ordered))
+    return _fmt_table(
+        ["Trạng thái", "FB", "TK", "CL", "Tổng"], rows, ["l", "r", "r", "r", "r"]
+    )
 
 
 def _lead_block(records: list[dict], day: dt.date) -> list[str]:
@@ -148,21 +192,18 @@ def _lead_block(records: list[dict], day: dt.date) -> list[str]:
     n = len(leads)
     lines.append(f"  - Tổng lead: {n}")
     if leads:
-        lines.append("  - Theo nguồn:")
-        lines += _source_lines(leads)
-        # Phân loại theo TRẠNG THÁI
-        st = Counter(
-            (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
-            for r in leads
-        )
-        lines.append("  - Theo trạng thái:")
-        lines += _status_lines(st, n, top=7)
-        # Nhấn mạnh kết quả chốt
+        lines.append("")
+        lines.append("Theo nguồn:")
+        lines += _source_table(leads)
+        lines.append("")
+        lines.append("Trạng thái × nguồn:")
+        lines += _status_source_table(leads)
         den = sum(1 for r in leads if _status_has(r, _STATUS_DEN))
         hen = sum(1 for r in leads if _status_has(r, _STATUS_HEN))
+        lines.append("")
         lines.append(
-            f"  - Kết quả: đã đặt hẹn {hen} ({hen / n * 100:.1f}%), "
-            f"đã đến khám {den} ({den / n * 100:.1f}%)"
+            f"Kết quả: đặt hẹn {hen} ({hen / n * 100:.1f}%), "
+            f"đến khám {den} ({den / n * 100:.1f}%)"
         )
     return lines
 
@@ -193,20 +234,19 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
     mleads = _leads_in_month(records, today)
     lines.append(f"  - Tổng lead: {len(mleads)}")
     if mleads:
-        lines.append("  - Lead theo nguồn:")
-        lines += _source_lines(mleads)
-        st = Counter(
-            (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
-            for r in mleads
-        )
         nm = len(mleads)
-        lines.append("  - Lead theo trạng thái:")
-        lines += _status_lines(st, nm, top=6)
+        lines.append("")
+        lines.append("Lead theo nguồn:")
+        lines += _source_table(mleads)
+        lines.append("")
+        lines.append("Trạng thái × nguồn:")
+        lines += _status_source_table(mleads, top=6)
         den = sum(1 for r in mleads if _status_has(r, _STATUS_DEN))
         hen = sum(1 for r in mleads if _status_has(r, _STATUS_HEN))
+        lines.append("")
         lines.append(
-            f"  - Kết quả: đã đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
-            f"đã đến khám {den} ({den / nm * 100:.1f}%)"
+            f"Kết quả: đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
+            f"đến khám {den} ({den / nm * 100:.1f}%)"
         )
 
     # Doanh thu / ROAS theo kênh trong tháng (form nhân viên điền)

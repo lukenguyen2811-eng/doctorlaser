@@ -7,12 +7,13 @@ Chạy:  python bot.py
 """
 
 import asyncio
+import html as _html
 import logging
 import re
 
 import anthropic
 from telegram import Update
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -106,6 +107,21 @@ def _allowed(update: Update) -> bool:
     return bool(user and user.id in config.ALLOWED_TELEGRAM_IDS)
 
 
+def _mono_chunks(text: str) -> list[str]:
+    """Chia text và bọc mỗi phần trong <pre> (monospace, canh cột thẳng hàng)."""
+    text = text or "(trống)"
+    limit = TELEGRAM_LIMIT - 20
+    return [
+        f"<pre>{_html.escape(text[i : i + limit])}</pre>"
+        for i in range(0, len(text), limit)
+    ]
+
+
+async def _reply_mono(update: Update, text: str) -> None:
+    for chunk in _mono_chunks(text):
+        await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
+
+
 async def _reply_long(update: Update, text: str) -> None:
     """Gửi tin nhắn, tự chia nhỏ nếu vượt giới hạn của Telegram."""
     if not text:
@@ -189,7 +205,8 @@ async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         invoices = await asyncio.to_thread(fetch)
         customer_total = await asyncio.to_thread(kiotviet.get_customer_total)
         summary = sales.build_summary(invoices, customer_total, label)
-        await status.edit_text(summary[:TELEGRAM_LIMIT])
+        await status.delete()
+        await _reply_mono(update, summary)
     except Exception as e:  # noqa: BLE001
         log.exception("doanhthu failed")
         await status.edit_text(f"Lỗi khi lấy dữ liệu KiotViet: {e}")
@@ -212,7 +229,7 @@ async def cmd_baocaongay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         text = await asyncio.to_thread(report.build_daily)
         await status.delete()
-        await _reply_long(update, text)
+        await _reply_mono(update, text)
     except Exception as e:  # noqa: BLE001
         log.exception("baocaongay failed")
         await status.edit_text(f"Lỗi khi lập báo cáo: {e}")
@@ -225,8 +242,8 @@ async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         text = await asyncio.to_thread(report.build_daily)
-        for i in range(0, len(text), TELEGRAM_LIMIT):
-            await context.bot.send_message(chat_id, text[i : i + TELEGRAM_LIMIT])
+        for chunk in _mono_chunks(text):
+            await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
         log.exception("daily report job failed")
 
@@ -279,7 +296,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         records = await asyncio.to_thread(sheets.get_records)
         summary = analytics.build_summary(records)
-        await _reply_long(update, summary)
+        await _reply_mono(update, summary)
     except Exception as e:  # noqa: BLE001
         log.exception("stats failed")
         await update.message.reply_text(f"Lỗi: {e}")
