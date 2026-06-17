@@ -123,21 +123,23 @@ def _status_lines(counter: Counter, total: int, top: int = 6) -> list[str]:
 
 
 def _group_source(nguon: str) -> str:
-    """Gom nguồn lẻ về nhóm chính: Facebook / TikTok / SEO / Zalo / Khác."""
-    s = (nguon or "").upper().strip()
-    if not s:
-        return "(trống)"
-    if "SEO" in s:  # FB SEO, GMAIL SEO, WEB SEO... -> SEO (organic)
-        return "SEO"
+    """Gom nguồn về 3 nhóm: Facebook / TikTok / Còn lại."""
+    s = (nguon or "").upper()
     if "TIKTOK" in s or "TIK TOK" in s:
         return "TikTok"
     if "FB" in s or "FACEBOOK" in s:
         return "Facebook"
-    if "ZALO" in s:
-        return "Zalo"
-    if "INSTAGRAM" in s or s == "IG":
-        return "Instagram"
-    return "Khác"
+    return "Còn lại"
+
+
+def _source_lines(leads: list[dict]) -> list[str]:
+    """Bảng lead theo nguồn (Facebook/TikTok/Còn lại) kèm số lượng và %."""
+    n = len(leads) or 1
+    grp = Counter(_group_source(r.get("nguon", "")) for r in leads)
+    return [
+        f"      • {name}: {grp.get(name, 0)} ({grp.get(name, 0) / n * 100:.0f}%)"
+        for name in ("Facebook", "TikTok", "Còn lại")
+    ]
 
 
 def _lead_block(records: list[dict], day: dt.date) -> list[str]:
@@ -146,10 +148,8 @@ def _lead_block(records: list[dict], day: dt.date) -> list[str]:
     n = len(leads)
     lines.append(f"  - Tổng lead: {n}")
     if leads:
-        grp = Counter(_group_source(r.get("nguon", "")) for r in leads)
-        lines.append(
-            "  - Theo nguồn: " + ", ".join(f"{k} {v}" for k, v in grp.most_common())
-        )
+        lines.append("  - Theo nguồn:")
+        lines += _source_lines(leads)
         # Phân loại theo TRẠNG THÁI
         st = Counter(
             (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
@@ -193,11 +193,8 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
     mleads = _leads_in_month(records, today)
     lines.append(f"  - Tổng lead: {len(mleads)}")
     if mleads:
-        grp = Counter(_group_source(r.get("nguon", "")) for r in mleads)
-        lines.append(
-            "  - Lead theo nguồn: "
-            + ", ".join(f"{k} {v}" for k, v in grp.most_common())
-        )
+        lines.append("  - Lead theo nguồn:")
+        lines += _source_lines(mleads)
         st = Counter(
             (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
             for r in mleads
