@@ -170,19 +170,23 @@ def _status_source_table(leads: list[dict], top: int = 7) -> list[str]:
         stot[st] += 1
     ordered = [s for s, _ in stot.most_common()]
     top_s, rest = ordered[:top], ordered[top:]
+    n = len(leads) or 1
 
     def row(label: str, statuses: list[str]) -> list[str]:
         fb = sum(grid[s].get("Facebook", 0) for s in statuses)
         tk = sum(grid[s].get("TikTok", 0) for s in statuses)
         cl = sum(grid[s].get("Còn lại", 0) for s in statuses)
-        return [label[:16], str(fb), str(tk), str(cl), str(fb + tk + cl)]
+        tot = fb + tk + cl
+        return [label[:16], str(fb), str(tk), str(cl), str(tot), f"{tot / n * 100:.0f}%"]
 
     rows = [row(s, [s]) for s in top_s]
     if rest:
         rows.append(row(f"Khác ({len(rest)})", rest))
     rows.append(row("TỔNG", ordered))
     return _fmt_table(
-        ["Trạng thái", "FB", "TK", "CL", "Tổng"], rows, ["l", "r", "r", "r", "r"]
+        ["Trạng thái", "FB", "TK", "CL", "Tổng", "%"],
+        rows,
+        ["l", "r", "r", "r", "r", "r"],
     )
 
 
