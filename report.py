@@ -160,8 +160,8 @@ def _source_table(leads: list[dict]) -> list[str]:
     return _fmt_table(["Nguồn", "SL", "%"], rows, ["l", "r", "r"])
 
 
-def _status_source_table(leads: list[dict], top: int = 7) -> list[str]:
-    """Bảng chéo Trạng thái × Nguồn (FB/TikTok/Còn lại) + cột Tổng."""
+def _status_source_table(leads: list[dict]) -> list[str]:
+    """Bảng chéo Trạng thái × Nguồn (FB/TikTok/Còn lại) + Tổng + % — đủ mọi trạng thái."""
     grid: dict[str, Counter] = defaultdict(Counter)
     stot: Counter = Counter()
     for r in leads:
@@ -169,7 +169,6 @@ def _status_source_table(leads: list[dict], top: int = 7) -> list[str]:
         grid[st][_group_source(r.get("nguon", ""))] += 1
         stot[st] += 1
     ordered = [s for s, _ in stot.most_common()]
-    top_s, rest = ordered[:top], ordered[top:]
     n = len(leads) or 1
 
     def row(label: str, statuses: list[str]) -> list[str]:
@@ -177,11 +176,9 @@ def _status_source_table(leads: list[dict], top: int = 7) -> list[str]:
         tk = sum(grid[s].get("TikTok", 0) for s in statuses)
         cl = sum(grid[s].get("Còn lại", 0) for s in statuses)
         tot = fb + tk + cl
-        return [label[:16], str(fb), str(tk), str(cl), str(tot), f"{tot / n * 100:.0f}%"]
+        return [label, str(fb), str(tk), str(cl), str(tot), f"{tot / n * 100:.0f}%"]
 
-    rows = [row(s, [s]) for s in top_s]
-    if rest:
-        rows.append(row(f"Khác ({len(rest)})", rest))
+    rows = [row(s, [s]) for s in ordered]
     rows.append(row("TỔNG", ordered))
     return _fmt_table(
         ["Trạng thái", "FB", "TK", "CL", "Tổng", "%"],
@@ -244,7 +241,7 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
         lines += _source_table(mleads)
         lines.append("")
         lines.append("Trạng thái × nguồn:")
-        lines += _status_source_table(mleads, top=6)
+        lines += _status_source_table(mleads)
         den = sum(1 for r in mleads if _status_has(r, _STATUS_DEN))
         hen = sum(1 for r in mleads if _status_has(r, _STATUS_HEN))
         lines.append("")
