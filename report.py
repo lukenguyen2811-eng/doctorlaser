@@ -82,9 +82,13 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
             name = d.get("categoryName") or d.get("productName") or "(không rõ)"
             prod[name] += float(d.get("subTotal") or 0)
     if prod:
-        lines.append("  - Dịch vụ bán chạy:")
-        for name, v in sorted(prod.items(), key=lambda x: -x[1])[:5]:
-            lines.append(f"      • {name}: {_vnd(v)}")
+        lines.append("")
+        lines.append("Dịch vụ bán chạy:")
+        rows = [
+            [name[:24], _vnd(v)]
+            for name, v in sorted(prod.items(), key=lambda x: -x[1])[:5]
+        ]
+        lines += _fmt_table(["Dịch vụ", "Doanh thu"], rows, ["l", "r"])
     else:
         lines.append("  - (Hóa đơn không kèm chi tiết dịch vụ)")
 
@@ -133,20 +137,27 @@ def _group_source(nguon: str) -> str:
 
 
 def _fmt_table(header: list[str], rows: list[list[str]], aligns: list[str]) -> list[str]:
-    """Bảng monospace canh cột (cột 'l' canh trái, 'r' canh phải)."""
+    """Vẽ bảng có khung (box-drawing) canh cột đẹp, dùng trong khối monospace."""
     cols = len(header)
     widths = [
         max(len(header[i]), max((len(r[i]) for r in rows), default=0))
         for i in range(cols)
     ]
 
-    def fmt(cells: list[str]) -> str:
-        out = []
-        for i, c in enumerate(cells):
-            out.append(c.ljust(widths[i]) if aligns[i] == "l" else c.rjust(widths[i]))
-        return " ".join(out).rstrip()
+    def border(left: str, mid: str, right: str) -> str:
+        return left + mid.join("─" * (widths[i] + 2) for i in range(cols)) + right
 
-    return [fmt(header)] + [fmt(r) for r in rows]
+    def fmt_row(cells: list[str]) -> str:
+        parts = []
+        for i, c in enumerate(cells):
+            cc = c.ljust(widths[i]) if aligns[i] == "l" else c.rjust(widths[i])
+            parts.append(f" {cc} ")
+        return "│" + "│".join(parts) + "│"
+
+    out = [border("┌", "┬", "┐"), fmt_row(header), border("├", "┼", "┤")]
+    out += [fmt_row(r) for r in rows]
+    out.append(border("└", "┴", "┘"))
+    return out
 
 
 def _source_table(leads: list[dict]) -> list[str]:
