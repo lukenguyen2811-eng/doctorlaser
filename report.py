@@ -168,7 +168,11 @@ def _status_source_table(leads: list[dict]) -> list[str]:
         st = (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
         grid[st][_group_source(r.get("nguon", ""))] += 1
         stot[st] += 1
-    ordered = [s for s, _ in stot.most_common()]
+    # Ghim 3 trạng thái quan trọng lên đầu, phần còn lại xếp theo số lượng.
+    pinned = ["ĐÃ ĐẾN", "ĐÃ ĐẶT HẸN", "ĐANG TƯ VẤN"]
+    pinned_present = [s for s in pinned if s in stot]
+    rest = [s for s, _ in stot.most_common() if s not in pinned_present]
+    ordered = pinned_present + rest
     n = len(leads) or 1
 
     def row(label: str, statuses: list[str]) -> list[str]:
