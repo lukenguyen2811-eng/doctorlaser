@@ -122,15 +122,33 @@ def _status_lines(counter: Counter, total: int, top: int = 6) -> list[str]:
     return lines
 
 
+def _group_source(nguon: str) -> str:
+    """Gom nguồn lẻ về nhóm chính: Facebook / TikTok / SEO / Zalo / Khác."""
+    s = (nguon or "").upper().strip()
+    if not s:
+        return "(trống)"
+    if "SEO" in s:  # FB SEO, GMAIL SEO, WEB SEO... -> SEO (organic)
+        return "SEO"
+    if "TIKTOK" in s or "TIK TOK" in s:
+        return "TikTok"
+    if "FB" in s or "FACEBOOK" in s:
+        return "Facebook"
+    if "ZALO" in s:
+        return "Zalo"
+    if "INSTAGRAM" in s or s == "IG":
+        return "Instagram"
+    return "Khác"
+
+
 def _lead_block(records: list[dict], day: dt.date) -> list[str]:
     lines = [f"📞 LEAD HÔM QUA ({day:%d/%m}):"]
     leads = _leads_on(records, day)
     n = len(leads)
     lines.append(f"  - Tổng lead: {n}")
     if leads:
-        src = Counter((r.get("nguon") or "(trống)").strip() for r in leads)
+        grp = Counter(_group_source(r.get("nguon", "")) for r in leads)
         lines.append(
-            "  - Theo kênh: " + ", ".join(f"{k} {v}" for k, v in src.most_common())
+            "  - Theo nguồn: " + ", ".join(f"{k} {v}" for k, v in grp.most_common())
         )
         # Phân loại theo TRẠNG THÁI
         st = Counter(
@@ -175,6 +193,11 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
     mleads = _leads_in_month(records, today)
     lines.append(f"  - Tổng lead: {len(mleads)}")
     if mleads:
+        grp = Counter(_group_source(r.get("nguon", "")) for r in mleads)
+        lines.append(
+            "  - Lead theo nguồn: "
+            + ", ".join(f"{k} {v}" for k, v in grp.most_common())
+        )
         st = Counter(
             (r.get("trang_thai") or "(chưa xử lý)").strip().upper() or "(chưa xử lý)"
             for r in mleads
