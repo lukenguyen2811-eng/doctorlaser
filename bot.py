@@ -290,12 +290,40 @@ async def cmd_kvdebug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await status.edit_text(f"Lỗi: {e}")
 
 
+def _lead_date(r: dict):
+    """Parse ô NGÀY (d/m/yyyy) của 1 lead -> datetime.date, hoặc None."""
+    import datetime as _dt
+
+    m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", (r.get("ngay") or "").strip())
+    if not m:
+        return None
+    try:
+        return _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
+    import datetime as _dt
+
+    mon = None
+    m = re.search(r"\d{1,2}", " ".join(context.args))
+    if m and 1 <= int(m.group()) <= 12:
+        mon = int(m.group())
     try:
         records = await asyncio.to_thread(sheets.get_records)
-        summary = analytics.build_summary(records)
+        if mon:
+            year = _dt.date.today().year
+            records = [
+                r for r in records
+                if (d := _lead_date(r)) and d.year == year and d.month == mon
+            ]
+            header = f"TỔNG HỢP LEAD THÁNG {mon}/{year}\n\n"
+        else:
+            header = "TỔNG HỢP LEAD (tất cả)\n\n"
+        summary = header + analytics.build_summary(records)
         await _reply_mono(update, summary)
     except Exception as e:  # noqa: BLE001
         log.exception("stats failed")
