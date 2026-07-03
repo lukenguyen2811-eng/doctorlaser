@@ -87,23 +87,59 @@ def _revenue_block(yesterday: dt.date) -> list[str]:
             lines.append(f"      • {name}: {_vnd(v)}")
     else:
         lines.append("  - (Hóa đơn không kèm chi tiết dịch vụ)")
+    return lines
 
-    # Doanh thu / ROAS theo kênh marketing (từ form nhân viên điền)
-    if config.channel_enabled():
-        try:
-            import channel
 
-            rows = channel.get_data()
-            agg = channel.by_channel(rows, yesterday, yesterday)
-            lines.append("  - Doanh thu theo kênh marketing (form nhập tay):")
-            lines += channel.build_lines(agg)
-        except Exception as e:  # noqa: BLE001
-            lines.append(
-                "  - Doanh thu theo kênh: (chưa đọc được sheet form — kiểm tra "
-                f"đã share cho service account & tạo tab chưa) [{type(e).__name__}]"
-            )
+def _ads_block(yesterday: dt.date, today: dt.date) -> list[str]:
+    """Chi phí & hiệu quả Facebook ads: HÔM QUA + lũy kế tháng, kèm ROAS thô."""
+    lines = [f"📢 ADS HÔM QUA ({yesterday:%d/%m}):"]
+    if not config.meta_enabled():
+        lines.append("  - (Chưa kết nối Meta ads)")
+        return lines
+
+    import meta
+
+    ds = yesterday.strftime("%Y-%m-%d")
+    try:
+        t = meta.totals(meta.get_insights(ds, ds))
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"  - Lỗi đọc Meta ads: {e}")
+        return lines
+
+    if t["spend"] <= 0:
+        lines.append("  - Chưa có chi tiêu ads hôm qua.")
     else:
-        lines.append("  - Doanh thu theo kênh marketing: (cần bổ sung nguồn)")
+        lines.append(f"  - Chi quảng cáo: {_vnd(t['spend'])}")
+        lines.append(f"  - Kết quả (tin nhắn/lead): {t['results']}")
+        lines.append(
+            f"  - CPL (giá mỗi kết quả): {_vnd(t['cpl']) if t['results'] else 'n/a'}"
+        )
+        lines.append(f"  - CTR: {t['ctr']:.2f}% | Click: {int(t['clicks'])}")
+        # ROAS thô = doanh thu hôm qua (KiotViet) / chi ads hôm qua.
+        if config.kiotviet_enabled():
+            try:
+                import kiotviet
+
+                rev = kiotviet.total_revenue(kiotviet.get_invoices_for_date(yesterday))
+                lines.append(
+                    f"  - ROAS thô (DT hôm qua ÷ chi ads): {rev / t['spend']:.1f}x"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+    # Lũy kế tháng (đến hết hôm qua — số đã chốt).
+    first = today.replace(day=1)
+    if first <= yesterday:
+        try:
+            tm = meta.totals(meta.get_insights(first.strftime("%Y-%m-%d"), ds))
+            if tm["spend"] > 0:
+                lines.append(
+                    f"  - Lũy kế tháng {today.month} (đến {yesterday:%d/%m}): "
+                    f"chi {_vnd(tm['spend'])} | KQ {tm['results']} | "
+                    f"CPL {_vnd(tm['cpl']) if tm['results'] else 'n/a'}"
+                )
+        except Exception:  # noqa: BLE001
+            pass
     return lines
 
 
@@ -253,19 +289,6 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
             f"Kết quả: đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
             f"đến khám {den} ({den / nm * 100:.1f}%)"
         )
-
-    # Doanh thu / ROAS theo kênh trong tháng (form nhân viên điền)
-    if config.channel_enabled():
-        try:
-            import channel
-
-            first = today.replace(day=1)
-            agg = channel.by_channel(channel.get_data(), first, today)
-            if agg:
-                lines.append("  - Doanh thu theo kênh (form nhập tay):")
-                lines += channel.build_lines(agg)
-        except Exception:  # noqa: BLE001
-            pass
     return lines
 
 
@@ -275,6 +298,8 @@ def build_daily() -> str:
 
     parts = [f"📊 BÁO CÁO NGÀY — {today:%A %d/%m/%Y}", ""]
     parts += _revenue_block(yesterday)
+    parts.append("")
+    parts += _ads_block(yesterday, today)
     parts.append("")
 
     records = []

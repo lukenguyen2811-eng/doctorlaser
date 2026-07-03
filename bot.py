@@ -92,7 +92,8 @@ WELCOME = (
     "• Sản phẩm/dịch vụ nào bán chạy nhất?\n"
     "• Top khách hàng chi tiêu nhiều nhất?\n\n"
     "Lệnh:\n"
-    "/baocaongay - báo cáo ngày (doanh thu hôm qua + lead hôm nay)\n"
+    "/baocaongay - báo cáo ngày (doanh thu + ads + lead hôm qua)\n"
+    "/baocaoads - báo cáo ads hôm qua theo campaign + lũy kế tháng\n"
     "/stats - số liệu lead tổng hợp\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
@@ -335,6 +336,44 @@ async def cmd_ads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:  # noqa: BLE001
         log.exception("ads failed")
         await status.edit_text(f"Lỗi khi lấy Meta ads: {e}")
+
+
+async def cmd_baocaoads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Báo cáo ads hằng ngày: chi tiết campaign HÔM QUA + lũy kế tháng."""
+    if not _allowed(update):
+        return
+    if not config.meta_enabled():
+        await update.message.reply_text(
+            "Chưa kết nối Meta ads. Cần đặt META_ACCESS_TOKEN, META_AD_ACCOUNT_ID."
+        )
+        return
+    import datetime as _dt
+
+    today = _dt.date.today()
+    yesterday = today - _dt.timedelta(days=1)
+    ds = yesterday.strftime("%Y-%m-%d")
+    status = await update.message.reply_text("⏳ Đang lấy báo cáo ads...")
+    try:
+        rows = await asyncio.to_thread(meta.get_insights, ds, ds)
+        text = meta.build_summary(rows, f"HÔM QUA {yesterday:%d/%m}")
+
+        first = today.replace(day=1)
+        if first <= yesterday:
+            rows_m = await asyncio.to_thread(
+                meta.get_insights, first.strftime("%Y-%m-%d"), ds
+            )
+            tm = meta.totals(rows_m)
+            text += (
+                f"\n\n— LŨY KẾ THÁNG {today.month} (đến {yesterday:%d/%m}) —\n"
+                f"Chi: {meta._vnd(tm['spend'])} | Kết quả: {tm['results']} | "
+                f"CPL: {meta._vnd(tm['cpl']) if tm['results'] else 'n/a'} | "
+                f"CTR: {tm['ctr']:.2f}%"
+            )
+        await status.delete()
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("baocaoads failed")
+        await status.edit_text(f"Lỗi khi lấy báo cáo ads: {e}")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -595,6 +634,7 @@ def main() -> None:
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
     app.add_handler(CommandHandler("ads", cmd_ads))
+    app.add_handler(CommandHandler("baocaoads", cmd_baocaoads))
     app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))

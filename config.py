@@ -76,15 +76,6 @@ DAILY_REPORT_HOUR = int(_get("DAILY_REPORT_HOUR", "8") or "8")
 # Chat ID nơi gửi báo cáo tự động. Lấy bằng cách gõ /chatid trong nhóm.
 DAILY_REPORT_CHAT_ID = _get("DAILY_REPORT_CHAT_ID")
 
-# Sheet nhân viên điền chi phí ads & doanh thu: mỗi TAB là 1 kênh
-# (TikTok/Facebook/Google), trong tab chia theo dịch vụ.
-CHANNEL_SHEET_ID = _get("CHANNEL_SHEET_ID", "1EWAWcW6l_RPW58F8j5CCWAWyAPmneLJCk5R1opwXsns")
-
-
-def channel_enabled() -> bool:
-    return bool(CHANNEL_SHEET_ID)
-
-
 # Meta (Facebook) Marketing API - chi phí & hiệu quả ads/campaign
 META_ACCESS_TOKEN = _get("META_ACCESS_TOKEN")
 META_AD_ACCOUNT_ID = _get("META_AD_ACCOUNT_ID")

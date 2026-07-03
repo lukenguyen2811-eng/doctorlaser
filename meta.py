@@ -68,16 +68,37 @@ def get_insights(since: str, until: str, force: bool = False) -> list[dict]:
 
 
 def _results(row: dict) -> int:
-    """Đếm 'kết quả' chính: tin nhắn + lead (tùy mục tiêu campaign)."""
-    total = 0.0
+    """Đếm 'kết quả' chính: tin nhắn khởi tạo + lead.
+
+    Lưu ý: Meta trả lead dưới NHIỀU tên (lead, onsite_conversion.lead_grouped,
+    onsite_web_lead...) cho CÙNG một tập lead — nếu cộng hết sẽ đếm trùng. Vì vậy
+    chỉ lấy 'lead' một lần, cộng với số hội thoại tin nhắn khởi tạo.
+    """
+    msgs = 0.0
+    leads = 0.0
     for a in row.get("actions") or []:
         at = a.get("action_type", "")
-        if "messaging_conversation_started" in at or at in (
-            "lead",
-            "onsite_conversion.lead_grouped",
-        ):
-            total += float(a.get("value") or 0)
-    return int(total)
+        if "messaging_conversation_started" in at:
+            msgs += float(a.get("value") or 0)
+        elif at == "lead":
+            leads += float(a.get("value") or 0)
+    return int(msgs + leads)
+
+
+def totals(rows: list[dict]) -> dict:
+    """Cộng dồn số liệu nhiều dòng insight thành 1 bộ tổng (chi/kết quả/CPL/CTR)."""
+    spend = sum(float(r.get("spend") or 0) for r in rows)
+    impr = sum(float(r.get("impressions") or 0) for r in rows)
+    clicks = sum(float(r.get("clicks") or 0) for r in rows)
+    results = sum(_results(r) for r in rows)
+    return {
+        "spend": spend,
+        "impressions": impr,
+        "clicks": clicks,
+        "results": results,
+        "cpl": (spend / results) if results else 0.0,
+        "ctr": (clicks / impr * 100) if impr else 0.0,
+    }
 
 
 def build_summary(rows: list[dict], label: str) -> str:
