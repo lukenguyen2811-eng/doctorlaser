@@ -27,6 +27,7 @@ import analytics
 import config
 import kiotviet
 import llm
+import meta
 import report
 import sales
 import sheets
@@ -303,6 +304,39 @@ def _lead_date(r: dict):
         return None
 
 
+async def cmd_ads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Chi phí & hiệu quả Facebook ads. /ads = tháng này, /ads 4 = tháng 4."""
+    if not _allowed(update):
+        return
+    if not config.meta_enabled():
+        await update.message.reply_text(
+            "Chưa kết nối Meta. Cần đặt META_ACCESS_TOKEN, META_AD_ACCOUNT_ID."
+        )
+        return
+    import calendar
+    import datetime as _dt
+
+    today = _dt.date.today()
+    m = re.search(r"\d{1,2}", " ".join(context.args))
+    if m and 1 <= int(m.group()) <= 12 and int(m.group()) != today.month:
+        mon = int(m.group())
+        since = f"{today.year}-{mon:02d}-01"
+        until = f"{today.year}-{mon:02d}-{calendar.monthrange(today.year, mon)[1]:02d}"
+        label = f"tháng {mon}/{today.year}"
+    else:
+        since = f"{today.year}-{today.month:02d}-01"
+        until = today.strftime("%Y-%m-%d")
+        label = f"tháng {today.month} (đến {today:%d/%m})"
+    status = await update.message.reply_text(f"⏳ Đang lấy Facebook ads {label}...")
+    try:
+        rows = await asyncio.to_thread(meta.get_insights, since, until)
+        await status.delete()
+        await _reply_mono(update, meta.build_summary(rows, label))
+    except Exception as e:  # noqa: BLE001
+        log.exception("ads failed")
+        await status.edit_text(f"Lỗi khi lấy Meta ads: {e}")
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
@@ -560,6 +594,7 @@ def main() -> None:
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
+    app.add_handler(CommandHandler("ads", cmd_ads))
     app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))

@@ -85,6 +85,16 @@ def channel_enabled() -> bool:
     return bool(CHANNEL_SHEET_ID)
 
 
+# Meta (Facebook) Marketing API - chi phí & hiệu quả ads/campaign
+META_ACCESS_TOKEN = _get("META_ACCESS_TOKEN")
+META_AD_ACCOUNT_ID = _get("META_AD_ACCOUNT_ID")
+META_API_VERSION = _get("META_API_VERSION", "v21.0")
+
+
+def meta_enabled() -> bool:
+    return bool(META_ACCESS_TOKEN and META_AD_ACCOUNT_ID)
+
+
 def check() -> list[str]:
     """Trả về danh sách lỗi cấu hình (rỗng nghĩa là OK)."""
     errors = []
