@@ -292,14 +292,26 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
     return lines
 
 
-def build_daily() -> str:
-    today = _today()
-    yesterday = today - dt.timedelta(days=1)
+def build_daily(as_of: dt.date | None = None) -> str:
+    """Báo cáo ngày.
 
-    parts = [f"📊 BÁO CÁO NGÀY — {today:%A %d/%m/%Y}", ""]
-    parts += _revenue_block(yesterday)
+    - Không truyền gì (lịch tự động 8h sáng): báo cáo cho HÔM QUA, lũy kế đến hôm nay.
+    - Truyền `as_of` (vd /baocaongay 4/7): các khối "HÔM QUA" là đúng ngày đó,
+      lũy kế tháng tính đến ngày đó.
+    """
+    if as_of is None:
+        header_day = _today()
+        day = header_day - dt.timedelta(days=1)
+        month_ref = header_day
+    else:
+        header_day = as_of
+        day = as_of
+        month_ref = as_of
+
+    parts = [f"📊 BÁO CÁO NGÀY — {header_day:%A %d/%m/%Y}", ""]
+    parts += _revenue_block(day)
     parts.append("")
-    parts += _ads_block(yesterday, today)
+    parts += _ads_block(day, month_ref)
     parts.append("")
 
     records = []
@@ -309,7 +321,7 @@ def build_daily() -> str:
         parts.append(f"📞 LEAD: lỗi đọc Google Sheet: {e}")
         return "\n".join(parts)
 
-    parts += _lead_block(records, yesterday)
+    parts += _lead_block(records, day)
     parts.append("")
-    parts += _month_block(records, today)
+    parts += _month_block(records, month_ref)
     return "\n".join(parts)

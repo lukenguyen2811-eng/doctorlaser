@@ -227,9 +227,31 @@ async def cmd_chatid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_baocaongay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
+    import datetime as _dt
+
+    # Cho phép chỉ định ngày: /baocaongay 4/7 hoặc /baocaongay 4/7/2026.
+    as_of = None
+    arg = " ".join(context.args).strip()
+    if arg:
+        m = re.match(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", arg)
+        if not m:
+            await update.message.reply_text(
+                "Không hiểu ngày. Dùng dạng: /baocaongay 4/7 hoặc /baocaongay 4/7/2026"
+            )
+            return
+        d, mo, y = m.groups()
+        year = int(y) if y else _dt.date.today().year
+        if year < 100:
+            year += 2000
+        try:
+            as_of = _dt.date(year, int(mo), int(d))
+        except ValueError:
+            await update.message.reply_text("Ngày không hợp lệ. Ví dụ đúng: /baocaongay 4/7/2026")
+            return
+
     status = await update.message.reply_text("⏳ Đang lập báo cáo ngày...")
     try:
-        text = await asyncio.to_thread(report.build_daily)
+        text = await asyncio.to_thread(report.build_daily, as_of)
         await status.delete()
         await _reply_mono(update, text)
     except Exception as e:  # noqa: BLE001
@@ -248,6 +270,40 @@ async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
         log.exception("daily report job failed")
+
+
+async def cmd_testbaocao(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Kiểm tra báo cáo tự động: gửi thử tới DAILY_REPORT_CHAT_ID đã cấu hình."""
+    if not _allowed(update):
+        return
+    chat_id = config.DAILY_REPORT_CHAT_ID
+    if not chat_id:
+        await update.message.reply_text(
+            "Chưa đặt DAILY_REPORT_CHAT_ID nên lịch 8h sáng KHÔNG chạy.\n"
+            "Cách sửa: gõ /chatid trong nhóm để lấy Chat ID, rồi thêm biến "
+            "DAILY_REPORT_CHAT_ID trên Railway = giá trị đó."
+        )
+        return
+    has_queue = bool(context.application.job_queue)
+    await update.message.reply_text(
+        f"Cấu hình lịch tự động:\n"
+        f"• DAILY_REPORT_CHAT_ID = {chat_id}\n"
+        f"• Giờ gửi = {config.DAILY_REPORT_HOUR}h ({config.TIMEZONE})\n"
+        f"• JobQueue khả dụng: {'CÓ' if has_queue else 'KHÔNG'}\n"
+        f"Đang gửi thử báo cáo tới chat đó..."
+    )
+    try:
+        text = await asyncio.to_thread(report.build_daily)
+        for chunk in _mono_chunks(text):
+            await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+        await update.message.reply_text("✅ Gửi thử THÀNH CÔNG tới chat đã cấu hình.")
+    except Exception as e:  # noqa: BLE001
+        log.exception("testbaocao failed")
+        await update.message.reply_text(
+            f"❌ Gửi thử THẤT BẠI: {e}\n"
+            "Thường do Chat ID sai. Gõ /chatid TRONG NHÓM cần nhận để lấy đúng ID "
+            "rồi cập nhật biến DAILY_REPORT_CHAT_ID trên Railway."
+        )
 
 
 async def cmd_kvdebug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -638,11 +694,22 @@ def main() -> None:
     app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
+    app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
     # Lịch gửi báo cáo tự động mỗi sáng (giờ VN).
-    if config.DAILY_REPORT_CHAT_ID and app.job_queue:
+    if not config.DAILY_REPORT_CHAT_ID:
+        log.warning(
+            "KHÔNG lên lịch báo cáo ngày: thiếu biến DAILY_REPORT_CHAT_ID. "
+            "Gõ /chatid trong nhóm để lấy Chat ID rồi đặt biến này trên Railway."
+        )
+    elif not app.job_queue:
+        log.warning(
+            "KHÔNG lên lịch báo cáo ngày: JobQueue không khả dụng. "
+            "Cần cài 'python-telegram-bot[job-queue]' (đã có trong requirements.txt)."
+        )
+    else:
         import datetime as _dt
 
         app.job_queue.run_daily(
