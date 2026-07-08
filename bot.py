@@ -94,6 +94,7 @@ WELCOME = (
     "Lệnh:\n"
     "/baocaongay - báo cáo ngày (doanh thu + ads + lead hôm qua)\n"
     "/baocaoads - báo cáo ads hôm qua theo campaign + lũy kế tháng\n"
+    "/adsnow - ads HÔM NAY realtime (đến thời điểm hiện tại)\n"
     "/stats - số liệu lead tổng hợp\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
@@ -432,6 +433,33 @@ async def cmd_baocaoads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await status.edit_text(f"Lỗi khi lấy báo cáo ads: {e}")
 
 
+async def cmd_adsnow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ads REALTIME: số liệu HÔM NAY tính đến thời điểm hiện tại (theo campaign)."""
+    if not _allowed(update):
+        return
+    if not config.meta_enabled():
+        await update.message.reply_text(
+            "Chưa kết nối Meta ads. Cần đặt META_ACCESS_TOKEN, META_AD_ACCOUNT_ID."
+        )
+        return
+    import datetime as _dt
+
+    now_vn = _dt.datetime.now(report.tzinfo())
+    ds = now_vn.strftime("%Y-%m-%d")
+    status = await update.message.reply_text("⏳ Đang lấy ads HÔM NAY (realtime)...")
+    try:
+        # force=True: bỏ cache để lấy số mới nhất từ Meta (gần realtime, trễ vài phút).
+        rows = await asyncio.to_thread(meta.get_insights, ds, ds, True)
+        label = f"HÔM NAY (đến {now_vn:%H:%M} {now_vn:%d/%m})"
+        text = meta.build_summary(rows, label)
+        text += "\n\n(Số liệu Meta cập nhật gần realtime, có thể trễ vài phút.)"
+        await status.delete()
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("adsnow failed")
+        await status.edit_text(f"Lỗi khi lấy ads realtime: {e}")
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
@@ -691,6 +719,7 @@ def main() -> None:
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
     app.add_handler(CommandHandler("ads", cmd_ads))
     app.add_handler(CommandHandler("baocaoads", cmd_baocaoads))
+    app.add_handler(CommandHandler("adsnow", cmd_adsnow))
     app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
