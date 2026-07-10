@@ -4,6 +4,7 @@ Mục đích: cung cấp con số CHÍNH XÁC cho Claude (mô hình ngôn ngữ 
 để Claude dựa vào đó trả lời thay vì tự đếm tay.
 """
 
+import re
 from collections import Counter
 
 
@@ -42,6 +43,23 @@ def _crosstab(records: list[dict], row_field: str, col_field: str) -> str:
     return "\n".join(lines) if lines else "  (không có dữ liệu)"
 
 
+def _has_phone(record: dict) -> bool:
+    """Lead đã lấy được SĐT nếu ô SĐT có >= 8 chữ số."""
+    return len(re.sub(r"\D", "", record.get("sdt") or "")) >= 8
+
+
+def _phone_summary(records: list[dict]) -> str:
+    """Số lượng & tỉ lệ lead lấy được SĐT (tổng + theo nguồn)."""
+    total = len(records) or 1
+    got = [r for r in records if _has_phone(r)]
+    lines = [f"  - TỔNG: {len(got)}/{len(records)} ({len(got) / total * 100:.1f}%)"]
+    tot: Counter = Counter((r.get("nguon") or "(trống)").strip() or "(trống)" for r in records)
+    ok: Counter = Counter((r.get("nguon") or "(trống)").strip() or "(trống)" for r in got)
+    for name, t in tot.most_common():
+        lines.append(f"  - {name}: {ok.get(name, 0)}/{t} ({ok.get(name, 0) / t * 100:.0f}%)")
+    return "\n".join(lines)
+
+
 def build_summary(records: list[dict]) -> str:
     """Tạo bản tóm tắt số liệu dạng text để đưa vào prompt."""
     total = len(records)
@@ -49,6 +67,10 @@ def build_summary(records: list[dict]) -> str:
 
     parts.append("Theo NGUỒN:")
     parts.append(_fmt(_count_by(records, "nguon"), total))
+    parts.append("")
+
+    parts.append("LẤY ĐƯỢC SĐT (theo nguồn):")
+    parts.append(_phone_summary(records))
     parts.append("")
 
     parts.append("Theo TRẠNG THÁI:")

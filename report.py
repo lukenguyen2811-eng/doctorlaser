@@ -168,6 +168,25 @@ def _group_source(nguon: str) -> str:
     return "Còn lại"
 
 
+def _has_phone(record: dict) -> bool:
+    """Lead được coi là ĐÃ LẤY SĐT nếu ô SĐT có >= 8 chữ số (số VN ~9-10 số)."""
+    return len(re.sub(r"\D", "", record.get("sdt") or "")) >= 8
+
+
+def _phone_lines(leads: list[dict]) -> list[str]:
+    """Số lượng & tỉ lệ lead lấy được SĐT, kèm bóc tách theo nguồn."""
+    n = len(leads) or 1
+    got = [r for r in leads if _has_phone(r)]
+    lines = [f"Lấy được SĐT: {len(got)}/{len(leads)} ({len(got) / n * 100:.1f}%)"]
+    tot = Counter(_group_source(r.get("nguon", "")) for r in leads)
+    ok = Counter(_group_source(r.get("nguon", "")) for r in got)
+    for name in ("Facebook", "TikTok", "Còn lại"):
+        t = tot.get(name, 0)
+        if t:
+            lines.append(f"  - {name}: {ok.get(name, 0)}/{t} ({ok.get(name, 0) / t * 100:.0f}%)")
+    return lines
+
+
 def _fmt_table(header: list[str], rows: list[list[str]], aligns: list[str]) -> list[str]:
     """Bảng monospace canh cột (cột 'l' canh trái, 'r' canh phải)."""
     cols = len(header)
@@ -246,6 +265,8 @@ def _lead_block(records: list[dict], day: dt.date) -> list[str]:
             f"Kết quả: đặt hẹn {hen} ({hen / n * 100:.1f}%), "
             f"đến khám {den} ({den / n * 100:.1f}%)"
         )
+        lines.append("")
+        lines += _phone_lines(leads)
     return lines
 
 
@@ -289,6 +310,8 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
             f"Kết quả: đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
             f"đến khám {den} ({den / nm * 100:.1f}%)"
         )
+        lines.append("")
+        lines += _phone_lines(mleads)
     return lines
 
 
