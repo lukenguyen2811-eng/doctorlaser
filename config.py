@@ -74,6 +74,9 @@ def adspend_enabled() -> bool:
 # Nhớ share sheet này cho service account (quyền Viewer) giống sheet lead cũ.
 CRM_SHEET_ID = _get("CRM_SHEET_ID", "1hEUk7ahzKHO9e656piWiI3L9XWIJqVURQa42eKM7rKA")
 CRM_LEADS_TAB = _get("CRM_LEADS_TAB", "LEADS")
+# "Ngày báo cáo" = từ CRM_DAY_START_HOUR (hôm trước) đến CRM_DAY_END_HOUR (hôm sau).
+CRM_DAY_START_HOUR = int(_get("CRM_DAY_START_HOUR", "22") or "22")
+CRM_DAY_END_HOUR = int(_get("CRM_DAY_END_HOUR", "18") or "18")
 
 
 def crm_enabled() -> bool:

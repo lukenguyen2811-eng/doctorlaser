@@ -246,13 +246,18 @@ def _status_source_table(leads: list[dict]) -> list[str]:
 
 
 def _lead_block(data: dict, day: dt.date) -> list[str]:
-    """DATA HÔM QUA — từ CRM chatbot (tổng data + funnel + chi tiết lead)."""
+    """DATA HÔM QUA — từ CRM chatbot, cửa sổ 22h hôm trước → 18h hôm sau."""
+    import config
     import crm
 
-    leads = crm.on_day(data["leads"], day)
-    quan_tam = crm.on_day(data["quan_tam"], day)
-    rac = crm.on_day(data["rac"], day)
-    lines = [f"📞 DATA HÔM QUA ({day:%d/%m}) — CRM chatbot:"]
+    leads = crm.in_business_day(data["leads"], day)
+    quan_tam = crm.in_business_day(data["quan_tam"], day)
+    rac = crm.in_business_day(data["rac"], day)
+    prev = day - dt.timedelta(days=1)
+    lines = [
+        f"📞 DATA NGÀY {day:%d/%m} "
+        f"({prev:%d/%m} {config.CRM_DAY_START_HOUR}h → {day:%d/%m} {config.CRM_DAY_END_HOUR}h) — CRM:"
+    ]
     lines += crm.funnel_lines(leads, quan_tam, rac)
     lines.append("  Chi tiết LEAD:")
     lines += crm.lead_lines(leads)

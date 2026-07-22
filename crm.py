@@ -17,13 +17,13 @@ from collections import Counter
 import config
 import sheets
 
-# Vị trí cột (0-based) từng tab.
+# Vị trí cột (0-based) từng tab. "tg" = thời điểm nhận (ngày + giờ).
 _LEADS_COL = {
     "ngay": 1, "nguon": 2, "sdt": 3, "ho_ten": 4, "dich_vu": 5,
-    "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13,
+    "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13, "tg": 19,
 }
-_QUANTAM_COL = {"ngay": 1, "nguon": 3, "dich_vu": 5, "trang_thai": 8}
-_RAC_COL = {"ngay": 1, "nguon": 2, "trang_thai": 6}
+_QUANTAM_COL = {"ngay": 1, "nguon": 3, "dich_vu": 5, "trang_thai": 8, "tg": 15}
+_RAC_COL = {"ngay": 1, "nguon": 2, "trang_thai": 6, "tg": 7}
 
 _cache: dict[str, tuple[float, list[dict]]] = {}
 
@@ -76,6 +76,41 @@ def parse_date(s: str) -> dt.date | None:
         return dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
     except ValueError:
         return None
+
+
+def parse_dt(s: str) -> dt.datetime | None:
+    """Parse 'dd/mm/yyyy HH:MM' -> datetime (cột thời gian nhận)."""
+    m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})[ T]+(\d{1,2}):(\d{2})", (s or "").strip())
+    if not m:
+        return None
+    try:
+        return dt.datetime(
+            int(m.group(3)), int(m.group(2)), int(m.group(1)),
+            int(m.group(4)), int(m.group(5)),
+        )
+    except ValueError:
+        return None
+
+
+def in_business_day(records: list[dict], day: dt.date) -> list[dict]:
+    """Bản ghi thuộc 'ngày báo cáo' D = [D-1 22:00, D 18:00).
+
+    - Có cột giờ ("tg"): lọc chính xác theo cửa sổ.
+    - Chưa có giờ (bản cũ): fallback đếm theo NGÀY (Ngày vào == D).
+    """
+    start = dt.datetime.combine(
+        day - dt.timedelta(days=1), dt.time(config.CRM_DAY_START_HOUR, 0)
+    )
+    end = dt.datetime.combine(day, dt.time(config.CRM_DAY_END_HOUR, 0))
+    out = []
+    for r in records:
+        tv = parse_dt(r.get("tg", ""))
+        if tv is not None:
+            if start <= tv < end:
+                out.append(r)
+        elif parse_date(r.get("ngay", "")) == day:
+            out.append(r)
+    return out
 
 
 def has_phone(r: dict) -> bool:
