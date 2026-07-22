@@ -70,6 +70,16 @@ def adspend_enabled() -> bool:
     return bool(ADS_MONTHLY_SHEET_ID)
 
 
+# CRM chatbot (Google Sheet CRM_DoctorLaser_v3) - nguồn LEAD mới (tab LEADS).
+# Nhớ share sheet này cho service account (quyền Viewer) giống sheet lead cũ.
+CRM_SHEET_ID = _get("CRM_SHEET_ID", "1hEUk7ahzKHO9e656piWiI3L9XWIJqVURQa42eKM7rKA")
+CRM_LEADS_TAB = _get("CRM_LEADS_TAB", "LEADS")
+
+
+def crm_enabled() -> bool:
+    return bool(CRM_SHEET_ID)
+
+
 # Báo cáo tự động hằng ngày
 TIMEZONE = _get("TIMEZONE", "Asia/Ho_Chi_Minh")
 DAILY_REPORT_HOUR = int(_get("DAILY_REPORT_HOUR", "8") or "8")

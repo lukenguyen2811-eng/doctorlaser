@@ -25,6 +25,7 @@ from telegram.ext import (
 import adspend
 import analytics
 import config
+import crm
 import kiotviet
 import llm
 import meta
@@ -470,17 +471,14 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if m and 1 <= int(m.group()) <= 12:
         mon = int(m.group())
     try:
-        records = await asyncio.to_thread(sheets.get_records)
+        records = await asyncio.to_thread(crm.get_leads)
         if mon:
             year = _dt.date.today().year
-            records = [
-                r for r in records
-                if (d := _lead_date(r)) and d.year == year and d.month == mon
-            ]
-            header = f"TỔNG HỢP LEAD THÁNG {mon}/{year}\n\n"
+            records = crm.leads_in_month(records, year, mon)
+            header = f"TỔNG HỢP LEAD THÁNG {mon}/{year} (CRM chatbot)\n\n"
         else:
-            header = "TỔNG HỢP LEAD (tất cả)\n\n"
-        summary = header + analytics.build_summary(records)
+            header = "TỔNG HỢP LEAD (CRM chatbot, tất cả)\n\n"
+        summary = header + crm.build_summary(records)
         await _reply_mono(update, summary)
     except Exception as e:  # noqa: BLE001
         log.exception("stats failed")

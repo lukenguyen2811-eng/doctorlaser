@@ -9,7 +9,6 @@ import re
 from collections import Counter, defaultdict
 
 import config
-import sheets
 
 
 def tzinfo() -> dt.tzinfo:
@@ -246,40 +245,17 @@ def _status_source_table(leads: list[dict]) -> list[str]:
     )
 
 
-def _lead_block(records: list[dict], day: dt.date) -> list[str]:
-    lines = [f"📞 LEAD HÔM QUA ({day:%d/%m}):"]
-    leads = _leads_on(records, day)
-    n = len(leads)
-    lines.append(f"  - Tổng lead: {n}")
-    if leads:
-        lines.append("")
-        lines.append("Theo nguồn:")
-        lines += _source_table(leads)
-        lines.append("")
-        lines.append("Trạng thái × nguồn:")
-        lines += _status_source_table(leads)
-        den = sum(1 for r in leads if _status_has(r, _STATUS_DEN))
-        hen = sum(1 for r in leads if _status_has(r, _STATUS_HEN))
-        lines.append("")
-        lines.append(
-            f"Kết quả: đặt hẹn {hen} ({hen / n * 100:.1f}%), "
-            f"đến khám {den} ({den / n * 100:.1f}%)"
-        )
-        lines.append("")
-        lines += _phone_lines(leads)
+def _lead_block(crm_leads: list[dict], day: dt.date) -> list[str]:
+    """Lead HÔM QUA — lấy từ CRM chatbot (tab LEADS = đã có SĐT)."""
+    import crm
+
+    lines = [f"📞 LEAD HÔM QUA ({day:%d/%m}) — CRM chatbot:"]
+    lines += crm.lead_lines(crm.leads_on(crm_leads, day))
     return lines
 
 
-def _leads_in_month(records: list[dict], today: dt.date) -> list[dict]:
-    out = []
-    for r in records:
-        d = _parse_lead_date(r.get("ngay", ""))
-        if d and d.year == today.year and d.month == today.month:
-            out.append(r)
-    return out
-
-
-def _month_block(records: list[dict], today: dt.date) -> list[str]:
+def _month_block(crm_leads: list[dict], today: dt.date) -> list[str]:
+    import crm
     import kiotviet
 
     lines = [f"📅 LŨY KẾ THÁNG {today.month}/{today.year} (đến {today:%d/%m}):"]
@@ -293,25 +269,9 @@ def _month_block(records: list[dict], today: dt.date) -> list[str]:
             lines.append(f"  - Doanh thu: lỗi KiotViet: {e}")
     else:
         lines.append("  - Doanh thu: (chưa kết nối KiotViet)")
-    mleads = _leads_in_month(records, today)
-    lines.append(f"  - Tổng lead: {len(mleads)}")
-    if mleads:
-        nm = len(mleads)
-        lines.append("")
-        lines.append("Lead theo nguồn:")
-        lines += _source_table(mleads)
-        lines.append("")
-        lines.append("Trạng thái × nguồn:")
-        lines += _status_source_table(mleads)
-        den = sum(1 for r in mleads if _status_has(r, _STATUS_DEN))
-        hen = sum(1 for r in mleads if _status_has(r, _STATUS_HEN))
-        lines.append("")
-        lines.append(
-            f"Kết quả: đặt hẹn {hen} ({hen / nm * 100:.1f}%), "
-            f"đến khám {den} ({den / nm * 100:.1f}%)"
-        )
-        lines.append("")
-        lines += _phone_lines(mleads)
+    lines.append("")
+    lines.append("LEAD (CRM chatbot):")
+    lines += crm.lead_lines(crm.leads_in_month(crm_leads, today.year, today.month))
     return lines
 
 
@@ -337,14 +297,15 @@ def build_daily(as_of: dt.date | None = None) -> str:
     parts += _ads_block(day, month_ref)
     parts.append("")
 
-    records = []
+    import crm
+
     try:
-        records = sheets.get_records()
+        crm_leads = crm.get_leads()
     except Exception as e:  # noqa: BLE001
-        parts.append(f"📞 LEAD: lỗi đọc Google Sheet: {e}")
+        parts.append(f"📞 LEAD: lỗi đọc CRM: {e}")
         return "\n".join(parts)
 
-    parts += _lead_block(records, day)
+    parts += _lead_block(crm_leads, day)
     parts.append("")
-    parts += _month_block(records, month_ref)
+    parts += _month_block(crm_leads, month_ref)
     return "\n".join(parts)
