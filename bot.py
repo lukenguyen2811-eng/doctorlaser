@@ -96,7 +96,7 @@ WELCOME = (
     "/baocaongay - báo cáo ngày (doanh thu + ads + lead hôm qua)\n"
     "/baocaoads - báo cáo ads hôm qua theo campaign + lũy kế tháng\n"
     "/adsnow - ads HÔM NAY realtime (đến thời điểm hiện tại)\n"
-    "/stats - số liệu lead tổng hợp\n"
+    "/stats - tổng data CRM (rác/quan tâm/lead) + trạng thái\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
     "/refresh - tải lại dữ liệu mới nhất\n"
@@ -471,14 +471,18 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if m and 1 <= int(m.group()) <= 12:
         mon = int(m.group())
     try:
-        records = await asyncio.to_thread(crm.get_leads)
+        leads, quan_tam, rac = await asyncio.to_thread(
+            lambda: (crm.get_leads(), crm.get_quan_tam(), crm.get_rac())
+        )
         if mon:
             year = _dt.date.today().year
-            records = crm.leads_in_month(records, year, mon)
-            header = f"TỔNG HỢP LEAD THÁNG {mon}/{year} (CRM chatbot)\n\n"
+            leads = crm.in_month(leads, year, mon)
+            quan_tam = crm.in_month(quan_tam, year, mon)
+            rac = crm.in_month(rac, year, mon)
+            header = f"TỔNG HỢP DATA THÁNG {mon}/{year} (CRM chatbot)\n\n"
         else:
-            header = "TỔNG HỢP LEAD (CRM chatbot, tất cả)\n\n"
-        summary = header + crm.build_summary(records)
+            header = "TỔNG HỢP DATA (CRM chatbot, tất cả)\n\n"
+        summary = header + crm.build_summary(leads, quan_tam, rac)
         await _reply_mono(update, summary)
     except Exception as e:  # noqa: BLE001
         log.exception("stats failed")

@@ -1,7 +1,12 @@
-"""Đọc dữ liệu LEAD từ CRM chatbot (Google Sheet CRM_DoctorLaser_v3), tab LEADS.
+"""Đọc dữ liệu từ CRM chatbot (Google Sheet CRM_DoctorLaser_v3).
 
-Trong CRM: LEADS = khách ĐÃ cho SĐT. Module này thay cho sheet tay ở
-báo cáo ngày (/baocaongay) và /stats — theo yêu cầu "đếm lead/SĐT theo CRM".
+Pipeline chatbot phân loại mọi hội thoại thành 3 nhóm:
+- RAC        : spam / không nhu cầu
+- QUAN_TAM   : có nhu cầu nhưng CHƯA cho SĐT
+- LEADS      : ĐÃ cho SĐT
+
+Module này thay cho sheet tay ở báo cáo ngày (/baocaongay) và /stats.
+"Tổng data" = RAC + QUAN_TAM + LEADS.
 """
 
 import datetime as dt
@@ -12,50 +17,55 @@ from collections import Counter
 import config
 import sheets
 
-# Vị trí cột trong tab LEADS (0-based).
-_COL = {
-    "ngay": 1,        # Ngày vào
-    "nguon": 2,       # Nguồn
-    "sdt": 3,         # SĐT
-    "ho_ten": 4,      # Tên khách
-    "dich_vu": 5,     # Dịch vụ quan tâm
-    "phan_loai": 6,   # Phân loại (Nóng/Ấm/Lạnh)
-    "nhan_vien": 8,   # Nhân viên
-    "trang_thai": 9,  # Trạng thái (Mới/Chốt/Đặt lịch)
-    "khach_cu": 13,   # Khách cũ
+# Vị trí cột (0-based) từng tab.
+_LEADS_COL = {
+    "ngay": 1, "nguon": 2, "sdt": 3, "ho_ten": 4, "dich_vu": 5,
+    "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13,
 }
+_QUANTAM_COL = {"ngay": 1, "nguon": 3, "dich_vu": 5, "trang_thai": 8}
+_RAC_COL = {"ngay": 1, "nguon": 2, "trang_thai": 6}
 
-_cache: tuple[float, list[dict]] | None = None
+_cache: dict[str, tuple[float, list[dict]]] = {}
 
 
 def enabled() -> bool:
     return bool(config.CRM_SHEET_ID)
 
 
-def _fetch() -> list[dict]:
+def _fetch(tab: str, colmap: dict) -> list[dict]:
     ss = sheets.open_spreadsheet(config.CRM_SHEET_ID)
-    ws = ss.worksheet(config.CRM_LEADS_TAB)
+    ws = ss.worksheet(tab)
     rows = ws.get_all_values()
     out: list[dict] = []
     for r in rows[1:]:  # bỏ tiêu đề
         c = [x.strip() for x in (r + [""] * 20)]
-        rec = {k: c[i] for k, i in _COL.items()}
-        # bỏ dòng rỗng thực sự
-        if not (rec["ho_ten"] or rec["sdt"] or rec["trang_thai"]):
+        rec = {k: c[i] for k, i in colmap.items()}
+        if not any(rec.values()):
             continue
         out.append(rec)
     return out
 
 
-def get_leads(force: bool = False) -> list[dict]:
-    """Danh sách lead (tab LEADS), có cache theo SHEET_CACHE_TTL."""
-    global _cache
+def _get(tab: str, colmap: dict, force: bool) -> list[dict]:
     now = time.time()
-    if not force and _cache and (now - _cache[0]) < config.SHEET_CACHE_TTL:
-        return _cache[1]
-    data = _fetch()
-    _cache = (now, data)
+    hit = _cache.get(tab)
+    if not force and hit and (now - hit[0]) < config.SHEET_CACHE_TTL:
+        return hit[1]
+    data = _fetch(tab, colmap)
+    _cache[tab] = (now, data)
     return data
+
+
+def get_leads(force: bool = False) -> list[dict]:
+    return _get(config.CRM_LEADS_TAB, _LEADS_COL, force)
+
+
+def get_quan_tam(force: bool = False) -> list[dict]:
+    return _get("QUAN_TAM", _QUANTAM_COL, force)
+
+
+def get_rac(force: bool = False) -> list[dict]:
+    return _get("RAC", _RAC_COL, force)
 
 
 def parse_date(s: str) -> dt.date | None:
@@ -72,31 +82,52 @@ def has_phone(r: dict) -> bool:
     return len(re.sub(r"\D", "", r.get("sdt") or "")) >= 8
 
 
-def leads_on(records: list[dict], day: dt.date) -> list[dict]:
-    return [r for r in records if parse_date(r["ngay"]) == day]
+def on_day(records: list[dict], day: dt.date) -> list[dict]:
+    return [r for r in records if parse_date(r.get("ngay", "")) == day]
 
 
-def leads_in_month(records: list[dict], year: int, month: int) -> list[dict]:
+def in_month(records: list[dict], year: int, month: int) -> list[dict]:
     out = []
     for r in records:
-        d = parse_date(r["ngay"])
+        d = parse_date(r.get("ngay", ""))
         if d and d.year == year and d.month == month:
             out.append(r)
     return out
 
 
-def _counter(leads: list[dict], field: str, empty: str = "(không rõ)") -> Counter:
-    return Counter((r.get(field) or empty).strip() or empty for r in leads)
+# Giữ tên cũ để tương thích.
+leads_on = on_day
+leads_in_month = in_month
+
+
+def _counter(rows: list[dict], field: str, empty: str = "(không rõ)") -> Counter:
+    return Counter((r.get(field) or empty).strip() or empty for r in rows)
+
+
+def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> list[str]:
+    """Tổng data (RÁC+QUAN_TÂM+LEADS) + trạng thái từng nhóm."""
+    nl, nq, nr = len(leads), len(quan_tam), len(rac)
+    tot = nl + nq + nr
+    lines = [f"  - TỔNG DATA: {tot}"]
+    if tot:
+        lines.append(f"      • Lead (đã có SĐT): {nl} ({nl / tot * 100:.0f}%)")
+        lines.append(f"      • Quan tâm (chưa SĐT): {nq} ({nq / tot * 100:.0f}%)")
+        lines.append(f"      • Rác: {nr} ({nr / tot * 100:.0f}%)")
+    if leads:
+        st = _counter(leads, "trang_thai", "(chưa)")
+        lines.append("  - Trạng thái LEAD: " + ", ".join(f"{k} {v}" for k, v in st.most_common()))
+    if quan_tam:
+        st = _counter(quan_tam, "trang_thai", "(chưa)")
+        lines.append("  - Trạng thái QUAN_TÂM: " + ", ".join(f"{k} {v}" for k, v in st.most_common()))
+    return lines
 
 
 def lead_lines(leads: list[dict]) -> list[str]:
-    """Các dòng thống kê lead từ CRM (dùng trong báo cáo ngày)."""
+    """Chi tiết nhóm LEAD (đã có SĐT): theo nguồn, phân loại, kết quả."""
     n = len(leads)
-    got = sum(1 for r in leads if has_phone(r))
-    lines = [f"  - Số lead: {n}", f"  - Có SĐT: {got}/{n}" + (f" ({got / n * 100:.0f}%)" if n else "")]
-    if not leads:
-        return lines
-    lines.append("  - Theo nguồn:")
+    if not n:
+        return ["  - (Chưa có lead)"]
+    lines = ["  - Theo nguồn:"]
     for name, c in _counter(leads, "nguon").most_common():
         lines.append(f"      • {name}: {c} ({c / n * 100:.0f}%)")
     pl = _counter(leads, "phan_loai", "(chưa)")
@@ -110,10 +141,13 @@ def lead_lines(leads: list[dict]) -> list[str]:
     return lines
 
 
-def build_summary(leads: list[dict]) -> str:
-    """Tóm tắt lead tổng hợp cho /stats (thay analytics.build_summary)."""
+def build_summary(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> str:
+    """Tóm tắt tổng hợp cho /stats: tổng data + funnel + chi tiết lead."""
+    parts = ["TỔNG DATA & PHÂN LOẠI (CRM chatbot):"]
+    parts += funnel_lines(leads, quan_tam, rac)
+    parts.append("")
+
     n = len(leads)
-    got = sum(1 for r in leads if has_phone(r))
 
     def block(title: str, counter: Counter) -> list[str]:
         out = [title]
@@ -121,11 +155,8 @@ def build_summary(leads: list[dict]) -> str:
             out.append(f"  - {name}: {c} ({c / n * 100:.1f}%)" if n else f"  - {name}: {c}")
         return out
 
-    parts = [
-        f"TỔNG LEAD (CRM chatbot): {n}",
-        f"Có SĐT: {got}/{n}" + (f" ({got / n * 100:.1f}%)" if n else ""),
-        "",
-    ]
+    parts.append(f"CHI TIẾT LEAD (đã có SĐT): {n}")
+    parts.append("")
     parts += block("Theo NGUỒN:", _counter(leads, "nguon"))
     parts.append("")
     parts += block("Theo PHÂN LOẠI:", _counter(leads, "phan_loai", "(chưa)"))

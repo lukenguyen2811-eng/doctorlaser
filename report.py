@@ -245,16 +245,21 @@ def _status_source_table(leads: list[dict]) -> list[str]:
     )
 
 
-def _lead_block(crm_leads: list[dict], day: dt.date) -> list[str]:
-    """Lead HÔM QUA — lấy từ CRM chatbot (tab LEADS = đã có SĐT)."""
+def _lead_block(data: dict, day: dt.date) -> list[str]:
+    """DATA HÔM QUA — từ CRM chatbot (tổng data + funnel + chi tiết lead)."""
     import crm
 
-    lines = [f"📞 LEAD HÔM QUA ({day:%d/%m}) — CRM chatbot:"]
-    lines += crm.lead_lines(crm.leads_on(crm_leads, day))
+    leads = crm.on_day(data["leads"], day)
+    quan_tam = crm.on_day(data["quan_tam"], day)
+    rac = crm.on_day(data["rac"], day)
+    lines = [f"📞 DATA HÔM QUA ({day:%d/%m}) — CRM chatbot:"]
+    lines += crm.funnel_lines(leads, quan_tam, rac)
+    lines.append("  Chi tiết LEAD:")
+    lines += crm.lead_lines(leads)
     return lines
 
 
-def _month_block(crm_leads: list[dict], today: dt.date) -> list[str]:
+def _month_block(data: dict, today: dt.date) -> list[str]:
     import crm
     import kiotviet
 
@@ -270,8 +275,14 @@ def _month_block(crm_leads: list[dict], today: dt.date) -> list[str]:
     else:
         lines.append("  - Doanh thu: (chưa kết nối KiotViet)")
     lines.append("")
-    lines.append("LEAD (CRM chatbot):")
-    lines += crm.lead_lines(crm.leads_in_month(crm_leads, today.year, today.month))
+    lines.append("DATA (CRM chatbot):")
+    y, m = today.year, today.month
+    leads = crm.in_month(data["leads"], y, m)
+    quan_tam = crm.in_month(data["quan_tam"], y, m)
+    rac = crm.in_month(data["rac"], y, m)
+    lines += crm.funnel_lines(leads, quan_tam, rac)
+    lines.append("  Chi tiết LEAD:")
+    lines += crm.lead_lines(leads)
     return lines
 
 
@@ -300,12 +311,16 @@ def build_daily(as_of: dt.date | None = None) -> str:
     import crm
 
     try:
-        crm_leads = crm.get_leads()
+        data = {
+            "leads": crm.get_leads(),
+            "quan_tam": crm.get_quan_tam(),
+            "rac": crm.get_rac(),
+        }
     except Exception as e:  # noqa: BLE001
-        parts.append(f"📞 LEAD: lỗi đọc CRM: {e}")
+        parts.append(f"📞 DATA: lỗi đọc CRM: {e}")
         return "\n".join(parts)
 
-    parts += _lead_block(crm_leads, day)
+    parts += _lead_block(data, day)
     parts.append("")
-    parts += _month_block(crm_leads, month_ref)
+    parts += _month_block(data, month_ref)
     return "\n".join(parts)
