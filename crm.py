@@ -93,7 +93,9 @@ def parse_dt(s: str) -> dt.datetime | None:
 
 
 def in_business_day(records: list[dict], day: dt.date) -> list[dict]:
-    """Bản ghi thuộc 'ngày báo cáo' D = [D-1 22:00, D 18:00).
+    """Bản ghi thuộc 'ngày báo cáo' D = [D-1 18:00, D 18:00) — trọn 24 giờ.
+
+    Ví dụ báo cáo ngày 23/7: lấy từ 18h ngày 22/7 đến (trước) 18h ngày 23/7.
 
     - Có cột giờ ("tg"): lọc chính xác theo cửa sổ.
     - Chưa có giờ (bản cũ): fallback đếm theo NGÀY (Ngày vào == D).

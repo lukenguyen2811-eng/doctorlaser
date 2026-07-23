@@ -246,7 +246,7 @@ def _status_source_table(leads: list[dict]) -> list[str]:
 
 
 def _lead_block(data: dict, day: dt.date) -> list[str]:
-    """DATA HÔM QUA — từ CRM chatbot, cửa sổ 22h hôm trước → 18h hôm sau."""
+    """DATA ngày D — từ CRM chatbot, cửa sổ 18h hôm trước (D-1) → 18h ngày D."""
     import config
     import crm
 
