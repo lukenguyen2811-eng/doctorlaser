@@ -20,9 +20,10 @@ import sheets
 # Vị trí cột (0-based) từng tab. "tg" = thời điểm nhận (ngày + giờ).
 _LEADS_COL = {
     "ngay": 1, "nguon": 2, "sdt": 3, "ho_ten": 4, "dich_vu": 5,
-    "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13, "tg": 19,
+    "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13,
+    "ma": 17, "tg": 19,
 }
-_QUANTAM_COL = {"ngay": 1, "nguon": 3, "dich_vu": 5, "trang_thai": 8, "tg": 15}
+_QUANTAM_COL = {"ma": 0, "ngay": 1, "nguon": 3, "dich_vu": 5, "trang_thai": 8, "tg": 15}
 _RAC_COL = {"ngay": 1, "nguon": 2, "trang_thai": 6, "tg": 7}
 
 _cache: dict[str, tuple[float, list[dict]]] = {}
@@ -141,8 +142,19 @@ def _counter(rows: list[dict], field: str, empty: str = "(không rõ)") -> Count
     return Counter((r.get(field) or empty).strip() or empty for r in rows)
 
 
+def dedupe_quan_tam(quan_tam: list[dict], leads: list[dict]) -> list[dict]:
+    """Loại khỏi QUAN_TÂM những hội thoại ĐÃ lên LEADS (cùng mã hội thoại).
+
+    Khi khách cho SĐT, chatbot thêm dòng vào LEADS nhưng dòng QUAN_TÂM vẫn còn
+    -> 1 người bị đếm 2 lần trong tổng data. Khớp theo 'Mã hội thoại' để khử.
+    """
+    lead_ids = {r.get("ma") for r in leads if r.get("ma")}
+    return [r for r in quan_tam if not (r.get("ma") and r.get("ma") in lead_ids)]
+
+
 def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> list[str]:
-    """Tổng data (RÁC+QUAN_TÂM+LEADS) + trạng thái từng nhóm."""
+    """Tổng data (RÁC+QUAN_TÂM+LEADS) + trạng thái từng nhóm (đã khử trùng)."""
+    quan_tam = dedupe_quan_tam(quan_tam, leads)
     nl, nq, nr = len(leads), len(quan_tam), len(rac)
     tot = nl + nq + nr
     lines = [f"  - TỔNG DATA: {tot}"]
@@ -162,7 +174,8 @@ def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> li
 def source_totals(
     leads: list[dict], quan_tam: list[dict], rac: list[dict]
 ) -> Counter:
-    """Tổng data (lead + quan tâm + rác) theo từng nguồn."""
+    """Tổng data (lead + quan tâm + rác) theo từng nguồn, đã khử trùng."""
+    quan_tam = dedupe_quan_tam(quan_tam, leads)
     total: Counter = Counter()
     for rows in (leads, quan_tam, rac):
         total.update(_counter(rows, "nguon"))
