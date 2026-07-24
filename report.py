@@ -260,7 +260,7 @@ def _lead_block(data: dict, day: dt.date) -> list[str]:
     ]
     lines += crm.funnel_lines(leads, quan_tam, rac)
     lines.append("  Chi tiết LEAD:")
-    lines += crm.lead_lines(leads)
+    lines += crm.lead_lines(leads, quan_tam, rac)
     return lines
 
 
@@ -287,7 +287,7 @@ def _month_block(data: dict, today: dt.date) -> list[str]:
     rac = crm.in_month(data["rac"], y, m)
     lines += crm.funnel_lines(leads, quan_tam, rac)
     lines.append("  Chi tiết LEAD:")
-    lines += crm.lead_lines(leads)
+    lines += crm.lead_lines(leads, quan_tam, rac)
     return lines
 
 

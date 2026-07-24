@@ -159,14 +159,41 @@ def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> li
     return lines
 
 
-def lead_lines(leads: list[dict]) -> list[str]:
-    """Chi tiết nhóm LEAD (đã có SĐT): theo nguồn, phân loại, kết quả."""
+def source_totals(
+    leads: list[dict], quan_tam: list[dict], rac: list[dict]
+) -> Counter:
+    """Tổng data (lead + quan tâm + rác) theo từng nguồn."""
+    total: Counter = Counter()
+    for rows in (leads, quan_tam, rac):
+        total.update(_counter(rows, "nguon"))
+    return total
+
+
+def lead_lines(
+    leads: list[dict],
+    quan_tam: list[dict] | None = None,
+    rac: list[dict] | None = None,
+) -> list[str]:
+    """Chi tiết nhóm LEAD (đã có SĐT): theo nguồn, phân loại, kết quả.
+
+    Có quan_tam/rac -> mỗi nguồn hiện 'lead/tổng data' của nguồn đó
+    (vd TikTok: 3/10 = 3 lead trên 10 data TikTok).
+    """
     n = len(leads)
     if not n:
         return ["  - (Chưa có lead)"]
-    lines = ["  - Theo nguồn:"]
-    for name, c in _counter(leads, "nguon").most_common():
-        lines.append(f"      • {name}: {c} ({c / n * 100:.0f}%)")
+    lead_src = _counter(leads, "nguon")
+    if quan_tam is not None or rac is not None:
+        total_src = source_totals(leads, quan_tam or [], rac or [])
+        lines = ["  - Theo nguồn (lead/tổng data nguồn):"]
+        # Sắp theo tổng data giảm dần; gồm cả nguồn có data nhưng 0 lead.
+        for name, tot in total_src.most_common():
+            c = lead_src.get(name, 0)
+            lines.append(f"      • {name}: {c}/{tot} ({c / tot * 100:.0f}% ra lead)")
+    else:
+        lines = ["  - Theo nguồn:"]
+        for name, c in lead_src.most_common():
+            lines.append(f"      • {name}: {c} ({c / n * 100:.0f}%)")
     pl = _counter(leads, "phan_loai", "(chưa)")
     lines.append("  - Phân loại: " + ", ".join(f"{k} {v}" for k, v in pl.most_common()))
     chot = sum(1 for r in leads if "chốt" in (r.get("trang_thai") or "").lower())
@@ -194,7 +221,11 @@ def build_summary(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> s
 
     parts.append(f"CHI TIẾT LEAD (đã có SĐT): {n}")
     parts.append("")
-    parts += block("Theo NGUỒN:", _counter(leads, "nguon"))
+    parts.append("Theo NGUỒN (lead/tổng data nguồn):")
+    lead_src = _counter(leads, "nguon")
+    for name, tot in source_totals(leads, quan_tam, rac).most_common():
+        c = lead_src.get(name, 0)
+        parts.append(f"  - {name}: {c}/{tot} ({c / tot * 100:.0f}% ra lead)")
     parts.append("")
     parts += block("Theo PHÂN LOẠI:", _counter(leads, "phan_loai", "(chưa)"))
     parts.append("")
