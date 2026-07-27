@@ -142,6 +142,80 @@ def _ads_block(yesterday: dt.date, today: dt.date) -> list[str]:
     return lines
 
 
+def _tiktok_block(day: dt.date, month_ref: dt.date) -> list[str]:
+    """Chi phí & hiệu quả TikTok Ads (tài khoản Doctor Laser Clinic0905)."""
+    lines = [f"🎵 TIKTOK ADS HÔM QUA ({day:%d/%m}):"]
+    if not config.tiktok_enabled():
+        lines.append("  - (Chưa kết nối TikTok Ads)")
+        return lines
+
+    import tiktok
+
+    ds = day.strftime("%Y-%m-%d")
+    try:
+        rows = tiktok.get_campaign_report(ds, ds)
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"  - Lỗi đọc TikTok: {e}")
+        return lines
+
+    t = tiktok.totals(rows)
+    if t["spend"] <= 0:
+        lines.append("  - Chưa có chi tiêu TikTok hôm qua.")
+    else:
+        lines.append(f"  - Chi quảng cáo: {_vnd(t['spend'])}")
+        lines.append(
+            f"  - Kết quả (chuyển đổi): {t['conversion']}"
+            + (f" | CPA: {_vnd(t['cpa'])}" if t["conversion"] else "")
+        )
+        lines.append("  - Theo campaign:")
+        for r in rows:
+            if r["conversion"]:
+                lines.append(
+                    f"      • {r['name'][:28]}: {_vnd(r['spend'])} | "
+                    f"{r['conversion']} KQ | CPA {_vnd(r['cpa'])}"
+                )
+            else:
+                lines.append(
+                    f"      • {r['name'][:28]}: {_vnd(r['spend'])} | "
+                    f"{r['impressions']:,} hiển thị".replace(",", ".")
+                )
+
+    # Lũy kế tháng (đến hết ngày báo cáo)
+    first = month_ref.replace(day=1)
+    if first <= day:
+        try:
+            tm = tiktok.totals(
+                tiktok.get_campaign_report(first.strftime("%Y-%m-%d"), ds)
+            )
+            if tm["spend"] > 0:
+                lines.append(
+                    f"  - Lũy kế tháng {month_ref.month} (đến {day:%d/%m}): "
+                    f"chi {_vnd(tm['spend'])} | KQ {tm['conversion']}"
+                    + (f" | CPA {_vnd(tm['cpa'])}" if tm["conversion"] else "")
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Tổng ads 2 nền tảng + ROAS thô gộp (dùng lại cache Meta/KiotViet nếu có)
+    if t["spend"] > 0 and config.meta_enabled():
+        try:
+            import meta
+
+            fb = meta.totals(meta.get_insights(ds, ds))
+            tong = fb["spend"] + t["spend"]
+            line = f"  - TỔNG ADS hôm qua (FB + TikTok): {_vnd(tong)}"
+            if config.kiotviet_enabled():
+                import kiotviet
+
+                rev = kiotviet.total_revenue(kiotviet.get_invoices_for_date(day))
+                if tong:
+                    line += f" | ROAS thô: {rev / tong:.1f}x"
+            lines.append(line)
+        except Exception:  # noqa: BLE001
+            pass
+    return lines
+
+
 def _status_lines(counter: Counter, total: int, top: int = 6) -> list[str]:
     """Hiện top N trạng thái, gộp phần còn lại thành 'Khác' cho gọn."""
     items = counter.most_common()
@@ -311,6 +385,8 @@ def build_daily(as_of: dt.date | None = None) -> str:
     parts += _revenue_block(day)
     parts.append("")
     parts += _ads_block(day, month_ref)
+    parts.append("")
+    parts += _tiktok_block(day, month_ref)
     parts.append("")
 
     import crm
