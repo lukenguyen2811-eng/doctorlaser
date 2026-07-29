@@ -15,7 +15,7 @@ import requests
 
 import config
 
-_URL = "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer"
+_URL = "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-flat"
 _initialized = False
 _cache: dict = {}
 
