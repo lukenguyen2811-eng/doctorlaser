@@ -489,7 +489,7 @@ async def cmd_phantichads(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     status = await update.message.reply_text(
         f"⏳ Đang bóc tách ads {days} ngày (FB + TikTok) và soạn đề xuất... "
-        "(~30-60 giây)"
+        "(khoảng 1 phút, vui lòng đợi)"
     )
     try:
         parts: list[str] = [f"# SỐ LIỆU ADS {days} NGÀY ({ds} → {de})"]

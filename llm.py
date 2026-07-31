@@ -105,7 +105,9 @@ def ads_analysis(context: str) -> str:
         max_tokens=6000,
         system=system,
         thinking={"type": "adaptive"},
-        output_config={"effort": "medium"},
+        # effort "low": số liệu đã tính sẵn nên không cần suy luận sâu; nhanh gấp
+        # ~3 lần (≈37s thay vì ≈103s) mà vẫn ra phân tích + đề xuất đầy đủ.
+        output_config={"effort": "low"},
         messages=[
             {
                 "role": "user",
