@@ -96,6 +96,7 @@ WELCOME = (
     "/baocaongay - báo cáo ngày (doanh thu + ads + lead hôm qua)\n"
     "/baocaoads - báo cáo ads hôm qua theo campaign + lũy kế tháng\n"
     "/adsnow - ads HÔM NAY realtime (đến thời điểm hiện tại)\n"
+    "/phantichads - phân tích FB + TikTok 30 ngày & đề xuất tối ưu (vd /phantichads 60)\n"
     "/stats - tổng data CRM (rác/quan tâm/lead) + trạng thái\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
@@ -461,6 +462,75 @@ async def cmd_adsnow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await status.edit_text(f"Lỗi khi lấy ads realtime: {e}")
 
 
+async def cmd_phantichads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Phân tích ads Facebook + TikTok (30 ngày) và đề xuất tối ưu bằng Claude.
+
+    /phantichads       -> 30 ngày gần nhất
+    /phantichads 60    -> 60 ngày gần nhất
+    """
+    if not _allowed(update):
+        return
+    if not config.meta_enabled() and not config.tiktok_enabled():
+        await update.message.reply_text(
+            "Chưa kết nối kênh ads nào (cần Meta và/hoặc TikTok)."
+        )
+        return
+    import datetime as _dt
+
+    days = 30
+    m = re.search(r"\d{1,3}", " ".join(context.args)) if context.args else None
+    if m:
+        days = max(7, min(180, int(m.group())))
+
+    today = _dt.date.today()
+    end = today - _dt.timedelta(days=1)          # đến hết hôm qua (ngày đủ dữ liệu)
+    start = end - _dt.timedelta(days=days - 1)
+    ds, de = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+    status = await update.message.reply_text(
+        f"⏳ Đang bóc tách ads {days} ngày (FB + TikTok) và soạn đề xuất... "
+        "(~30-60 giây)"
+    )
+    try:
+        parts: list[str] = [f"# SỐ LIỆU ADS {days} NGÀY ({ds} → {de})"]
+
+        # --- Facebook ---
+        if config.meta_enabled():
+            try:
+                rows = await asyncio.to_thread(meta.get_insights, ds, de)
+                parts.append(
+                    "## FACEBOOK ADS (theo campaign)\n"
+                    + meta.build_summary(rows, f"{days} ngày")
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("phantichads FB fail: %s", e)
+                parts.append(f"## FACEBOOK ADS\n(Không lấy được số Facebook: {e})")
+
+        # --- TikTok ---
+        if config.tiktok_enabled():
+            try:
+                import tiktok
+
+                parts.append(await asyncio.to_thread(tiktok.build_analysis_text, ds, de))
+            except Exception as e:  # noqa: BLE001
+                log.warning("phantichads TT fail: %s", e)
+                parts.append(f"## TIKTOK ADS\n(Không lấy được số TikTok: {e})")
+
+        reply = await asyncio.to_thread(llm.ads_analysis, "\n\n".join(parts))
+        if not reply:
+            await status.edit_text(
+                "Mình chưa tạo được nội dung (có thể do giới hạn token). Thử lại sau ít phút."
+            )
+            return
+        await status.delete()
+        await _reply_long(update, reply)
+    except anthropic.RateLimitError:
+        await status.edit_text("⚠️ Bị giới hạn tốc độ. Thử lại sau ~1 phút.")
+    except Exception as e:  # noqa: BLE001
+        log.exception("phantichads failed")
+        await status.edit_text(f"Có lỗi xảy ra: {e}")
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update):
         return
@@ -722,6 +792,7 @@ def main() -> None:
     app.add_handler(CommandHandler("ads", cmd_ads))
     app.add_handler(CommandHandler("baocaoads", cmd_baocaoads))
     app.add_handler(CommandHandler("adsnow", cmd_adsnow))
+    app.add_handler(CommandHandler("phantichads", cmd_phantichads))
     app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))

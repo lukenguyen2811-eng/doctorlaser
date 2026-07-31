@@ -1,15 +1,5 @@
-# Bí mật & cấu hình cục bộ
+.token_synced
 .env
 service_account.json
-*.json.local
-
-# Python
 __pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-*.egg-info/
-
-# Hệ điều hành
-.DS_Store
+*.pyc

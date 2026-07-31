@@ -65,6 +65,59 @@ bằng tiếng Việt; dùng đơn vị tiền Việt (đ).
 """
 
 
+_ADS_INSTRUCTIONS = """\
+Bạn là CHUYÊN GIA QUẢNG CÁO (media buyer) cho phòng khám da liễu/thẩm mỹ
+"Doctor Laser", giỏi cả Facebook Ads lẫn TikTok Ads. Bạn nhận số liệu ĐÃ TÍNH
+SẴN 30 ngày: Facebook (theo campaign) + TikTok (campaign, ad group, top video
+kèm tỉ lệ giữ chân 2 giây).
+
+Nhiệm vụ: BÓC TÁCH hiệu quả & chi phí, rồi ĐỀ XUẤT tối ưu cụ thể, làm được ngay.
+
+Trình bày theo cấu trúc:
+1. TỔNG QUAN 2 KÊNH: chi phí, số kết quả (lead/tin nhắn), CPL/CPA mỗi kênh, kênh
+   nào đang rẻ hơn. So sánh thẳng Facebook vs TikTok.
+2. FACEBOOK: campaign/ad set nào hiệu quả (CPL thấp), cái nào đang lãng phí; cảnh
+   báo tần suất cao (chai tệp) nếu có.
+3. TIKTOK: ad group thắng/thua (chú ý CVR — click ra tin nhắn), và VIDEO: quy luật
+   giữ chân 2 giây (video thắng thường giữ ≥20%, thua ~10%); chỉ đích danh video
+   nên TẮT (CPA cao) và video nên TĂNG TIỀN (CPA thấp/CVR cao).
+4. ĐỀ XUẤT HÀNH ĐỘNG (ưu tiên theo tác động): danh sách gạch đầu dòng — tắt gì,
+   tăng/giảm ngân sách chỗ nào, đổi tệp/nhắm ai, brief nội dung cho team media.
+5. PHÂN BỔ NGÂN SÁCH ĐỀ XUẤT: bảng ngắn "hạng mục → hiện tại → đề xuất → lý do".
+
+Nguyên tắc:
+- CHỈ dùng con số đã cho, tuyệt đối không bịa. Campaign mục tiêu "View/lượt xem"
+  thường 0 chuyển đổi — đừng coi là thất bại chốt, mà xét vai trò nuôi kênh.
+- Nếu một campaign vừa được nhân bản/khởi động lại (chi ít, ít kết quả), nhắc rõ
+  đang trong GIAI ĐOẠN HỌC MÁY, chưa nên kết luận CPA.
+- Nêu rõ giả định khi dữ liệu chưa đủ. Viết gọn, dễ hành động, tiếng Việt, đơn vị đ.
+"""
+
+
+def ads_analysis(context: str) -> str:
+    """Phân tích ads Facebook + TikTok và đề xuất tối ưu (model mạnh)."""
+    system = [
+        {"type": "text", "text": _ADS_INSTRUCTIONS},
+        {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
+    ]
+    with _client.messages.stream(
+        model=config.STRATEGY_MODEL,
+        max_tokens=6000,
+        system=system,
+        thinking={"type": "adaptive"},
+        output_config={"effort": "medium"},
+        messages=[
+            {
+                "role": "user",
+                "content": "Hãy bóc tách hiệu quả & chi phí ads 2 kênh và đưa đề "
+                "xuất tối ưu cụ thể dựa trên toàn bộ số liệu trên.",
+            }
+        ],
+    ) as stream:
+        message = stream.get_final_message()
+    return "".join(b.text for b in message.content if b.type == "text").strip()
+
+
 def strategy(context: str) -> str:
     """Phân tích chiến lược chuyên sâu (dùng model mạnh + suy luận)."""
     system = [

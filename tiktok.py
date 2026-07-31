@@ -1,11 +1,15 @@
-"""Báo cáo TikTok Ads qua endpoint MCP chính thức của TikTok (tt-ads-mcp-layer).
+"""Báo cáo TikTok Ads qua endpoint MCP chính thức của TikTok (tt-ads-mcp-flat).
 
 Bot gọi JSON-RPC (initialize + tools/call report_integrated_get) tới
-https://business-api.tiktok.com/open_mcp/tt-ads-mcp-layer bằng token OAuth
+https://business-api.tiktok.com/open_mcp/tt-ads-mcp-flat bằng token OAuth
 cấp qua TikTok Agentic Hub (biến TIKTOK_MCP_TOKEN).
 
-LƯU Ý: token Agentic Hub có hiệu lực ~30 ngày. Khi hết hạn, bot sẽ báo rõ
-trong báo cáo — cần authorize lại và cập nhật TIKTOK_MCP_TOKEN trên Railway.
+QUAN TRỌNG: token bị RÀNG BUỘC theo endpoint (OAuth resource indicator).
+Token cấp cho tt-ads-mcp-flat gọi sang tt-ads-mcp-layer sẽ bị 401. Nếu đổi
+endpoint khi authorize thì phải đổi _URL bên dưới cho khớp.
+
+LƯU Ý: access token chỉ sống ~24 giờ (quyền uỷ quyền mới là 30 ngày). Khi hết
+hạn, bot báo rõ trong báo cáo — cần cập nhật lại TIKTOK_MCP_TOKEN trên Railway.
 """
 
 import json
@@ -139,3 +143,92 @@ def totals(rows: list[dict]) -> dict:
         "impressions": sum(r["impressions"] for r in rows),
         "clicks": sum(r["clicks"] for r in rows),
     }
+
+
+# ---------------------------------------------------------------------------
+# Dữ liệu đa tầng cho lệnh phân tích ads (/phantichads)
+# ---------------------------------------------------------------------------
+
+def _report_list(data_level: str, dimensions: list, metrics: list,
+                 start: str, end: str, page_size: int = 50) -> list[dict]:
+    data = _call_tool("report_integrated_get", {
+        "advertiser_id": config.TIKTOK_ADVERTISER_ID,
+        "report_type": "BASIC", "data_level": data_level,
+        "dimensions": dimensions, "metrics": metrics,
+        "start_date": start, "end_date": end, "page_size": page_size,
+        "order_field": "spend", "order_type": "DESC",
+    })
+    return data.get("list") or []
+
+
+def _f(m: dict, k: str) -> float:
+    try:
+        return float(m.get(k) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_analysis_text(start: str, end: str) -> str:
+    """Khối dữ liệu TikTok (campaign + ad group + top video) để đưa cho Claude.
+
+    Số liệu thô, đã tính CPA và tỉ lệ giữ chân 2 giây — để model phân tích, không
+    tự bịa. Trả chuỗi tiếng Việt gọn.
+    """
+    lines: list[str] = [f"## TIKTOK ADS ({start} → {end}) — tài khoản Doctor Laser Clinic0905"]
+
+    # 1) Campaign (chỉ cái có chi tiêu)
+    camp = _report_list("AUCTION_CAMPAIGN", ["campaign_id"],
+                        ["campaign_name", "spend", "impressions", "clicks", "ctr",
+                         "conversion", "cost_per_conversion", "conversion_rate", "frequency"],
+                        start, end)
+    lines.append("\n### Theo CAMPAIGN")
+    for it in camp:
+        m = it.get("metrics") or {}
+        if _f(m, "spend") <= 0:
+            continue
+        conv = int(_f(m, "conversion"))
+        lines.append(
+            f"- {m.get('campaign_name','?')}: chi {_f(m,'spend'):,.0f}đ | KQ {conv}"
+            + (f" | CPA {_f(m,'cost_per_conversion'):,.0f}đ" if conv else " | (không có chuyển đổi)")
+            + f" | CTR {_f(m,'ctr'):.2f}% | CVR {_f(m,'conversion_rate'):.2f}%"
+            + f" | tần suất {_f(m,'frequency'):.2f}"
+        )
+
+    # 2) Ad group (top theo chi tiêu)
+    ag = _report_list("AUCTION_ADGROUP", ["adgroup_id"],
+                     ["campaign_name", "adgroup_name", "spend", "conversion",
+                      "cost_per_conversion", "conversion_rate", "frequency"],
+                     start, end)
+    ag = [x for x in ag if _f((x.get("metrics") or {}), "spend") > 0][:8]
+    lines.append("\n### Theo AD GROUP (top chi tiêu)")
+    for it in ag:
+        m = it["metrics"]
+        conv = int(_f(m, "conversion"))
+        lines.append(
+            f"- [{m.get('campaign_name','?')}] {m.get('adgroup_name','?')}: "
+            f"chi {_f(m,'spend'):,.0f}đ | KQ {conv}"
+            + (f" | CPA {_f(m,'cost_per_conversion'):,.0f}đ" if conv else "")
+            + f" | CVR {_f(m,'conversion_rate'):.2f}% | tần suất {_f(m,'frequency'):.2f}"
+        )
+
+    # 3) Top video/ad theo chi tiêu (kèm giữ chân 2s = xem>=2s / lượt phát)
+    ads = _report_list("AUCTION_AD", ["ad_id"],
+                      ["adgroup_name", "ad_name", "spend", "conversion",
+                       "cost_per_conversion", "conversion_rate",
+                       "video_play_actions", "video_watched_2s"],
+                      start, end, page_size=20)
+    ads = [x for x in ads if _f((x.get("metrics") or {}), "spend") > 0][:15]
+    lines.append("\n### TOP VIDEO/AD (theo chi tiêu) — giữ 2s = xem≥2s / lượt phát")
+    for it in ads:
+        m = it["metrics"]
+        conv = int(_f(m, "conversion"))
+        plays = _f(m, "video_play_actions")
+        hold2 = (_f(m, "video_watched_2s") / plays * 100) if plays else 0.0
+        lines.append(
+            f"- {m.get('ad_name','?')} [{m.get('adgroup_name','?')}]: "
+            f"chi {_f(m,'spend'):,.0f}đ | KQ {conv}"
+            + (f" | CPA {_f(m,'cost_per_conversion'):,.0f}đ" if conv else "")
+            + f" | CVR {_f(m,'conversion_rate'):.2f}%"
+            + (f" | giữ 2s {hold2:.1f}%" if plays else " | (ảnh/không phải video)")
+        )
+    return "\n".join(lines)
