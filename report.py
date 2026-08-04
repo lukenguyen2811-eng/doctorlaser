@@ -405,3 +405,31 @@ def build_daily(as_of: dt.date | None = None) -> str:
     parts.append("")
     parts += _month_block(data, month_ref)
     return "\n".join(parts)
+
+
+def build_data_preview(as_of: dt.date | None = None) -> str:
+    """Báo cáo DATA sớm (chạy 19h) để sale rà trước báo cáo đầy đủ 8h sáng.
+
+    Chỉ gồm phần DATA/lead của NGÀY VỪA CHỐT lúc 18h hôm nay (cửa sổ 18h hôm qua
+    → 18h hôm nay), cùng cửa sổ mà báo cáo 8h sáng mai sẽ tổng kết. Không kèm
+    doanh thu/ads vì ngày hôm nay chưa khép sổ.
+    """
+    day = as_of or _today()
+    import crm
+
+    try:
+        data = {
+            "leads": crm.get_leads(force=True),
+            "quan_tam": crm.get_quan_tam(force=True),
+            "rac": crm.get_rac(force=True),
+        }
+    except Exception as e:  # noqa: BLE001
+        return f"🔎 KIỂM TRA DATA {day:%d/%m}: lỗi đọc CRM: {e}"
+
+    parts = [
+        f"🔎 KIỂM TRA DATA — chốt 18h {day:%d/%m} (18h {day - dt.timedelta(days=1):%d/%m} → 18h {day:%d/%m})",
+        "Sale rà & sửa phân loại trước; báo cáo đầy đủ vẫn gửi 8h sáng mai.",
+        "",
+    ]
+    parts += _lead_block(data, day)
+    return "\n".join(parts)

@@ -97,6 +97,7 @@ WELCOME = (
     "/baocaoads - báo cáo ads hôm qua theo campaign + lũy kế tháng\n"
     "/adsnow - ads HÔM NAY realtime (đến thời điểm hiện tại)\n"
     "/phantichads - phân tích FB + TikTok 30 ngày & đề xuất tối ưu (vd /phantichads 60)\n"
+    "/kiemtradata - xem data ngày vừa chốt (bản 19h để sale rà trước)\n"
     "/stats - tổng data CRM (rác/quan tâm/lead) + trạng thái\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
@@ -273,6 +274,33 @@ async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
         log.exception("daily report job failed")
+
+
+async def _send_data_preview(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job 19h: gửi báo cáo DATA sớm để sale rà trước báo cáo 8h sáng."""
+    chat_id = config.DAILY_REPORT_CHAT_ID
+    if not chat_id:
+        return
+    try:
+        text = await asyncio.to_thread(report.build_data_preview)
+        for chunk in _mono_chunks(text):
+            await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+    except Exception:  # noqa: BLE001
+        log.exception("data preview job failed")
+
+
+async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Xem thử báo cáo DATA sớm (giống bản tự động 19h) cho ngày vừa chốt."""
+    if not _allowed(update):
+        return
+    status = await update.message.reply_text("⏳ Đang lấy data để rà...")
+    try:
+        text = await asyncio.to_thread(report.build_data_preview)
+        await status.delete()
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("kiemtradata failed")
+        await status.edit_text(f"Lỗi: {e}")
 
 
 async def cmd_testbaocao(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -796,6 +824,7 @@ def main() -> None:
     app.add_handler(CommandHandler("kvdebug", cmd_kvdebug))
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
+    app.add_handler(CommandHandler("kiemtradata", cmd_kiemtradata))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
@@ -819,9 +848,16 @@ def main() -> None:
             time=_dt.time(hour=config.DAILY_REPORT_HOUR, tzinfo=report.tzinfo()),
             name="daily_report",
         )
+        # Báo cáo DATA sớm lúc 19h để sale rà trước (giữ nguyên báo cáo 8h sáng).
+        app.job_queue.run_daily(
+            _send_data_preview,
+            time=_dt.time(hour=config.DATA_PREVIEW_HOUR, tzinfo=report.tzinfo()),
+            name="data_preview",
+        )
         log.info(
-            "Đã lên lịch báo cáo ngày lúc %sh (%s) gửi tới chat %s",
+            "Đã lên lịch: báo cáo đầy đủ %sh + kiểm tra data %sh (%s) gửi tới chat %s",
             config.DAILY_REPORT_HOUR,
+            config.DATA_PREVIEW_HOUR,
             config.TIMEZONE,
             config.DAILY_REPORT_CHAT_ID,
         )

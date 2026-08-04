@@ -87,6 +87,9 @@ def crm_enabled() -> bool:
 # Báo cáo tự động hằng ngày
 TIMEZONE = _get("TIMEZONE", "Asia/Ho_Chi_Minh")
 DAILY_REPORT_HOUR = int(_get("DAILY_REPORT_HOUR", "8") or "8")
+# Báo cáo DATA sớm lúc 19h để sale rà trước (cửa sổ vừa chốt lúc 18h). Báo cáo
+# đầy đủ 8h sáng vẫn giữ nguyên.
+DATA_PREVIEW_HOUR = int(_get("DATA_PREVIEW_HOUR", "19") or "19")
 # Chat ID nơi gửi báo cáo tự động. Lấy bằng cách gõ /chatid trong nhóm.
 DAILY_REPORT_CHAT_ID = _get("DAILY_REPORT_CHAT_ID")
 

@@ -157,11 +157,19 @@ def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> li
     quan_tam = dedupe_quan_tam(quan_tam, leads)
     nl, nq, nr = len(leads), len(quan_tam), len(rac)
     tot = nl + nq + nr
+    # Rác mà sale đánh dấu "KHÁCH CŨ QUÉT OA" (khách cũ quét mã Zalo OA) — vẫn là
+    # rác nhưng đáng ghi chú riêng để sale biết đó không phải data mới.
+    rac_khachcu = sum(
+        1 for r in rac if "khách cũ quét" in (r.get("trang_thai") or "").lower()
+    )
     lines = [f"  - TỔNG DATA: {tot}"]
     if tot:
         lines.append(f"      • Lead (đã có SĐT): {nl} ({nl / tot * 100:.0f}%)")
         lines.append(f"      • Quan tâm (chưa SĐT): {nq} ({nq / tot * 100:.0f}%)")
-        lines.append(f"      • Rác: {nr} ({nr / tot * 100:.0f}%)")
+        rac_line = f"      • Rác: {nr} ({nr / tot * 100:.0f}%)"
+        if rac_khachcu:
+            rac_line += f" (trong đó {rac_khachcu} data khách cũ quét OA)"
+        lines.append(rac_line)
     if leads:
         st = _counter(leads, "trang_thai", "(chưa)")
         lines.append("  - Trạng thái LEAD: " + ", ".join(f"{k} {v}" for k, v in st.most_common()))
