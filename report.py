@@ -343,16 +343,43 @@ def _month_block(data: dict, today: dt.date) -> list[str]:
     import kiotviet
 
     lines = [f"📅 LŨY KẾ THÁNG {today.month}/{today.year} (đến {today:%d/%m}):"]
+    revenue = 0.0
     if config.kiotviet_enabled():
         try:
             inv = kiotviet.get_current_month_invoices()
-            total = kiotviet.total_revenue(inv)
-            lines.append(f"  - Doanh thu tổng: {_vnd(total)}")
+            revenue = kiotviet.total_revenue(inv)
+            lines.append(f"  - Doanh thu tổng: {_vnd(revenue)}")
             lines.append(f"  - Tổng khách chốt (hóa đơn): {len(inv)}")
         except Exception as e:  # noqa: BLE001
             lines.append(f"  - Doanh thu: lỗi KiotViet: {e}")
     else:
         lines.append("  - Doanh thu: (chưa kết nối KiotViet)")
+
+    # Tổng chi ads tháng (FB + TikTok), lũy kế từ đầu tháng đến ngày báo cáo.
+    first = today.replace(day=1)
+    ds, de = first.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
+    fb_spend = tt_spend = 0.0
+    parts_ad = []
+    if config.meta_enabled():
+        try:
+            import meta
+            fb_spend = meta.totals(meta.get_insights(ds, de))["spend"]
+            parts_ad.append(f"FB {_vnd(fb_spend)}")
+        except Exception:  # noqa: BLE001
+            pass
+    if config.tiktok_enabled():
+        try:
+            import tiktok
+            tt_spend = tiktok.totals(tiktok.get_campaign_report(ds, de))["spend"]
+            parts_ad.append(f"TikTok {_vnd(tt_spend)}")
+        except Exception:  # noqa: BLE001
+            pass
+    if parts_ad:
+        total_ad = fb_spend + tt_spend
+        line = f"  - Tổng chi ads: {_vnd(total_ad)} (" + " + ".join(parts_ad) + ")"
+        if revenue > 0:
+            line += f" — {total_ad / revenue * 100:.1f}% doanh thu"
+        lines.append(line)
     lines.append("")
     lines.append("DATA (CRM chatbot):")
     y, m = today.year, today.month
