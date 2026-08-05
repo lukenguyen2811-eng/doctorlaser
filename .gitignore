@@ -3,3 +3,5 @@
 service_account.json
 __pycache__/
 *.pyc
+.tiktok_refresh
+.token_synced
