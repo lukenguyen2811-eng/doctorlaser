@@ -35,6 +35,16 @@ _cache: dict = {}
 # Access token đang dùng (khởi tạo từ env, tự thay khi refresh).
 _access_token: str = config.TIKTOK_MCP_TOKEN
 _token_lock = threading.Lock()
+# Hạn của refresh token (epoch giây) — cập nhật từ refresh_token_expires_in
+# mỗi lần refresh, để báo cáo nhắc trước khi phải authorize lại (~30 ngày/lần).
+_rt_expires_at: float = 0.0
+
+
+def rt_days_left() -> float | None:
+    """Số ngày còn lại của refresh token (None nếu chưa refresh lần nào)."""
+    if not _rt_expires_at:
+        return None
+    return (_rt_expires_at - time.time()) / 86400
 
 
 def _headers() -> dict:
@@ -51,7 +61,7 @@ def _can_refresh() -> bool:
 
 def _refresh_access_token() -> bool:
     """Đổi refresh token lấy access token mới. Trả True nếu thành công."""
-    global _access_token
+    global _access_token, _rt_expires_at
     if not _can_refresh():
         return False
     with _token_lock:
@@ -63,7 +73,11 @@ def _refresh_access_token() -> bool:
             }, headers={"Accept": "application/json"})
             if resp.status_code != 200:
                 return False
-            _access_token = resp.json()["access_token"]
+            body = resp.json()
+            _access_token = body["access_token"]
+            rt_exp = body.get("refresh_token_expires_in")
+            if rt_exp:
+                _rt_expires_at = time.time() + float(rt_exp)
             return True
         except Exception:  # noqa: BLE001
             return False

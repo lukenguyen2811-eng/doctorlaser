@@ -213,6 +213,14 @@ def _tiktok_block(day: dt.date, month_ref: dt.date) -> list[str]:
             lines.append(line)
         except Exception:  # noqa: BLE001
             pass
+
+    # Nhắc TRƯỚC khi refresh token TikTok hết hạn (~30 ngày phải authorize lại).
+    days = tiktok.rt_days_left()
+    if days is not None and days <= 5:
+        lines.append(
+            f"  ⚠️ TikTok cần authorize lại trong {max(days, 0):.0f} ngày nữa: "
+            "chạy `claude mcp login tiktok-ads` trên Mac mini."
+        )
     return lines
 
 
