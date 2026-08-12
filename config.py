@@ -93,14 +93,17 @@ DATA_PREVIEW_HOUR = int(_get("DATA_PREVIEW_HOUR", "19") or "19")
 # Chat ID nơi gửi báo cáo tự động. Lấy bằng cách gõ /chatid trong nhóm.
 DAILY_REPORT_CHAT_ID = _get("DAILY_REPORT_CHAT_ID")
 
-# TikTok Ads — qua endpoint MCP chính thức của TikTok (token từ Agentic Hub,
-# hiệu lực ~30 ngày; hết hạn thì authorize lại và cập nhật biến này).
+# TikTok Ads — qua endpoint MCP chính thức của TikTok.
+# Access token sống ~24h VÀ bị thu hồi mỗi khi có bên khác refresh, nên bot
+# giữ REFRESH TOKEN (không xoay vòng, sống ~30 ngày) để tự refresh khi cần.
 TIKTOK_MCP_TOKEN = _get("TIKTOK_MCP_TOKEN")
+TIKTOK_REFRESH_TOKEN = _get("TIKTOK_REFRESH_TOKEN")
+TIKTOK_CLIENT_ID = _get("TIKTOK_CLIENT_ID")
 TIKTOK_ADVERTISER_ID = _get("TIKTOK_ADVERTISER_ID", "7139812447623446530")
 
 
 def tiktok_enabled() -> bool:
-    return bool(TIKTOK_MCP_TOKEN)
+    return bool(TIKTOK_MCP_TOKEN or (TIKTOK_REFRESH_TOKEN and TIKTOK_CLIENT_ID))
 
 
 # Meta (Facebook) Marketing API - chi phí & hiệu quả ads/campaign

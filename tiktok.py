@@ -8,11 +8,20 @@ QUAN TRỌNG: token bị RÀNG BUỘC theo endpoint (OAuth resource indicator).
 Token cấp cho tt-ads-mcp-flat gọi sang tt-ads-mcp-layer sẽ bị 401. Nếu đổi
 endpoint khi authorize thì phải đổi _URL bên dưới cho khớp.
 
-LƯU Ý: access token chỉ sống ~24 giờ (quyền uỷ quyền mới là 30 ngày). Khi hết
-hạn, bot báo rõ trong báo cáo — cần cập nhật lại TIKTOK_MCP_TOKEN trên Railway.
+CƠ CHẾ TOKEN (đã kiểm chứng 12/08/2026):
+- Access token sống ~24h, NHƯNG TikTok chỉ cho 1 access token sống/lượt cấp:
+  bất kỳ ai refresh (Claude Code CLI, script khác) là token đang dùng BỊ THU HỒI
+  ngay → không thể dựa vào access token tĩnh trong env.
+- Refresh token KHÔNG xoay vòng (dùng lại được tới khi authorize hết hạn ~30
+  ngày) → bot giữ TIKTOK_REFRESH_TOKEN + TIKTOK_CLIENT_ID và TỰ refresh khi
+  gặp 401/40105 rồi thử lại. Tự lành, không cần cập nhật token thủ công.
+- Khi refresh token hết hạn (~30 ngày): authorize lại
+  (claude mcp logout tiktok-ads && claude mcp login tiktok-ads) và cập nhật
+  TIKTOK_REFRESH_TOKEN trên Railway.
 """
 
 import json
+import threading
 import time
 
 import requests
@@ -20,16 +29,44 @@ import requests
 import config
 
 _URL = "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-flat"
+_TOKEN_EP = _URL + "/oauth/token"
 _initialized = False
 _cache: dict = {}
+# Access token đang dùng (khởi tạo từ env, tự thay khi refresh).
+_access_token: str = config.TIKTOK_MCP_TOKEN
+_token_lock = threading.Lock()
 
 
 def _headers() -> dict:
     return {
-        "Authorization": f"Bearer {config.TIKTOK_MCP_TOKEN}",
+        "Authorization": f"Bearer {_access_token}",
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
+
+
+def _can_refresh() -> bool:
+    return bool(config.TIKTOK_REFRESH_TOKEN and config.TIKTOK_CLIENT_ID)
+
+
+def _refresh_access_token() -> bool:
+    """Đổi refresh token lấy access token mới. Trả True nếu thành công."""
+    global _access_token
+    if not _can_refresh():
+        return False
+    with _token_lock:
+        try:
+            resp = requests.post(_TOKEN_EP, timeout=30, data={
+                "grant_type": "refresh_token",
+                "refresh_token": config.TIKTOK_REFRESH_TOKEN,
+                "client_id": config.TIKTOK_CLIENT_ID,
+            }, headers={"Accept": "application/json"})
+            if resp.status_code != 200:
+                return False
+            _access_token = resp.json()["access_token"]
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
 
 def _parse_body(text: str) -> dict:
@@ -47,10 +84,15 @@ def _parse_body(text: str) -> dict:
 
 def _rpc(payload: dict) -> dict:
     resp = requests.post(_URL, data=json.dumps(payload), headers=_headers(), timeout=60)
+    if resp.status_code == 401 and _refresh_access_token():
+        # Token bị thu hồi (bên khác vừa refresh) -> tự refresh và thử lại 1 lần.
+        resp = requests.post(
+            _URL, data=json.dumps(payload), headers=_headers(), timeout=60
+        )
     if resp.status_code == 401:
         raise RuntimeError(
-            "Token TikTok hết hạn/không hợp lệ — authorize lại Agentic Hub và "
-            "cập nhật TIKTOK_MCP_TOKEN trên Railway."
+            "Token TikTok hết hạn và không tự refresh được — authorize lại "
+            "Agentic Hub, cập nhật TIKTOK_REFRESH_TOKEN trên Railway."
         )
     if resp.status_code != 200:
         raise RuntimeError(f"TikTok MCP lỗi HTTP {resp.status_code}: {resp.text[:200]}")
@@ -72,25 +114,35 @@ def _ensure_init() -> None:
 
 
 def _call_tool(name: str, arguments: dict) -> dict:
-    """Gọi 1 tool MCP, trả về JSON đã parse từ TikTok API."""
+    """Gọi 1 tool MCP, trả về JSON đã parse từ TikTok API.
+
+    Tự refresh + thử lại khi token hết hạn (40105) hoặc TikTok cấp token thiếu
+    quyền advertiser (40001 — thi thoảng xảy ra, refresh lại là được).
+    """
     _ensure_init()
-    res = _rpc({
-        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-        "params": {"name": name, "arguments": arguments},
-    })
-    if "error" in res:
-        raise RuntimeError(f"TikTok MCP lỗi: {res['error']}")
-    content = (res.get("result") or {}).get("content") or []
-    body = json.loads(content[0]["text"]) if content else {}
+    body: dict = {}
+    for attempt in range(3):
+        res = _rpc({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        })
+        if "error" in res:
+            raise RuntimeError(f"TikTok MCP lỗi: {res['error']}")
+        content = (res.get("result") or {}).get("content") or []
+        body = json.loads(content[0]["text"]) if content else {}
+        code = body.get("code")
+        if code == 0:
+            return body.get("data") or {}
+        if code in (40105, 40001) and attempt < 2 and _refresh_access_token():
+            continue  # token mới -> thử lại
+        break
     code = body.get("code")
-    if code == 40105:
+    if code in (40105, 40001):
         raise RuntimeError(
-            "Token TikTok hết hạn — authorize lại Agentic Hub và cập nhật "
-            "TIKTOK_MCP_TOKEN trên Railway."
+            "Token TikTok hết hạn/thiếu quyền và không tự refresh được — "
+            "authorize lại Agentic Hub, cập nhật TIKTOK_REFRESH_TOKEN trên Railway."
         )
-    if code != 0:
-        raise RuntimeError(f"TikTok API lỗi ({code}): {body.get('message', '')[:200]}")
-    return body.get("data") or {}
+    raise RuntimeError(f"TikTok API lỗi ({code}): {body.get('message', '')[:200]}")
 
 
 def get_campaign_report(start_date: str, end_date: str, force: bool = False) -> list[dict]:
