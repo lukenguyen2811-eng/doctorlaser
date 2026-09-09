@@ -392,6 +392,16 @@ def _khachcu_warn_lines(leads: list[dict]) -> list[str]:
     ] + warns
 
 
+def _lichhen_block(day: dt.date, tieu_de: str) -> list[str]:
+    """Lịch hẹn đọc thẳng tab ĐẶT LỊCH (lỗi thì bỏ khối, không hỏng báo cáo)."""
+    try:
+        import datlich
+
+        return datlich.lich_hen_lines(day, tieu_de)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _month_block(data: dict, today: dt.date) -> list[str]:
     import crm
     import kiotviet
@@ -484,6 +494,10 @@ def build_daily(as_of: dt.date | None = None) -> str:
 
     parts += _lead_block(data, day)
     parts.append("")
+    hen = _lichhen_block(header_day, "🗓 LỊCH HẸN HÔM NAY")
+    if hen:
+        parts += hen
+        parts.append("")
     parts += _month_block(data, month_ref)
     return "\n".join(parts)
 
@@ -513,4 +527,8 @@ def build_data_preview(as_of: dt.date | None = None) -> str:
         "",
     ]
     parts += _lead_block(data, day)
+    hen = _lichhen_block(day + dt.timedelta(days=1), "🗓 LỊCH HẸN NGÀY MAI")
+    if hen:
+        parts.append("")
+        parts += hen
     return "\n".join(parts)

@@ -32,6 +32,63 @@ def tab_thang(day: dt.date) -> str:
     return f"ĐẶT LỊCH T{day.month:02d}"
 
 
+def _parse_ngay(s: str) -> dt.date | None:
+    m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", (s or "").strip())
+    if not m:
+        return None
+    try:
+        return dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
+def _parse_gio(s: str) -> int:
+    """'10h30' -> phút trong ngày để sắp xếp; không đọc được thì đẩy xuống cuối."""
+    m = re.match(r"(\d{1,2})\s*[hg:]\s*(\d{0,2})", (s or "").strip().lower())
+    if not m:
+        return 24 * 60
+    return int(m.group(1)) * 60 + int(m.group(2) or 0)
+
+
+def lich_hen_lines(day: dt.date, tieu_de: str) -> list[str]:
+    """Danh sách lịch hẹn của đúng 1 ngày, đọc thẳng tab ĐẶT LỊCH tháng đó.
+
+    Hiển thị đã khử trùng SĐT trong ngày (giữ dòng dưới cùng — bản mới nhất),
+    sắp theo giờ hẹn. Trả [] nếu không mở được tab (không làm hỏng báo cáo).
+    """
+    ss = sheets.open_spreadsheet(config.CRM_SHEET_ID)
+    try:
+        ws = ss.worksheet(tab_thang(day))
+    except Exception:  # noqa: BLE001
+        return []
+    rows = ws.get_all_values()[1:]
+    chon: dict = {}  # khoá SĐT (hoặc tên) -> dòng cuối cùng của ngày
+    for r in rows:
+        if _parse_ngay(r[0] if len(r) > 0 else "") != day:
+            continue
+        p = _phone(r[3] if len(r) > 3 else "")
+        ten = (r[2] if len(r) > 2 else "").strip()
+        if not p and not ten:
+            continue
+        chon[p or ten.lower()] = r
+    lines = [f"{tieu_de} ({day:%d/%m}): {len(chon)} khách"]
+    if not chon:
+        lines.append("  - (chưa có lịch hẹn)")
+        return lines
+    for r in sorted(chon.values(), key=lambda x: _parse_gio(x[4] if len(x) > 4 else "")):
+        gio = (r[4] if len(r) > 4 else "").strip() or "?"
+        ten = (r[2] if len(r) > 2 else "").strip() or "(chưa tên)"
+        noidung = (r[5] if len(r) > 5 else "").strip()
+        tvtt = (r[7] if len(r) > 7 else "").strip()
+        line = f"  • {gio:<6} {ten}"
+        if noidung:
+            line += f" — {noidung}"
+        if tvtt:
+            line += f" (TVTT: {tvtt})"
+        lines.append(line)
+    return lines
+
+
 def don_trung(day: dt.date | None = None) -> str:
     """Dọn lịch trùng trong tab tháng của `day` (mặc định: hôm nay).
 
