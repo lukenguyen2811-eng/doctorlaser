@@ -289,6 +289,52 @@ async def _send_data_preview(context: ContextTypes.DEFAULT_TYPE) -> None:
         log.exception("data preview job failed")
 
 
+async def _clean_datlich(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job 18h45: dọn lịch hẹn trùng trong tab ĐẶT LỊCH tháng hiện tại.
+
+    Chỉ nhắn vào nhóm khi CÓ dòng bị dọn (không spam khi sạch).
+    """
+    import datlich
+
+    try:
+        msg = await asyncio.to_thread(datlich.don_trung)
+    except Exception:  # noqa: BLE001
+        log.exception("clean datlich job failed")
+        return
+    log.info("don lich trung: %s", msg.splitlines()[0])
+    if config.DAILY_REPORT_CHAT_ID and msg.startswith("🧹"):
+        await context.bot.send_message(config.DAILY_REPORT_CHAT_ID, msg)
+
+
+async def cmd_donlich(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Dọn lịch hẹn trùng: /donlich (tháng này) hoặc /donlich 8 (tab T08)."""
+    if not _allowed(update):
+        return
+    import datetime as _dt
+
+    import datlich
+
+    day = _dt.date.today()
+    if context.args:
+        try:
+            thang = int(context.args[0])
+            if not 1 <= thang <= 12:
+                raise ValueError
+            day = day.replace(month=thang, day=1)
+        except ValueError:
+            await update.message.reply_text("Dùng: /donlich hoặc /donlich <tháng 1-12>")
+            return
+
+    status = await update.message.reply_text("⏳ Đang rà lịch hẹn trùng...")
+    try:
+        msg = await asyncio.to_thread(datlich.don_trung, day)
+        await status.delete()
+        await update.message.reply_text(msg)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi dọn lịch: {e}")
+
+
 async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Xem thử báo cáo DATA sớm (giống bản tự động 19h) cho ngày vừa chốt."""
     if not _allowed(update):
@@ -825,6 +871,7 @@ def main() -> None:
     app.add_handler(CommandHandler("chienluoc", cmd_chienluoc))
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
     app.add_handler(CommandHandler("kiemtradata", cmd_kiemtradata))
+    app.add_handler(CommandHandler("donlich", cmd_donlich))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
@@ -853,6 +900,12 @@ def main() -> None:
             _send_data_preview,
             time=_dt.time(hour=config.DATA_PREVIEW_HOUR, tzinfo=report.tzinfo()),
             name="data_preview",
+        )
+        # Dọn lịch hẹn trùng 18h45 — trước bản kiểm tra data 19h.
+        app.job_queue.run_daily(
+            _clean_datlich,
+            time=_dt.time(hour=18, minute=45, tzinfo=report.tzinfo()),
+            name="clean_datlich",
         )
         log.info(
             "Đã lên lịch: báo cáo đầy đủ %sh + kiểm tra data %sh (%s) gửi tới chat %s",

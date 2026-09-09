@@ -66,6 +66,25 @@ def open_spreadsheet(sheet_id: str):
     return client.open_by_key(sheet_id)
 
 
+_SCOPES_RW = ["https://www.googleapis.com/auth/spreadsheets"]
+
+
+def open_spreadsheet_rw(sheet_id: str):
+    """Mở spreadsheet với quyền GHI.
+
+    Mọi chỗ đọc dữ liệu vẫn dùng open_spreadsheet (readonly) — chỉ tính năng
+    dọn lịch hẹn trùng (datlich.py) được phép ghi.
+    """
+    if config.GOOGLE_SERVICE_ACCOUNT_JSON:
+        info = json.loads(config.GOOGLE_SERVICE_ACCOUNT_JSON)
+        creds = Credentials.from_service_account_info(info, scopes=_SCOPES_RW)
+    else:
+        creds = Credentials.from_service_account_file(
+            config.GOOGLE_SERVICE_ACCOUNT_FILE, scopes=_SCOPES_RW
+        )
+    return gspread.authorize(creds).open_by_key(sheet_id)
+
+
 def open_worksheet(sheet_id: str, gid: str | None = None):
     """Mở 1 worksheet bất kỳ theo sheet_id + gid (dùng chung cho các module khác)."""
     spreadsheet = open_spreadsheet(sheet_id)
