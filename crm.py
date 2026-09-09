@@ -70,6 +70,10 @@ def _fetch(tab: str, colmap: dict) -> list[dict]:
         if not any(rec.values()):
             continue
         if "nguon" in rec:
+            # Data cũ import hàng loạt (Nguồn "DATA CŨ - ...") không phải lead
+            # mới -> loại khỏi mọi báo cáo, khỏi làm phồng số liệu.
+            if rec["nguon"].upper().startswith("DATA CŨ"):
+                continue
             rec["nguon"] = _norm_nguon(rec["nguon"])
         out.append(rec)
     return out

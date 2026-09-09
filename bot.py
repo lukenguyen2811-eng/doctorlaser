@@ -294,15 +294,27 @@ async def _clean_datlich(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     Chỉ nhắn vào nhóm khi CÓ dòng bị dọn (không spam khi sạch).
     """
+    import capnhat
     import datlich
 
     try:
         msg = await asyncio.to_thread(datlich.don_trung)
     except Exception:  # noqa: BLE001
         log.exception("clean datlich job failed")
+        msg = ""
+    if msg:
+        log.info("don lich trung: %s", msg.splitlines()[0])
+        if config.DAILY_REPORT_CHAT_ID and msg.startswith("🧹"):
+            await context.bot.send_message(config.DAILY_REPORT_CHAT_ID, msg)
+
+    # Ghi "Chốt" cho lead đã ra doanh thu KiotViet (trước bản kiểm tra data 19h).
+    try:
+        msg = await asyncio.to_thread(capnhat.cap_nhat_chot)
+    except Exception:  # noqa: BLE001
+        log.exception("cap nhat chot job failed")
         return
-    log.info("don lich trung: %s", msg.splitlines()[0])
-    if config.DAILY_REPORT_CHAT_ID and msg.startswith("🧹"):
+    log.info("cap nhat chot: %s", msg.splitlines()[0])
+    if config.DAILY_REPORT_CHAT_ID and msg.startswith("💰"):
         await context.bot.send_message(config.DAILY_REPORT_CHAT_ID, msg)
 
 
@@ -349,6 +361,38 @@ async def cmd_xulytrung(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:  # noqa: BLE001
         await status.delete()
         await update.message.reply_text(f"Lỗi xử lý trùng: {e}")
+
+
+async def cmd_datacu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Đánh dấu Nguồn 'DATA CŨ' cho đợt import 30/08 (chạy 1 lần là đủ)."""
+    if not _allowed(update):
+        return
+    import capnhat
+
+    status = await update.message.reply_text("⏳ Đang đánh dấu data cũ import 30/08...")
+    try:
+        msg = await asyncio.to_thread(capnhat.danh_dau_data_cu)
+        await status.delete()
+        await update.message.reply_text(msg)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi đánh dấu data cũ: {e}")
+
+
+async def cmd_capnhatchot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ghi 'Chốt' cho lead đã phát sinh doanh thu KiotViet (60 ngày gần nhất)."""
+    if not _allowed(update):
+        return
+    import capnhat
+
+    status = await update.message.reply_text("⏳ Đang đối chiếu lead với doanh thu KiotViet...")
+    try:
+        msg = await asyncio.to_thread(capnhat.cap_nhat_chot)
+        await status.delete()
+        await _reply_mono(update, msg)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi cập nhật chốt: {e}")
 
 
 async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -889,6 +933,8 @@ def main() -> None:
     app.add_handler(CommandHandler("kiemtradata", cmd_kiemtradata))
     app.add_handler(CommandHandler("donlich", cmd_donlich))
     app.add_handler(CommandHandler("xulytrung", cmd_xulytrung))
+    app.add_handler(CommandHandler("datacu", cmd_datacu))
+    app.add_handler(CommandHandler("capnhatchot", cmd_capnhatchot))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))

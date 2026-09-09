@@ -184,6 +184,26 @@ def get_invoices(days: int | None = None, force: bool = False) -> list[dict]:
     )
 
 
+def get_customers(force: bool = False) -> list[dict]:
+    """Toàn bộ danh bạ khách hàng (id, tên, SĐT). Cache 6 giờ — ~85 trang API.
+
+    Dùng để nối hóa đơn (customerId) với SĐT lead. KHÔNG dùng tab KHACH_HANG
+    của sheet CRM vì tab đó phụ thuộc Apps Script đồng bộ (từng đứng im 1 tháng).
+    """
+    key = "customers:all"
+    if force:
+        _data_cache.pop(key, None)
+    return _cached(
+        key,
+        6 * 3600,
+        lambda: _get_all(
+            "/customers",
+            {"orderBy": "createdDate", "orderDirection": "Desc"},
+            max_items=20000,
+        ),
+    )
+
+
 def find_customer_by_phone(phone: str) -> dict | None:
     """Tìm khách hàng KiotViet theo SĐT (chuẩn hoá 84xx -> 0xx). None nếu không có.
 
