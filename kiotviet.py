@@ -5,6 +5,7 @@ header Retailer + Bearer. Tài liệu: KiotViet Public API v1.2.
 """
 
 import calendar
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -181,6 +182,26 @@ def get_invoices(days: int | None = None, force: bool = False) -> list[dict]:
     return _cached(
         key, config.KIOTVIET_CACHE_TTL, lambda: _fetch_invoices(from_date, to_date)
     )
+
+
+def find_customer_by_phone(phone: str) -> dict | None:
+    """Tìm khách hàng KiotViet theo SĐT (chuẩn hoá 84xx -> 0xx). None nếu không có.
+
+    Dùng cho cảnh báo "lead trùng khách cũ" trong báo cáo ngày. Cache 6 giờ/SĐT
+    để không gọi lặp khi báo cáo 19h và 8h cùng kiểm một cửa sổ.
+    """
+    digits = re.sub(r"\D", "", phone or "")
+    if digits.startswith("84") and len(digits) == 11:
+        digits = "0" + digits[2:]
+    if len(digits) < 9:
+        return None
+
+    def _load():
+        body = _api_get("/customers", {"contactNumber": digits, "pageSize": 5})
+        data = body.get("data") or []
+        return data[0] if data else None
+
+    return _cached(f"customer:{digits}", 6 * 3600, _load)
 
 
 def get_current_month_invoices(force: bool = False) -> list[dict]:

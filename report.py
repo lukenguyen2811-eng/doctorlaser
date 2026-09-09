@@ -343,7 +343,53 @@ def _lead_block(data: dict, day: dt.date) -> list[str]:
     lines += crm.funnel_lines(leads, quan_tam, rac)
     lines.append("  Chi tiết LEAD:")
     lines += crm.lead_lines(leads, quan_tam, rac)
+    lines += _khachcu_warn_lines(leads)
     return lines
+
+
+def _khachcu_warn_lines(leads: list[dict]) -> list[str]:
+    """Cảnh báo lead có SĐT trùng hồ sơ KiotViet tạo TRƯỚC ngày lead vào.
+
+    Hồ sơ tạo cùng/sau ngày lead là luồng bình thường (khách mới đến rồi được
+    lập hồ sơ) nên không cảnh báo. Lead sale đã đánh TRÙNG/rác cũng bỏ qua.
+    Chỉ chạy cho cửa sổ ngày (ít lead); lỗi KiotViet thì im lặng — cảnh báo là
+    phụ, không được làm hỏng báo cáo.
+    """
+    import crm
+
+    if not config.kiotviet_enabled():
+        return []
+    import kiotviet
+
+    warns: list[str] = []
+    for r in leads:
+        if crm.la_trung_rac(r):
+            continue
+        lead_d = crm.parse_date(r.get("ngay", ""))
+        if not lead_d:
+            continue
+        try:
+            c = kiotviet.find_customer_by_phone(r.get("sdt") or "")
+        except Exception:  # noqa: BLE001
+            return []  # KiotViet trục trặc -> bỏ cả khối, báo cáo sau thử lại
+        if not c:
+            continue
+        try:
+            created = dt.date.fromisoformat((c.get("createdDate") or "")[:10])
+        except ValueError:
+            continue
+        if created < lead_d:
+            ten = (r.get("ho_ten") or "").strip() or "(chưa tên)"
+            kv_ten = (c.get("name") or "?").strip()
+            warns.append(
+                f"      • {ten} · {r.get('sdt')} · {r.get('nguon') or '—'} — "
+                f"hồ sơ KiotViet \"{kv_ten}\" từ {created:%d/%m/%Y}"
+            )
+    if not warns:
+        return []
+    return [
+        "  ⚠️ Lead trùng hồ sơ KiotViet (khách cũ?) — sale kiểm tra, nếu đúng thì đánh TRÙNG:"
+    ] + warns
 
 
 def _month_block(data: dict, today: dt.date) -> list[str]:
