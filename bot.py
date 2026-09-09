@@ -335,6 +335,22 @@ async def cmd_donlich(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"Lỗi dọn lịch: {e}")
 
 
+async def cmd_xulytrung(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Đánh TRÙNG các lead lặp SĐT trong tab LEADS (giữ dòng trạng thái tốt nhất)."""
+    if not _allowed(update):
+        return
+    import leadtrung
+
+    status = await update.message.reply_text("⏳ Đang quét lead trùng SĐT...")
+    try:
+        msg = await asyncio.to_thread(leadtrung.xu_ly)
+        await status.delete()
+        await _reply_mono(update, msg)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi xử lý trùng: {e}")
+
+
 async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Xem thử báo cáo DATA sớm (giống bản tự động 19h) cho ngày vừa chốt."""
     if not _allowed(update):
@@ -872,6 +888,7 @@ def main() -> None:
     app.add_handler(CommandHandler("baocaongay", cmd_baocaongay))
     app.add_handler(CommandHandler("kiemtradata", cmd_kiemtradata))
     app.add_handler(CommandHandler("donlich", cmd_donlich))
+    app.add_handler(CommandHandler("xulytrung", cmd_xulytrung))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
