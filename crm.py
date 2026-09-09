@@ -19,6 +19,7 @@ import sheets
 
 # Vị trí cột (0-based) từng tab. "tg" = thời điểm nhận (ngày + giờ).
 _LEADS_COL = {
+    "lead_id": 0,
     "ngay": 1, "nguon": 2, "sdt": 3, "ho_ten": 4, "dich_vu": 5,
     "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13,
     "ma": 17, "tg": 19,
@@ -169,6 +170,42 @@ def _counter(rows: list[dict], field: str, empty: str = "(không rõ)") -> Count
     return Counter((r.get(field) or empty).strip() or empty for r in rows)
 
 
+# ---- Lead TRÙNG / rác: sale đánh dấu tay, KHÔNG phải lead thật ----------------
+# 09/09/2026 (BS): báo cáo trước đây đếm cả lead có trạng thái TRÙNG/SPAM-RÁC vào
+# tổng lead nên tỉ lệ "ra lead" và CPL đẹp hơn thực tế (08/2026: 29/1419 = 2%;
+# 09/2026: 5/91 = 5%). Nay TÁCH RIÊNG: tỉ lệ tính trên lead HỢP LỆ, còn lead trùng
+# được LIỆT KÊ ra để sale xử lý. Máy không tự gán TRÙNG — đây là phán đoán của sale.
+_TRUNG_RAC = {"TRÙNG", "SPAM/RÁC", "RÁC"}
+
+
+def la_trung_rac(r: dict) -> bool:
+    return (r.get("trang_thai") or "").strip().upper() in _TRUNG_RAC
+
+
+def tach_lead_trung(leads: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Trả (lead hợp lệ, lead trùng/rác)."""
+    hop_le = [r for r in leads if not la_trung_rac(r)]
+    trung = [r for r in leads if la_trung_rac(r)]
+    return hop_le, trung
+
+
+def lead_trung_lines(leads: list[dict], gioi_han: int = 15) -> list[str]:
+    """Liệt kê lead bị đánh dấu TRÙNG/rác để sale gộp hoặc dọn."""
+    _, trung = tach_lead_trung(leads)
+    if not trung:
+        return []
+    out = [f"  - LEAD TRÙNG/RÁC ({len(trung)}) — không tính vào tỉ lệ:"]
+    for r in trung[:gioi_han]:
+        ten = (r.get("ho_ten") or "").strip() or "(chưa tên)"
+        out.append(
+            f"      • {r.get('lead_id') or '?'} · {ten} · {r.get('sdt') or '—'}"
+            f" · {r.get('nguon') or '—'} · {r.get('trang_thai') or '—'}"
+        )
+    if len(trung) > gioi_han:
+        out.append(f"      • … và {len(trung) - gioi_han} lead nữa")
+    return out
+
+
 def dedupe_quan_tam(quan_tam: list[dict], leads: list[dict]) -> list[dict]:
     """Loại khỏi QUAN_TÂM những hội thoại ĐÃ lên LEADS (cùng mã hội thoại).
 
@@ -202,9 +239,13 @@ def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> li
     rac_khachcu = sum(
         1 for r in rac if "khách cũ quét" in (r.get("trang_thai") or "").lower()
     )
+    hop_le, trung = tach_lead_trung(leads)
     lines = [f"  - TỔNG DATA: {tot}"]
     if tot:
-        lines.append(f"      • Lead (đã có SĐT): {nl} ({nl / tot * 100:.0f}%)")
+        lead_line = f"      • Lead (đã có SĐT): {nl} ({nl / tot * 100:.0f}%)"
+        if trung:   # tách rõ để tỉ lệ ra lead / CPL không bị thổi lên
+            lead_line += f" — hợp lệ {len(hop_le)}, trùng/rác {len(trung)}"
+        lines.append(lead_line)
         lines.append(f"      • Quan tâm (chưa SĐT): {nq} ({nq / tot * 100:.0f}%)")
         rac_line = f"      • Rác: {nr} ({nr / tot * 100:.0f}%)"
         if rac_khachcu:
@@ -216,6 +257,7 @@ def funnel_lines(leads: list[dict], quan_tam: list[dict], rac: list[dict]) -> li
     if quan_tam:
         st = _counter(quan_tam, "trang_thai", "(chưa)")
         lines.append("  - Trạng thái QUAN_TÂM: " + ", ".join(f"{k} {v}" for k, v in st.most_common()))
+    lines += lead_trung_lines(leads)
     return lines
 
 
@@ -241,12 +283,16 @@ def lead_lines(
     Có quan_tam/rac -> mỗi nguồn hiện 'lead/tổng data' của nguồn đó
     (vd TikTok: 3/10 = 3 lead trên 10 data TikTok).
     """
+    # 09/09/2026: tỉ lệ ra lead / phân loại / kết quả tính trên LEAD HỢP LỆ
+    # (bỏ lead sale đánh dấu TRÙNG hoặc rác). Danh sách lead trùng in ở funnel_lines.
+    leads_all = leads                      # giữ để MẪU SỐ theo nguồn khớp TỔNG DATA
+    leads, _bo = tach_lead_trung(leads)
     n = len(leads)
     if not n:
-        return ["  - (Chưa có lead)"]
+        return ["  - (Chưa có lead hợp lệ)"]
     lead_src = _counter(leads, "nguon")
     if quan_tam is not None or rac is not None:
-        total_src = source_totals(leads, quan_tam or [], rac or [])
+        total_src = source_totals(leads_all, quan_tam or [], rac or [])
         lines = ["  - Theo nguồn (lead/tổng data nguồn):"]
         # Sắp theo tổng data giảm dần; gồm cả nguồn có data nhưng 0 lead.
         for name, tot in total_src.most_common():
