@@ -15,10 +15,35 @@
 """
 
 import datetime as dt
+import os
 import re
+
+import requests
 
 import config
 import sheets
+
+# 17/09: Sheet là bản GƯƠNG của app KIOT — mirror đè cột Trạng thái của dòng
+# đã có, nên mọi thay đổi trạng thái phải ghi VÀO KIOT (nguồn sự thật) qua
+# /api/ingest/lead-trang-thai, mirror sẽ tự gương xuống Sheet trong ~1 phút.
+_KIOT_URL = "https://kiot-production.up.railway.app"
+
+
+def _kiot_doi_trang_thai(items: list, nguon: str = "baocao") -> dict:
+    """Đổi trạng thái lead trong KIOT. items: [{leadId, status, note?}] (<=500)."""
+    tok = os.environ.get("KIOT_INGEST_TOKEN") or os.environ.get("INGEST_TOKEN") or ""
+    if not tok:
+        raise RuntimeError(
+            "Thiếu KIOT_INGEST_TOKEN trên Railway (copy INGEST_TOKEN từ service kiot)"
+        )
+    r = requests.post(
+        _KIOT_URL + "/api/ingest/lead-trang-thai",
+        headers={"x-ingest-token": tok, "Content-Type": "application/json"},
+        json={"nguon": nguon, "items": items}, timeout=60,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"KIOT ingest lỗi {r.status_code}: {r.text[:150]}")
+    return r.json()
 
 _COL_NGAY = 1
 _COL_NGUON = 2
@@ -130,10 +155,8 @@ def cap_nhat_chot(so_ngay: int = 60) -> str:
     Điều kiện: SĐT có hóa đơn KiotViet ngày >= ngày lead vào (tổng > 0đ).
     Bỏ qua dòng TRÙNG/rác, DATA CŨ, đã Chốt.
     """
-    import gspread
-
     paid = _kh_da_thanh_toan(so_ngay)
-    ss = sheets.open_spreadsheet_rw(config.CRM_SHEET_ID)
+    ss = sheets.open_spreadsheet(config.CRM_SHEET_ID)
     ws = ss.worksheet(config.CRM_LEADS_TAB)
     rows = ws.get_all_values()
     cutoff = dt.date.today() - dt.timedelta(days=so_ngay)
@@ -143,10 +166,8 @@ def cap_nhat_chot(so_ngay: int = 60) -> str:
         d = _parse_ngay(_c(r, _COL_NGAY))
         if not d or d < cutoff:
             continue
-        # 17/09: lọc theo cột "Gốc lead" (V) do KIOT gắn — chỉ auto-Chốt
-        # lead phễu thật (CHAT/MANUAL); kho CRM cũ IMPORT_* và TEST bỏ qua.
-        goc = _c(r, 21).upper()
-        if goc.startswith("IMPORT") or goc == "TEST":
+        # 17/09: chỉ auto-Chốt lead phễu thật theo cờ "Gốc lead" (cột V).
+        if _c(r, 21).upper() not in ("CHAT", "MANUAL"):
             continue
         st = _c(r, _COL_TRANGTHAI)
         if st.upper() in _BO_QUA or "chốt" in st.lower():
@@ -159,17 +180,29 @@ def cap_nhat_chot(so_ngay: int = 60) -> str:
         lan_toi, tong = paid[p]
         if lan_toi is None or lan_toi < d:
             continue  # thanh toán là của lần ghé TRƯỚC khi thành lead -> khách cũ
-        cells.append(gspread.Cell(idx, _COL_TRANGTHAI + 1, "Chốt"))
-        ten = _c(r, _COL_TEN) or "(chưa tên)"
+        lead_id = _c(r, 0)
+        if not lead_id:
+            continue
+        cells.append({
+            "leadId": lead_id, "status": "Chốt",
+            "note": "Chốt tự động (bot báo cáo): hóa đơn KiotViet "
+                    + "{:,.0f}đ, gần nhất {}".format(tong, lan_toi.strftime("%d/%m")).replace(",", "."),
+        })
         chi_tiet.append(
-            f"  • dòng {idx}: {_c(r, _COL_NGAY)} · {ten} · {p[:3]}***{p[-3:]}"
-            f" ({st or 'chưa có trạng thái'} → Chốt, đã chi {tong:,.0f}đ)".replace(",", ".")
+            f"  • {lead_id}: {_c(r, _COL_NGAY)} · {p[:3]}***{p[-3:]}"
+            f" ({st or 'chưa trạng thái'} → Chốt, đã chi {tong:,.0f}đ)".replace(",", ".")
         )
     if not cells:
         return "✅ Không có lead mới nào cần cập nhật Chốt."
-    ws.update_cells(cells)
-    return (
-        f"💰 Đã ghi 'Chốt' cho {len(cells)} lead phát sinh doanh thu KiotViet:\n"
-        + "\n".join(chi_tiet[:20])
+    kq = _kiot_doi_trang_thai(cells[:500])
+    ok = sum(1 for x in (kq.get("ketQua") or []) if x.get("ok"))
+    loi = [x for x in (kq.get("ketQua") or []) if not x.get("ok") and not x.get("khongDoi")]
+    out = (
+        f"💰 Đã ghi 'Chốt' vào KIOT cho {ok}/{len(cells)} lead có doanh thu "
+        "(Sheet sẽ gương xuống trong ~1 phút):\n" + "\n".join(chi_tiet[:20])
         + (f"\n  • … và {len(chi_tiet) - 20} lead nữa" if len(chi_tiet) > 20 else "")
     )
+    if loi:
+        out += "\n⚠️ Lỗi: " + "; ".join(
+            f"{x.get('leadId')}: {x.get('loi')}" for x in loi[:5])
+    return out

@@ -15,6 +15,7 @@ import re
 
 import config
 import sheets
+from capnhat import _kiot_doi_trang_thai
 
 _COL_SDT = 3        # cột D (0-based)
 _COL_NGAY = 1       # cột B
@@ -61,7 +62,8 @@ def xu_ly(tu_ngay: dt.date | None = None) -> str:
 
     Trả tóm tắt tiếng Việt. Chỉ ghi cột Trạng thái, không đụng gì khác.
     """
-    ss = sheets.open_spreadsheet_rw(config.CRM_SHEET_ID)
+    # Chỉ ĐỌC Sheet; trạng thái TRÙNG ghi vào KIOT (Sheet là bản gương).
+    ss = sheets.open_spreadsheet(config.CRM_SHEET_ID)
     ws = ss.worksheet(config.CRM_LEADS_TAB)
     rows = ws.get_all_values()
 
@@ -72,10 +74,9 @@ def xu_ly(tu_ngay: dt.date | None = None) -> str:
     for idx, r in enumerate(rows[1:], start=2):
         if not any(x.strip() for x in r):
             continue
-        # 17/09: lọc theo cột "Gốc lead" (V) — chỉ quét lead phễu thật
-        # (CHAT/MANUAL); kho CRM cũ IMPORT_* và TEST bỏ qua.
-        goc = _cell(r, 21).upper()
-        if goc.startswith("IMPORT") or goc == "TEST":
+        # 17/09: chỉ quét lead phễu thật (Gốc lead = CHAT/MANUAL). Kho cũ
+        # IMPORT_* để đội gộp bằng nút 🧲 trên KIOT, không đánh hàng loạt.
+        if _cell(r, 21).upper() not in ("CHAT", "MANUAL"):
             continue
         p = _phone(r[_COL_SDT] if len(r) > _COL_SDT else "")
         if len(p) < 9:
@@ -120,14 +121,18 @@ def xu_ly(tu_ngay: dt.date | None = None) -> str:
     if not danh_dau:
         return "✅ Không còn lead trùng SĐT nào cần xử lý."
 
-    import gspread
-
-    ws.update_cells(
-        [gspread.Cell(idx, _COL_TRANGTHAI + 1, "TRÙNG") for idx, *_ in danh_dau]
-    )
-    out = [f"🧹 Đã đánh TRÙNG {len(danh_dau)} dòng lead lặp SĐT (giữ dòng trạng thái tốt nhất):"]
+    items = []
     for idx, ten, ngay, p, giu_idx in danh_dau:
+        lead_id = _cell(rows[idx - 1], 0)
+        if lead_id:
+            items.append({"leadId": lead_id, "status": "TRÙNG",
+                          "note": "Trùng SĐT (bot báo cáo), giữ dòng %d" % giu_idx})
+    kq = _kiot_doi_trang_thai(items[:500], nguon="baocao-trung")
+    ok = sum(1 for x in (kq.get("ketQua") or []) if x.get("ok"))
+    out = [f"🧹 Đã ghi TRÙNG vào KIOT cho {ok}/{len(items)} lead lặp SĐT "
+           "(giữ dòng trạng thái tốt nhất; Sheet gương xuống ~1 phút):"]
+    for idx, ten, ngay, p, giu_idx in danh_dau[:15]:
         p_an = p[:3] + "***" + p[-3:]
-        out.append(f"  • dòng {idx}: {ngay} · {ten} · {p_an} (giữ dòng {giu_idx})")
-    out.append("Dòng TRÙNG không bị xoá — chỉ bị loại khỏi tỉ lệ trong báo cáo.")
+        out.append(f"  • {_cell(rows[idx - 1], 0) or ('dòng %d' % idx)}: {ngay} · {p_an} (giữ dòng {giu_idx})")
+    out.append("Không xoá dòng nào — lead TRÙNG chỉ bị loại khỏi tỉ lệ báo cáo.")
     return "\n".join(out)
