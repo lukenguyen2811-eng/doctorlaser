@@ -395,6 +395,35 @@ async def cmd_capnhatchot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(f"Lỗi cập nhật chốt: {e}")
 
 
+async def cmd_baocaomoi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Preview BÁO CÁO ĐIỀU HÀNH v2 (Đợt 1): /baocaomoi [d/m].
+
+    Bản thử nghiệm — báo cáo 8h sáng production vẫn dùng mẫu cũ tới khi duyệt.
+    """
+    if not _allowed(update):
+        return
+    import datetime as _dt
+
+    import report2
+
+    day = None
+    if context.args:
+        m = re.match(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?$", context.args[0])
+        if not m:
+            await update.message.reply_text("Dùng: /baocaomoi hoặc /baocaomoi 16/9")
+            return
+        day = _dt.date(int(m.group(3) or _dt.date.today().year),
+                       int(m.group(2)), int(m.group(1)))
+    status = await update.message.reply_text("⏳ Đang dựng báo cáo điều hành v2...")
+    try:
+        text = await asyncio.to_thread(report2.build, day)
+        await status.delete()
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi báo cáo v2: {e}")
+
+
 async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Xem thử báo cáo DATA sớm (giống bản tự động 19h) cho ngày vừa chốt."""
     if not _allowed(update):
@@ -935,6 +964,7 @@ def main() -> None:
     app.add_handler(CommandHandler("xulytrung", cmd_xulytrung))
     app.add_handler(CommandHandler("datacu", cmd_datacu))
     app.add_handler(CommandHandler("capnhatchot", cmd_capnhatchot))
+    app.add_handler(CommandHandler("baocaomoi", cmd_baocaomoi))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
