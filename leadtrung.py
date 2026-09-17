@@ -22,6 +22,8 @@ _COL_TEN = 4        # cột E
 _COL_TRANGTHAI = 9  # cột J
 
 _DA_TRUNG = {"TRÙNG", "SPAM/RÁC", "RÁC"}
+_COL_MA = 17
+_COL_TG = 19
 
 
 def _phone(s: str) -> str:
@@ -63,9 +65,18 @@ def xu_ly(tu_ngay: dt.date | None = None) -> str:
     ws = ss.worksheet(config.CRM_LEADS_TAB)
     rows = ws.get_all_values()
 
+    def _cell(r: list, i: int) -> str:
+        return r[i].strip() if len(r) > i else ""
+
     nhom: dict = {}
     for idx, r in enumerate(rows[1:], start=2):
         if not any(x.strip() for x in r):
+            continue
+        # 17/09: bỏ qua kho CRM cũ up 14/09 (không Mã hội thoại + không Thời
+        # gian nhận + ngày vào trước 07/09) — không phải lead phễu, quét vào
+        # sẽ đánh TRÙNG loạn với lead thật.
+        if (not _cell(r, _COL_MA) and not _cell(r, _COL_TG)
+                and _parse_ngay(_cell(r, _COL_NGAY)) < dt.date(2026, 9, 7)):
             continue
         p = _phone(r[_COL_SDT] if len(r) > _COL_SDT else "")
         if len(p) < 9:
