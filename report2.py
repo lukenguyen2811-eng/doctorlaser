@@ -286,8 +286,13 @@ def build(day=None):
     # Sự kiện CRM ngày D (ngày lịch), loại DATA CŨ import
     ev = None
     if L is not None:
-        Ld = [r for r in L if _in_day(r, 19, 1, D)
-              and not _c(r, 2).upper().startswith("DATA CŨ")]
+        def _phễu(r):
+            goc = _c(r, 21).upper()
+            if goc.startswith("IMPORT") or goc == "TEST":
+                return False
+            return not _c(r, 2).upper().startswith("DATA CŨ")
+
+        Ld = [r for r in L if _in_day(r, 19, 1, D) and _phễu(r)]
         tho = Ld
         trung = [r for r in Ld if _c(r, 9).upper() in _TRUNG]
         hople = [r for r in Ld if _c(r, 9).upper() not in _TRUNG]
@@ -315,8 +320,7 @@ def build(day=None):
     lk_crm = None
     if L is not None:
         Lm = [r for r in L if _pn(_c(r, 1)) and first <= _pn(_c(r, 1)) <= D
-              and not _c(r, 2).upper().startswith("DATA CŨ")
-              and not (_c(r, 1) in ("30/08/2026", "30/8/2026") and not _c(r, 17) and not _c(r, 19))]
+              and _phễu(r)]
         hopleM = [r for r in Lm if _c(r, 9).upper() not in _TRUNG]
         chotM = sum(1 for r in hopleM if "chốt" in _c(r, 9).lower())
         lk_crm = {"hople": len(hopleM), "chot": chotM}

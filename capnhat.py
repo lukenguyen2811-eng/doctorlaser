@@ -143,11 +143,10 @@ def cap_nhat_chot(so_ngay: int = 60) -> str:
         d = _parse_ngay(_c(r, _COL_NGAY))
         if not d or d < cutoff:
             continue
-        # 17/09: kho CRM cũ ~3.800 dòng (L2030+) được up vào LEADS ngày 14/09
-        # mang NGÀY VÀO lịch sử — không phải lead phễu. Chỉ auto-Chốt lead có
-        # dấu vết chat (Mã hội thoại hoặc Thời gian nhận); dòng thiếu cả hai
-        # (kho cũ / hotline nhập tay) bỏ qua cho tới khi có cờ phân biệt rõ.
-        if not _c(r, _COL_MA) and not _c(r, _COL_TG):
+        # 17/09: lọc theo cột "Gốc lead" (V) do KIOT gắn — chỉ auto-Chốt
+        # lead phễu thật (CHAT/MANUAL); kho CRM cũ IMPORT_* và TEST bỏ qua.
+        goc = _c(r, 21).upper()
+        if goc.startswith("IMPORT") or goc == "TEST":
             continue
         st = _c(r, _COL_TRANGTHAI)
         if st.upper() in _BO_QUA or "chốt" in st.lower():

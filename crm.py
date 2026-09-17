@@ -22,7 +22,7 @@ _LEADS_COL = {
     "lead_id": 0,
     "ngay": 1, "nguon": 2, "sdt": 3, "ho_ten": 4, "dich_vu": 5,
     "phan_loai": 6, "nhan_vien": 8, "trang_thai": 9, "khach_cu": 13,
-    "ma": 17, "tg": 19,
+    "ma": 17, "tg": 19, "goc": 21,
 }
 _QUANTAM_COL = {"ma": 0, "ngay": 1, "nguon": 3, "dich_vu": 5, "trang_thai": 8, "tg": 15}
 _RAC_COL = {"ma": 0, "ngay": 1, "nguon": 2, "trang_thai": 6, "tg": 7}
@@ -69,9 +69,14 @@ def _fetch(tab: str, colmap: dict) -> list[dict]:
         rec = {k: c[i] for k, i in colmap.items()}
         if not any(rec.values()):
             continue
+        # 17/09: cột "Gốc lead" (V) do KIOT gắn — IMPORT_1409/IMPORT_3008 là
+        # kho CRM cũ, TEST là dòng thử -> loại khỏi mọi báo cáo. Lead phễu
+        # thật = CHAT/MANUAL (dòng trống coi là thật cho an toàn).
+        goc = (rec.get("goc") or "").upper()
+        if goc.startswith("IMPORT") or goc == "TEST":
+            continue
         if "nguon" in rec:
-            # Data cũ import hàng loạt (Nguồn "DATA CŨ - ...") không phải lead
-            # mới -> loại khỏi mọi báo cáo, khỏi làm phồng số liệu.
+            # Giữ thêm lớp cũ: Nguồn "DATA CŨ - ..." (đánh dấu trước khi có cờ).
             if rec["nguon"].upper().startswith("DATA CŨ"):
                 continue
             rec["nguon"] = _norm_nguon(rec["nguon"])

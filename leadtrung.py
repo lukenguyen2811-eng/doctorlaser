@@ -72,11 +72,10 @@ def xu_ly(tu_ngay: dt.date | None = None) -> str:
     for idx, r in enumerate(rows[1:], start=2):
         if not any(x.strip() for x in r):
             continue
-        # 17/09: bỏ qua kho CRM cũ up 14/09 (không Mã hội thoại + không Thời
-        # gian nhận + ngày vào trước 07/09) — không phải lead phễu, quét vào
-        # sẽ đánh TRÙNG loạn với lead thật.
-        if (not _cell(r, _COL_MA) and not _cell(r, _COL_TG)
-                and _parse_ngay(_cell(r, _COL_NGAY)) < dt.date(2026, 9, 7)):
+        # 17/09: lọc theo cột "Gốc lead" (V) — chỉ quét lead phễu thật
+        # (CHAT/MANUAL); kho CRM cũ IMPORT_* và TEST bỏ qua.
+        goc = _cell(r, 21).upper()
+        if goc.startswith("IMPORT") or goc == "TEST":
             continue
         p = _phone(r[_COL_SDT] if len(r) > _COL_SDT else "")
         if len(p) < 9:
