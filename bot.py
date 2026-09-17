@@ -424,6 +424,41 @@ async def cmd_baocaomoi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"Lỗi báo cáo v2: {e}")
 
 
+async def cmd_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Phễu cohort theo tuần (tự động gửi sáng thứ 6, gọi tay bất kỳ lúc nào)."""
+    if not _allowed(update):
+        return
+    import cohort
+
+    status = await update.message.reply_text("⏳ Đang dựng phễu cohort (~1 phút)...")
+    try:
+        text = await asyncio.to_thread(cohort.build)
+        await status.delete()
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi cohort: {e}")
+
+
+async def _send_cohort_weekly(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job 8h05: chỉ gửi vào THỨ 6 (kiểm tra weekday để khỏi lệ thuộc days= của PTB)."""
+    import datetime as _dt
+
+    if _dt.datetime.now(report.tzinfo()).weekday() != 4:  # 4 = thứ 6
+        return
+    chat_id = config.DAILY_REPORT_CHAT_ID
+    if not chat_id:
+        return
+    import cohort
+
+    try:
+        text = await asyncio.to_thread(cohort.build)
+        for chunk in _mono_chunks(text):
+            await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+    except Exception:  # noqa: BLE001
+        log.exception("cohort weekly job failed")
+
+
 async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Xem thử báo cáo DATA sớm (giống bản tự động 19h) cho ngày vừa chốt."""
     if not _allowed(update):
@@ -965,6 +1000,7 @@ def main() -> None:
     app.add_handler(CommandHandler("datacu", cmd_datacu))
     app.add_handler(CommandHandler("capnhatchot", cmd_capnhatchot))
     app.add_handler(CommandHandler("baocaomoi", cmd_baocaomoi))
+    app.add_handler(CommandHandler("cohort", cmd_cohort))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
@@ -993,6 +1029,12 @@ def main() -> None:
             _send_data_preview,
             time=_dt.time(hour=config.DATA_PREVIEW_HOUR, tzinfo=report.tzinfo()),
             name="data_preview",
+        )
+        # Phễu cohort tuần — 8h05 sáng thứ 6 (job tự kiểm tra weekday).
+        app.job_queue.run_daily(
+            _send_cohort_weekly,
+            time=_dt.time(hour=8, minute=5, tzinfo=report.tzinfo()),
+            name="cohort_weekly",
         )
         # Dọn lịch hẹn trùng 18h45 — trước bản kiểm tra data 19h.
         app.job_queue.run_daily(
