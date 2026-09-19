@@ -424,6 +424,40 @@ async def cmd_baocaomoi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(f"Lỗi báo cáo v2: {e}")
 
 
+async def _push_adsfeed(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job 8h10: đẩy chi phí ads 7 ngày gần nhất sang KIOT (thay_ca_ngay)."""
+    import adsfeed
+
+    try:
+        msg = await asyncio.to_thread(adsfeed.push)
+        log.info("adsfeed: %s", msg)
+    except Exception:  # noqa: BLE001
+        log.exception("adsfeed job failed")
+        if config.DAILY_REPORT_CHAT_ID:
+            await context.bot.send_message(
+                config.DAILY_REPORT_CHAT_ID,
+                "⚠️ adsfeed: đẩy chi phí ads sang KIOT thất bại — xem log Railway.")
+
+
+async def cmd_adsfeed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Đẩy chi phí ads sang KIOT ngay: /adsfeed [số ngày, mặc định 7]."""
+    if not _allowed(update):
+        return
+    import adsfeed
+
+    n = 7
+    if context.args and context.args[0].isdigit():
+        n = max(1, min(60, int(context.args[0])))
+    status = await update.message.reply_text("⏳ Đang đẩy chi phí ads %d ngày sang KIOT..." % n)
+    try:
+        msg = await asyncio.to_thread(adsfeed.push, n)
+        await status.delete()
+        await update.message.reply_text(msg)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi adsfeed: {e}")
+
+
 async def cmd_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Phễu cohort theo tuần (tự động gửi sáng thứ 6, gọi tay bất kỳ lúc nào)."""
     if not _allowed(update):
@@ -1001,6 +1035,7 @@ def main() -> None:
     app.add_handler(CommandHandler("capnhatchot", cmd_capnhatchot))
     app.add_handler(CommandHandler("baocaomoi", cmd_baocaomoi))
     app.add_handler(CommandHandler("cohort", cmd_cohort))
+    app.add_handler(CommandHandler("adsfeed", cmd_adsfeed))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
@@ -1029,6 +1064,12 @@ def main() -> None:
             _send_data_preview,
             time=_dt.time(hour=config.DATA_PREVIEW_HOUR, tzinfo=report.tzinfo()),
             name="data_preview",
+        )
+        # Đẩy chi phí ads 7 ngày sang KIOT — 8h10 hằng ngày (BS duyệt 19/09).
+        app.job_queue.run_daily(
+            _push_adsfeed,
+            time=_dt.time(hour=8, minute=10, tzinfo=report.tzinfo()),
+            name="adsfeed_daily",
         )
         # Phễu cohort tuần — 8h05 sáng thứ 6 (job tự kiểm tra weekday).
         app.job_queue.run_daily(
