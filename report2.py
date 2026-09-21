@@ -392,6 +392,24 @@ def build(day=None):
     except Exception as e:  # noqa: BLE001
         tinh_trang.append("  - TikTok Ads API: ERROR ⚠️ (%s)" % str(e)[:80])
 
+    # ---------- Phút gọi của sale (từ KIOT, BS yêu cầu 21/09) ----------
+    goi = None
+    goi_err = "N/A — chờ KIOT mở endpoint calls-daily"
+    tok = os.environ.get("KIOT_INGEST_TOKEN") or os.environ.get("INGEST_TOKEN") or ""
+    if tok:
+        try:
+            r = requests.get(
+                "https://kiot-production.up.railway.app/api/ingest/calls-daily",
+                headers={"x-ingest-token": tok},
+                params={"tu": str(D), "den": str(D)}, timeout=30)
+            if r.status_code == 200 and (r.json() or {}).get("ok"):
+                goi = r.json().get("theo_nhan_vien") or []
+                goi_err = None
+            else:
+                goi_err = "N/A — KIOT calls-daily trả %s" % r.status_code
+        except Exception as e:  # noqa: BLE001
+            goi_err = "N/A — lỗi đọc KIOT (%s)" % str(e)[:60]
+
     # ---------- Lịch hẹn hôm nay (snapshot) ----------
     lich = None
     if tabs:
@@ -516,6 +534,27 @@ def build(day=None):
                  "không chia cho nhau để tính conversion.")
     else:
         p.append("  - N/A — CRM chưa đọc được (%s)" % (crm_err or "?"))
+    p.append("")
+
+    p.append("☎️ GỌI CỦA SALE NGÀY %s (Zalo + tổng đài)" % D.strftime("%d/%m"))
+    if goi is not None:
+        if not goi:
+            p.append("  - 0 cuộc gọi được ghi nhận")
+        else:
+            tong = {}
+            for x in goi:
+                nv = x.get("nhan_vien") or "?"
+                t = tong.setdefault(nv, [0, 0, 0.0])
+                t[0] += int(x.get("so_cuoc") or 0)
+                t[1] += int(x.get("so_bat_may") or 0)
+                t[2] += float(x.get("tong_giay") or 0)
+            tc = sum(v[0] for v in tong.values())
+            tp = sum(v[2] for v in tong.values()) / 60
+            p.append("  - Tổng: %d cuộc | %.0f phút" % (tc, tp))
+            for nv, (sc, bm, gy) in sorted(tong.items(), key=lambda x: -x[1][2]):
+                p.append("      • %s: %d cuộc (bắt máy %d) | %.0f phút" % (nv, sc, bm, gy / 60))
+    else:
+        p.append("  - %s" % goi_err)
     p.append("")
 
     if lich is not None:
