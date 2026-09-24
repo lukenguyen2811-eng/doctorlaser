@@ -93,7 +93,9 @@ WELCOME = (
     "• Sản phẩm/dịch vụ nào bán chạy nhất?\n"
     "• Top khách hàng chi tiêu nhiều nhất?\n\n"
     "Lệnh:\n"
-    "/baocaongay - báo cáo ngày (doanh thu + ads + lead hôm qua)\n"
+    "/baocaongay - BÁO CÁO ĐIỀU HÀNH ngày (mẫu v2; /baocaongay 16/9 xem ngày cũ)\n"
+    "/cohort - phễu cohort theo tuần (tự gửi sáng thứ 6)\n"
+    "/adsfeed - đẩy chi phí ads sang KIOT (tự chạy 8h10)\n"
     "/baocaoads - báo cáo ads hôm qua theo campaign + lũy kế tháng\n"
     "/adsnow - ads HÔM NAY realtime (đến thời điểm hiện tại)\n"
     "/phantichads - phân tích FB + TikTok 30 ngày & đề xuất tối ưu (vd /phantichads 60)\n"
@@ -255,7 +257,16 @@ async def cmd_baocaongay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     status = await update.message.reply_text("⏳ Đang lập báo cáo ngày...")
     try:
-        text = await asyncio.to_thread(report.build_daily, as_of)
+        # 24/09: BS duyệt — /baocaongay dùng mẫu ĐIỀU HÀNH v2; lỗi thì lùi mẫu cũ.
+        import report2
+
+        try:
+            text = await asyncio.to_thread(report2.build, as_of)
+        except Exception:  # noqa: BLE001
+            log.exception("baocaongay v2 failed — fallback mẫu cũ")
+            text = "⚠️ Báo cáo v2 lỗi, gửi tạm mẫu cũ:\n\n" + await asyncio.to_thread(
+                report.build_daily, as_of
+            )
         await status.delete()
         await _reply_mono(update, text)
     except Exception as e:  # noqa: BLE001
@@ -268,12 +279,26 @@ async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = config.DAILY_REPORT_CHAT_ID
     if not chat_id:
         return
+    # 24/09: BS duyệt — bản chính thức là BÁO CÁO ĐIỀU HÀNH v2 (report2).
+    # v2 lỗi thì lùi về mẫu cũ để sáng nào cũng có báo cáo.
     try:
-        text = await asyncio.to_thread(report.build_daily)
+        import report2
+
+        text = await asyncio.to_thread(report2.build)
+    except Exception:  # noqa: BLE001
+        log.exception("daily report v2 failed — fallback mẫu cũ")
+        try:
+            text = "⚠️ Báo cáo v2 lỗi, gửi tạm mẫu cũ:\n\n" + await asyncio.to_thread(
+                report.build_daily
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("daily report fallback failed")
+            return
+    try:
         for chunk in _mono_chunks(text):
             await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
-        log.exception("daily report job failed")
+        log.exception("daily report send failed")
 
 
 async def _send_data_preview(context: ContextTypes.DEFAULT_TYPE) -> None:
