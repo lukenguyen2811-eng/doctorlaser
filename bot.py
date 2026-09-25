@@ -483,6 +483,22 @@ async def cmd_adsfeed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"Lỗi adsfeed: {e}")
 
 
+async def cmd_saletuan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tổng hợp công việc sale 7 ngày (tự gửi sáng thứ 6 cùng cohort)."""
+    if not _allowed(update):
+        return
+    import saletuan
+
+    status = await update.message.reply_text("⏳ Đang tổng hợp công việc sale tuần...")
+    try:
+        text = await asyncio.to_thread(saletuan.build)
+        await status.delete()
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi sale tuần: {e}")
+
+
 async def cmd_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Phễu cohort theo tuần (tự động gửi sáng thứ 6, gọi tay bất kỳ lúc nào)."""
     if not _allowed(update):
@@ -509,6 +525,7 @@ async def _send_cohort_weekly(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not chat_id:
         return
     import cohort
+    import saletuan
 
     try:
         text = await asyncio.to_thread(cohort.build)
@@ -516,6 +533,13 @@ async def _send_cohort_weekly(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
         log.exception("cohort weekly job failed")
+    # Tổng hợp công việc sale theo tuần (BS duyệt 25/09) — gửi ngay sau cohort.
+    try:
+        text = await asyncio.to_thread(saletuan.build)
+        for chunk in _mono_chunks(text):
+            await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+    except Exception:  # noqa: BLE001
+        log.exception("sale weekly job failed")
 
 
 async def cmd_kiemtradata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1061,6 +1085,7 @@ def main() -> None:
     app.add_handler(CommandHandler("baocaomoi", cmd_baocaomoi))
     app.add_handler(CommandHandler("cohort", cmd_cohort))
     app.add_handler(CommandHandler("adsfeed", cmd_adsfeed))
+    app.add_handler(CommandHandler("saletuan", cmd_saletuan))
     app.add_handler(CommandHandler("testbaocao", cmd_testbaocao))
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
