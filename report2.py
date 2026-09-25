@@ -392,23 +392,37 @@ def build(day=None):
     except Exception as e:  # noqa: BLE001
         tinh_trang.append("  - TikTok Ads API: ERROR ⚠️ (%s)" % str(e)[:80])
 
-    # ---------- Phút gọi của sale (từ KIOT, BS yêu cầu 21/09) ----------
-    goi = None
-    goi_err = "N/A — chờ KIOT mở endpoint calls-daily"
+    # ---------- Công việc sale (KIOT sale-daily, BS yêu cầu 25/09) ----------
+    # Khách tương tác = SĐT duy nhất có cuộc bắt máy hoặc hành động CRM có bằng
+    # chứng; talktime chỉ tính đàm thoại với KHÁCH (đã loại gọi nội bộ).
+    sale = None
+    goi = None  # fallback calls-daily (schema cũ)
+    goi_err = "N/A — chờ nguồn KIOT"
     tok = os.environ.get("KIOT_INGEST_TOKEN") or os.environ.get("INGEST_TOKEN") or ""
     if tok:
         try:
             r = requests.get(
-                "https://kiot-production.up.railway.app/api/ingest/calls-daily",
+                "https://kiot-production.up.railway.app/api/ingest/sale-daily",
                 headers={"x-ingest-token": tok},
                 params={"tu": str(D), "den": str(D)}, timeout=30)
             if r.status_code == 200 and (r.json() or {}).get("ok"):
-                goi = r.json().get("theo_nhan_vien") or []
+                sale = r.json().get("rows") or []
                 goi_err = None
-            else:
-                goi_err = "N/A — KIOT calls-daily trả %s" % r.status_code
         except Exception as e:  # noqa: BLE001
             goi_err = "N/A — lỗi đọc KIOT (%s)" % str(e)[:60]
+        if sale is None:
+            try:
+                r = requests.get(
+                    "https://kiot-production.up.railway.app/api/ingest/calls-daily",
+                    headers={"x-ingest-token": tok},
+                    params={"tu": str(D), "den": str(D)}, timeout=30)
+                if r.status_code == 200 and (r.json() or {}).get("ok"):
+                    goi = r.json().get("theo_nhan_vien") or []
+                    goi_err = None
+                else:
+                    goi_err = "N/A — KIOT trả %s" % r.status_code
+            except Exception as e:  # noqa: BLE001
+                goi_err = "N/A — lỗi đọc KIOT (%s)" % str(e)[:60]
 
     # ---------- Lịch hẹn hôm nay (snapshot) ----------
     lich = None
@@ -536,23 +550,40 @@ def build(day=None):
         p.append("  - N/A — CRM chưa đọc được (%s)" % (crm_err or "?"))
     p.append("")
 
-    p.append("☎️ GỌI CỦA SALE NGÀY %s (Zalo + tổng đài)" % D.strftime("%d/%m"))
-    if goi is not None:
-        if not goi:
-            p.append("  - 0 cuộc gọi được ghi nhận")
+    p.append("👥 CÔNG VIỆC SALE NGÀY %s (talktime với KHÁCH, đã loại gọi nội bộ)"
+             % D.strftime("%d/%m"))
+    if sale is not None:
+        if not sale:
+            p.append("  - Không có hoạt động được ghi nhận")
         else:
-            tong = {}
-            for x in goi:
+            tkh = sum(int(x.get("so_khach_tuong_tac") or 0) for x in sale)
+            tph = sum(float(x.get("phut_talktime_khach") or 0) for x in sale)
+            tnb = sum(int(x.get("goi_noi_bo_da_loai") or 0) for x in sale)
+            p.append("  - Toàn đội: %d lượt khách tương tác | %.0f phút talktime"
+                     % (tkh, tph) + (" | đã loại %d cuộc nội bộ" % tnb if tnb else ""))
+            for x in sorted(sale, key=lambda v: -float(v.get("phut_talktime_khach") or 0)):
                 nv = x.get("nhan_vien") or "?"
-                t = tong.setdefault(nv, [0, 0, 0.0])
-                t[0] += int(x.get("so_cuoc") or 0)
-                t[1] += int(x.get("so_bat_may") or 0)
-                t[2] += float(x.get("tong_giay") or 0)
-            tc = sum(v[0] for v in tong.values())
-            tp = sum(v[2] for v in tong.values()) / 60
-            p.append("  - Tổng: %d cuộc | %.0f phút" % (tc, tp))
-            for nv, (sc, bm, gy) in sorted(tong.items(), key=lambda x: -x[1][2]):
-                p.append("      • %s: %d cuộc (bắt máy %d) | %.0f phút" % (nv, sc, bm, gy / 60))
+                dong = ("      • %s: %s khách | %.0f phút | %s cuộc/%s bắt máy"
+                        % (nv, x.get("so_khach_tuong_tac") or 0,
+                           float(x.get("phut_talktime_khach") or 0),
+                           x.get("so_cuoc_khach") or 0, x.get("so_bat_may") or 0))
+                if int(x.get("so_lead_cap_nhat") or 0) or int(x.get("so_lich_tao") or 0):
+                    dong += " | lead %s, lịch %s" % (
+                        x.get("so_lead_cap_nhat") or 0, x.get("so_lich_tao") or 0)
+                z = x.get("zalo_khong_ro_khach") or {}
+                if float(z.get("phut") or 0) > 0:
+                    dong += " | Zalo chưa rõ khách %.0f phút" % float(z.get("phut") or 0)
+                p.append(dong)
+    elif goi is not None:
+        tong = {}
+        for x in goi:
+            nv = x.get("nhan_vien") or "?"
+            t = tong.setdefault(nv, [0, 0, 0.0])
+            t[0] += int(x.get("so_cuoc") or 0)
+            t[1] += int(x.get("so_bat_may") or 0)
+            t[2] += float(x.get("tong_giay_khach") or x.get("tong_giay") or 0)
+        for nv, (sc, bm, gy) in sorted(tong.items(), key=lambda x: -x[1][2]):
+            p.append("      • %s: %d cuộc (bắt máy %d) | %.0f phút" % (nv, sc, bm, gy / 60))
     else:
         p.append("  - %s" % goi_err)
     p.append("")
