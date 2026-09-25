@@ -573,6 +573,10 @@ def build(day=None):
                 z = x.get("zalo_khong_ro_khach") or {}
                 if float(z.get("phut") or 0) > 0:
                     dong += " | Zalo chưa rõ khách %.0f phút" % float(z.get("phut") or 0)
+                bulk = int(x.get("so_thao_tac_hang_loat") or 0) + int(
+                    x.get("so_doi_trang_thai_don_le") or 0)
+                if bulk:
+                    dong += " | đã loại %d bulk" % bulk
                 p.append(dong)
     elif goi is not None:
         tong = {}

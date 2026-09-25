@@ -32,7 +32,7 @@ def _fetch(tu, den):
 
 def _gop(rows):
     """Gộp theo nhân viên: [khách, phút, cuộc, bắt máy, lead, lịch, zalo_phút]."""
-    out = defaultdict(lambda: [0, 0.0, 0, 0, 0, 0, 0.0])
+    out = defaultdict(lambda: [0, 0.0, 0, 0, 0, 0, 0.0, 0, 0])
     for x in rows:
         t = out[x.get("nhan_vien") or "?"]
         t[0] += int(x.get("so_khach_tuong_tac") or 0)
@@ -42,6 +42,9 @@ def _gop(rows):
         t[4] += int(x.get("so_lead_cap_nhat") or 0)
         t[5] += int(x.get("so_lich_tao") or 0)
         t[6] += float((x.get("zalo_khong_ro_khach") or {}).get("phut") or 0)
+        # 25/09: phần bị rào chống thao tác hàng loạt loại ra — hiện để BS thấy.
+        t[7] += int(x.get("so_thao_tac_hang_loat") or 0)
+        t[8] += int(x.get("so_doi_trang_thai_don_le") or 0)
     return out
 
 
@@ -81,10 +84,14 @@ def build() -> str:
             dong += " | lead %d, lịch %d" % (t[4], t[5])
         if t[6] > 0:
             dong += " | Zalo %.0f phút" % t[6]
+        if t[7] or t[8]:
+            dong += " | đã loại %d bulk" % (t[7] + t[8])
         lines.append(dong)
     lines.append("")
     lines.append("Ghi chú: phút talktime = đàm thoại với KHÁCH qua tổng đài (đã loại "
-                 "nội bộ). Phút Zalo ghi riêng — chưa phân loại được khách/nội bộ.")
+                 "nội bộ). Phút Zalo ghi riêng — chỉ cuộc bấm từ nút 💬Zalo trong KIOT "
+                 "mới ghép được khách. 'Đã loại bulk' = thao tác CRM hàng loạt/đổi "
+                 "trạng thái đơn lẻ không tính là tương tác khách.")
     return "\n".join(lines)
 
 
