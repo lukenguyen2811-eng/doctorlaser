@@ -38,6 +38,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
 )
 log = logging.getLogger("doctorlaser-bot")
+# httpx ở mức INFO in nguyên URL request — URL Telegram chứa token bot, nên
+# chỉ để WARNING trở lên để token không nằm trong log Railway.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Số cặp hỏi-đáp tối đa giữ lại cho mỗi cuộc trò chuyện.
 MAX_HISTORY_TURNS = 6
@@ -456,12 +459,14 @@ async def _push_adsfeed(context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         msg = await asyncio.to_thread(adsfeed.push)
         log.info("adsfeed: %s", msg)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         log.exception("adsfeed job failed")
         if config.DAILY_REPORT_CHAT_ID:
+            # Ghi rõ lý do để khỏi phải mở log (log cũ mất khi redeploy).
             await context.bot.send_message(
                 config.DAILY_REPORT_CHAT_ID,
-                "⚠️ adsfeed: đẩy chi phí ads sang KIOT thất bại — xem log Railway.")
+                "⚠️ adsfeed: đẩy chi phí ads sang KIOT chưa trọn — "
+                f"{str(e)[:600]}\nSửa xong gõ /adsfeed để đẩy bù (tự bù 7 ngày).")
 
 
 async def cmd_adsfeed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

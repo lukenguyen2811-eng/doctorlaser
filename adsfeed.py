@@ -86,12 +86,19 @@ def _meta_rows(d1, d2):
 
 def _tiktok_rows(d1, d2):
     """Mức NHÓM QC (adgroup), dimension stat_time_day để tách ngày."""
-    body = requests.post(TIKTOK_URL + "/oauth/token", data={
-        "grant_type": "refresh_token",
-        "refresh_token": os.environ["TIKTOK_REFRESH_TOKEN"],
-        "client_id": os.environ["TIKTOK_CLIENT_ID"]},
-        headers={"Accept": "application/json"}, timeout=30).json()
-    h = {"Authorization": "Bearer " + body["access_token"],
+    def _refresh():
+        r = requests.post(TIKTOK_URL + "/oauth/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": os.environ["TIKTOK_REFRESH_TOKEN"],
+            "client_id": os.environ["TIKTOK_CLIENT_ID"]},
+            headers={"Accept": "application/json"}, timeout=30)
+        if r.status_code != 200 or "access_token" not in (r.json() or {}):
+            raise RuntimeError(
+                "TikTok refresh token hết hạn/không hợp lệ (HTTP %s) — chạy "
+                "`claude mcp login tiktok-ads` trên Mac mini" % r.status_code)
+        return r.json()["access_token"]
+
+    h = {"Authorization": "Bearer " + _refresh(),
          "Content-Type": "application/json",
          "Accept": "application/json, text/event-stream"}
 
@@ -123,6 +130,9 @@ def _tiktok_rows(d1, d2):
             b = json.loads(res["result"]["content"][0]["text"])
             if b.get("code") == 0:
                 break
+            if b.get("code") in (40001, 40105):
+                # TikTok đôi khi cấp token thiếu quyền advertiser — lấy token mới.
+                h["Authorization"] = "Bearer " + _refresh()
             time.sleep(3)
         if b.get("code") != 0:
             raise RuntimeError("TikTok code %s" % b.get("code"))
@@ -166,18 +176,33 @@ def push(so_ngay=7, den=None):
     d2 = den or (today - dt.timedelta(days=1))
     d1 = max(d2 - dt.timedelta(days=so_ngay - 1), BACKFILL_TU)
 
-    dong = _meta_rows(d1, d2) + _tiktok_rows(d1, d2)
+    # Mỗi kênh độc lập: thay_ca_ngay chỉ thay (ngày, kênh) CÓ trong gói, nên
+    # kênh lỗi bị bỏ qua thì dữ liệu cũ của kênh đó trên KIOT vẫn nguyên.
+    dong, loi = [], []
+    for ten, fn in (("Meta", _meta_rows), ("TikTok", _tiktok_rows)):
+        try:
+            dong += fn(d1, d2)
+        except Exception as e:  # noqa: BLE001
+            loi.append("%s: %s" % (ten, str(e)[:160]))
     if not dong:
-        return "adsfeed: không có dòng chi tiêu %s → %s" % (d1, d2)
+        raise RuntimeError("không kênh nào đọc được — " + " | ".join(loi))
     r = requests.post(KIOT_URL, headers={
         "x-ingest-token": _token(), "Content-Type": "application/json"},
         json={"thay_ca_ngay": True, "dong": dong}, timeout=120)
     if r.status_code != 200:
         raise RuntimeError("KIOT ads-daily lỗi %s: %s" % (r.status_code, r.text[:200]))
     tong = sum(x["chi_tieu"] for x in dong)
-    return ("📤 adsfeed → KIOT: %d dòng (%s → %s), tổng chi %s | KIOT: %s"
-            % (len(dong), d1.strftime("%d/%m"), d2.strftime("%d/%m"),
-               "{:,.0f}đ".format(tong).replace(",", "."), r.text[:120]))
+    msg = ("📤 adsfeed → KIOT: %d dòng (%s → %s), tổng chi %s | KIOT: %s"
+           % (len(dong), d1.strftime("%d/%m"), d2.strftime("%d/%m"),
+              "{:,.0f}đ".format(tong).replace(",", "."), r.text[:120]))
+    if loi:
+        # Đẩy được 1 phần — báo lỗi kênh còn lại để job gửi cảnh báo cụ thể.
+        raise PartialFeed(msg + "\n⚠️ Kênh lỗi (chưa đẩy): " + " | ".join(loi))
+    return msg
+
+
+class PartialFeed(RuntimeError):
+    """Đã đẩy được một phần kênh; message ghi kênh nào lỗi và vì sao."""
 
 
 def kiem_tra(tu, den):
