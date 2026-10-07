@@ -366,10 +366,165 @@ def render(text: str) -> bytes:
     return buf.getvalue()
 
 
+# ================================================================ BẢN 19H
+def parse_kiemtra(text: str) -> dict:
+    """Đọc văn bản report.build_data_preview (bản kiểm data 19h cho sale)."""
+    d = {}
+    d["tieu_de"] = _m(r"KIỂM TRA DATA — (chốt 18h \S+)", text)
+    d["cua_so"] = _m(r"KIỂM TRA DATA — chốt 18h \S+ \((.+?)\)", text)
+    d["tong"] = int(_n(_m(r"TỔNG DATA: (\d+)", text)))
+    d["lead"] = int(_n(_m(r"Lead \(đã có SĐT\): (\d+)", text)))
+    d["hople"] = _m(r"hợp lệ (\d+), trùng", text) or str(d["lead"])
+    d["trungrac"] = int(_n(_m(r"trùng/rác (\d+)", text, default="0")))
+    d["qt"] = int(_n(_m(r"Quan tâm \(chưa SĐT\): (\d+)", text)))
+    d["rac"] = int(_n(_m(r"• Rác: (\d+)", text)))
+    d["khach_cu_oa"] = _m(r"\(trong đó (\d+) data khách cũ quét OA\)", text)
+    st = _m(r"Trạng thái LEAD: ([^\n]+)", text)
+    d["trang_thai"] = [(m.group(1).strip(), int(m.group(2)))
+                       for m in re.finditer(r"([^,]+?) (\d+)(?:,|$)", st)]
+    d["ma_trung"] = re.findall(r"• (L\d+) ·", text)
+    blk = _m(r"Theo nguồn \(lead/tổng data nguồn\):\n((?:\s+• .+\n)+)", text)
+    d["nguon"] = [(m.group(1).strip(), int(m.group(2)), int(m.group(3)))
+                  for m in re.finditer(r"• (.+?): (\d+)/(\d+)", blk)]
+    pl = _m(r"Phân loại: ([^\n]+)", text)
+    d["phan_loai"] = [(m.group(1).strip(), int(m.group(2)))
+                      for m in re.finditer(r"([^,]+?) (\d+)(?:,|$)", pl)]
+    d["chot"] = _m(r"Kết quả: Chốt (\d+ \(\d+%\))", text)
+    d["datlich"] = _m(r"Đặt lịch (\d+ \(\d+%\))", text)
+    d["lich_ngay"] = _m(r"LỊCH HẸN NGÀY MAI \((\S+)\)", text)
+    d["lich_tong"] = int(_n(_m(r"LỊCH HẸN NGÀY MAI \(\S+\): (\d+)", text, default="0")))
+    gio, tvtt = {}, {}
+    for m in re.finditer(r"^\s+• (\d{1,2})h\S*\s+.*?(?:\(TVTT: ([^)]+)\))?$", text, re.M):
+        h = int(m.group(1))
+        gio[h] = gio.get(h, 0) + 1
+        if m.group(2):
+            tvtt[m.group(2).strip()] = tvtt.get(m.group(2).strip(), 0) + 1
+    d["lich_gio"], d["lich_tvtt"] = gio, tvtt
+    return d
+
+
+def render_kiemtra(text: str) -> bytes:
+    d = parse_kiemtra(text)
+    c = _Canvas(2400)
+    X0, WC = 40, 1000
+
+    c.ax.add_patch(FancyBboxPatch((0, 0), 1080, 150, boxstyle="square,pad=0", fc=TEAL, ec="none"))
+    c.text(48, 32, "DOCTOR LASER · KIỂM TRA DATA CHO SALE", 22, True, "#CDEFE8")
+    c.text(48, 70, d["tieu_de"].capitalize(), 40, True, "white")
+    c.text(1032, 44, d["cua_so"].replace("→", "–"), 17, False, "#D9F2EC", ha="right")
+    y = 176
+    c.text(48, y, "Sale rà và sửa phân loại tối nay — báo cáo chính thức gửi 8h sáng mai.",
+           16, False, MUTED)
+    y += 40
+
+    tiles = [("TỔNG DATA", str(d["tong"]), "cửa sổ 18h – 18h", NAVY),
+             ("LEAD CÓ SỐ", str(d["lead"]), "hợp lệ %s · trùng/rác %d" % (d["hople"], d["trungrac"]), TEAL),
+             ("QUAN TÂM", str(d["qt"]), "chưa có số — cần nuôi", AMBER),
+             ("RÁC", str(d["rac"]),
+              ("%s khách cũ quét OA" % d["khach_cu_oa"]) if d["khach_cu_oa"] else "đã loại", MUTED)]
+    tw = (WC - 60) / 4
+    for i, (lab, val, sub, col) in enumerate(tiles):
+        x = X0 + i * (tw + 20)
+        c.card(x, y, tw, 170)
+        c.rect(x, y, tw, 8, col)
+        c.text(x + 22, y + 28, lab, 16, True, MUTED)
+        c.text(x + 22, y + 60, val, 44, True, INK)
+        c.text(x + 22, y + 128, sub, 14, False, MUTED)
+    y += 200
+
+    # Kết quả + phân loại
+    y = c.section(y, "Kết quả & mức độ nóng")
+    c.card(X0, y, WC, 150)
+    c.text(68, y + 24, "Chốt", 16, True, MUTED)
+    c.text(68, y + 50, d["chot"] or "0", 30, True, GREEN)
+    c.text(330, y + 24, "Đặt lịch", 16, True, MUTED)
+    c.text(330, y + 50, d["datlich"] or "0", 30, True, TEAL)
+    pcol = {"Nóng": RED, "Ấm": AMBER, "Lạnh": FB}
+    tot = sum(v for _, v in d["phan_loai"]) or 1
+    xx = 600
+    c.text(600, y + 24, "Phân loại lead", 16, True, MUTED)
+    for ten, v in d["phan_loai"]:
+        w = 400 * v / tot
+        c.rect(xx, y + 58, max(w - 4, 4), 34, pcol.get(ten, MUTED))
+        if w > 60:
+            c.text(xx + 10, y + 63, "%s %d" % (ten, v), 16, True, "white")
+        xx += w
+    c.text(600, y + 104, " · ".join("%s %d" % kv for kv in d["phan_loai"]), 15, False, MUTED)
+    y += 180
+
+    # Trạng thái lead
+    y = c.section(y, "Trạng thái lead")
+    hh = 40 + 46 * len(d["trang_thai"])
+    c.card(X0, y, WC, hh)
+    mx = max([v for _, v in d["trang_thai"]] or [1])
+    for i, (ten, v) in enumerate(d["trang_thai"]):
+        yy = y + 24 + 46 * i
+        col = GREEN if "chốt" in ten.lower() else TEAL if "lịch" in ten.lower() else \
+            RED if ten.upper() in ("TRÙNG", "SPAM/RÁC") else NAVY
+        c.text(68, yy + 4, ten.capitalize(), 18, False, INK)
+        c.rect(360, yy + 4, 560 * v / mx, 28, col)
+        c.text(1012, yy + 4, str(v), 18, True, INK, ha="right")
+    y += hh + 30
+
+    # Theo nguồn
+    y = c.section(y, "Theo nguồn — lead / tổng data")
+    hh = 40 + 50 * len(d["nguon"])
+    c.card(X0, y, WC, hh)
+    mx = max([t for _, _, t in d["nguon"]] or [1])
+    for i, (ten, l, t) in enumerate(d["nguon"]):
+        yy = y + 24 + 50 * i
+        c.text(68, yy + 4, ten, 18, False, INK)
+        c.rect(300, yy + 4, 520 * t / mx, 28, "#D7E2F0")
+        c.rect(300, yy + 4, max(520 * l / mx, 4), 28, TEAL)
+        c.text(1012, yy + 4, "%d / %d · %d%%" % (l, t, round(l * 100 / t) if t else 0),
+               18, True, INK, ha="right")
+    y += hh + 30
+
+    # Lịch ngày mai
+    y = c.section(y, "Lịch hẹn ngày mai %s" % d["lich_ngay"])
+    c.card(X0, y, WC, 300)
+    c.text(68, y + 24, str(d["lich_tong"]), 52, True, TEAL)
+    c.text(150, y + 44, "khách", 20, False, MUTED)
+    sang = sum(v for h, v in d["lich_gio"].items() if h < 13)
+    c.text(68, y + 104, "Sáng %d · Chiều %d" % (sang, d["lich_tong"] - sang), 18, False, INK)
+    if d["lich_tvtt"]:
+        c.text(68, y + 140, "TVTT: " + ", ".join("%s %d" % kv for kv in
+               sorted(d["lich_tvtt"].items(), key=lambda x: -x[1])), 17, False, INK)
+    # biểu đồ theo giờ 8h→19h
+    gx, gy, gh = 380, y + 40, 180
+    mx = max(d["lich_gio"].values() or [1])
+    for i, h in enumerate(range(8, 20)):
+        v = d["lich_gio"].get(h, 0)
+        bh = gh * v / mx if mx else 0
+        col = AMBER if v >= 3 else TEAL
+        c.rect(gx + i * 52, gy + gh - bh, 38, max(bh, 2), col if v else LINE)
+        if v:
+            c.text(gx + i * 52 + 19, gy + gh - bh - 26, str(v), 15, True, INK, ha="center")
+        c.text(gx + i * 52 + 19, gy + gh + 10, "%dh" % h, 13, False, MUTED, ha="center")
+    c.text(68, y + 250, "Cam = khung giờ có từ 3 lịch trở lên", 14, False, MUTED)
+    y += 330
+
+    if d["ma_trung"]:
+        c.card(X0, y, WC, 70, fc="#FDF3E3", ec="#F1D9A8")
+        c.text(68, y + 22, "Lead trùng cần gộp trong KIOT: " + ", ".join(d["ma_trung"][:8]),
+               17, True, AMBER)
+        y += 90
+    c.text(48, y + 4, "Chi tiết từng khách xem ở tin chữ bên dưới / trong KIOT.", 15, False, MUTED)
+    y += 50
+
+    c.ax.set_ylim(y, 0)
+    c.fig.set_size_inches(W_IN, y / DPI)
+    buf = io.BytesIO()
+    c.fig.savefig(buf, format="png", dpi=DPI, facecolor=BG)
+    plt.close(c.fig)
+    return buf.getvalue()
+
+
 if __name__ == "__main__":
     src, out = sys.argv[1], sys.argv[2]
     with open(src, encoding="utf-8") as f:
-        png = render(f.read())
+        t = f.read()
+        png = render_kiemtra(t) if "KIỂM TRA DATA" in t else render(t)
     with open(out, "wb") as f:
         f.write(png)
     print("OK", out, len(png), "bytes")

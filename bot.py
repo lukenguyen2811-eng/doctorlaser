@@ -328,10 +328,25 @@ async def _send_data_preview(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     try:
         text = await asyncio.to_thread(report.build_data_preview)
+    except Exception:  # noqa: BLE001
+        log.exception("data preview job failed")
+        return
+    # 07/10: BS duyệt — ảnh tổng hợp (không tên/SĐT) trước, tin chữ chi tiết sau.
+    try:
+        import io as _io
+
+        import report_image
+
+        png = await asyncio.to_thread(report_image.render_kiemtra, text)
+        await context.bot.send_photo(chat_id, photo=_io.BytesIO(png),
+                                     caption="🔎 Kiểm tra data 19h — chi tiết từng khách ở tin chữ bên dưới")
+    except Exception:  # noqa: BLE001
+        log.exception("data preview image failed — chỉ gửi tin chữ")
+    try:
         for chunk in _mono_chunks(text):
             await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
-        log.exception("data preview job failed")
+        log.exception("data preview send failed")
 
 
 async def _clean_datlich(context: ContextTypes.DEFAULT_TYPE) -> None:
