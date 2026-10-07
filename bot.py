@@ -297,11 +297,28 @@ async def _send_daily_report(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:  # noqa: BLE001
             log.exception("daily report fallback failed")
             return
+    # 07/10: BS duyệt — gửi ẢNH (vẽ từ chính văn bản v2) trước, tin chữ ngay sau.
+    # Ảnh lỗi thì bỏ qua, tin chữ vẫn đi.
+    if text.startswith("📊 BÁO CÁO ĐIỀU HÀNH"):
+        await _send_report_photo(context.bot, chat_id, text)
     try:
         for chunk in _mono_chunks(text):
             await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
     except Exception:  # noqa: BLE001
         log.exception("daily report send failed")
+
+
+async def _send_report_photo(bot, chat_id, text: str) -> None:
+    try:
+        import io as _io
+
+        import report_image
+
+        png = await asyncio.to_thread(report_image.render, text)
+        await bot.send_photo(chat_id, photo=_io.BytesIO(png),
+                             caption="📊 Báo cáo điều hành — chi tiết tra cứu ở tin chữ bên dưới")
+    except Exception:  # noqa: BLE001
+        log.exception("report image failed — chỉ gửi tin chữ")
 
 
 async def _send_data_preview(context: ContextTypes.DEFAULT_TYPE) -> None:
