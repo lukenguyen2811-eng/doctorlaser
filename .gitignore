@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 .tiktok_refresh
 .token_synced
+# Dữ liệu ảnh khách (nhạy cảm) — KHÔNG đưa lên git
+anhkhach.db
+KhachHang/
+doctorlaser.db
+export/

@@ -1,0 +1,5 @@
+# Thư viện riêng cho anhkhach.py (chạy trên máy Mac, KHÔNG cần cho bot Railway)
+-r requirements.txt
+osxphotos>=0.68
+Pillow>=10.0
+pillow-heif>=0.16
