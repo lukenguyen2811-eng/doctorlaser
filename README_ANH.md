@@ -42,6 +42,10 @@ Nếu ảnh đã được xuất sẵn ra một thư mục: `python3 anhkhach.py
 - Mỗi ngày 1 trang, ảnh chia theo **đợt chụp**. Chọn khách cho cả đợt → **Áp dụng cho cả đợt**.
 - Từng ảnh: chọn khách, **trước/trong/sau**, **vùng**, ghi chú tình trạng → **Lưu**.
 - **Không phải ảnh khách** để loại ảnh không liên quan.
+- **Diễn tiến điều trị của 1 khách:** ô **Tìm khách** ở trang chủ (mã KH, SĐT, tên) → bấm khách,
+  hoặc bấm tên khách ở trang ngày. Mỗi lần điều trị (ngày HĐ + dịch vụ) 1 hàng **Trước | Trong | Sau**
+  (+ cột *Chưa phân loại*), dưới ảnh là vùng + ghi chú; bấm ảnh để phóng to. Lọc 1 dịch vụ bằng link dịch vụ
+  ở đầu trang. Ảnh máy mới gợi ý (chưa ai duyệt) có nhãn **chưa duyệt**; ảnh *Chưa rõ* không hiện.
 
 ## Kết quả
 ```

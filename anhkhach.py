@@ -33,7 +33,7 @@ import subprocess
 import sys
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 DB_FILE = os.environ.get("ANH_DB", "anhkhach.db")
 PORT = int(os.environ.get("ANH_PORT", "8765"))
@@ -902,6 +902,8 @@ a{color:#0b57d0;text-decoration:none}main{padding:16px;max-width:1400px;margin:a
 .tag{font-size:11px;padding:1px 6px;border-radius:9px;color:#fff}.chac{background:var(--ok)}.goi_y{background:var(--warn)}.chua_ro,.khong_hd{background:var(--bad)}
 .small{font-size:12px;color:var(--muted)}button{cursor:pointer;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:#fff}
 button.p{background:#0b57d0;color:#fff;border-color:#0b57d0}
+.cot{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.cot h4{margin:0 0 6px;font-size:13px}
+.cot .ph{margin-bottom:8px}.tim input{padding:4px 8px;width:240px}.tag.cd{background:var(--warn)}
 #zoom{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9;align-items:center;justify-content:center}#zoom img{max-width:96vw;max-height:96vh}
 """
 
@@ -935,7 +937,7 @@ def _trang_chu(conn) -> bytes:
         "SELECT ngay, COUNT(*) n, SUM(xn_hd IS NOT NULL OR bo_qua=1) d, "
         "SUM(do_tin='chac') c FROM photos GROUP BY ngay ORDER BY ngay").fetchall()
     o = ["<header><b>Duyệt ảnh khách hàng</b><span class=small>Bấm vào một ngày để duyệt."
-         " Xanh = đã duyệt hết.</span></header><main><div class=days>"]
+         f" Xanh = đã duyệt hết.</span>{_o_tim()}</header><main><div class=days>"]
     for r in rows:
         pct = (r["d"] or 0) * 100 // r["n"]
         o.append(f"<a class=day href='/ngay?d={r['ngay']}'><b>{r['ngay'][8:]}/{r['ngay'][5:7]}</b>"
@@ -967,6 +969,17 @@ def _trang_ngay(conn, ngay: str) -> bytes:
         ngay_hd = "" if v["ngay"] == ngay else f"{v['ngay'][8:10]}/{v['ngay'][5:7]} "
         return html.escape(f"{ngay_hd}{v['gio']} · {v['ten_kh']} ({v['ma_kh']}) · {v['dich_vu'][:50]}")
 
+    def dong(v):  # 1 dòng hóa đơn; tên khách là link sang trang diễn tiến
+        ngay_hd = "" if v["ngay"] == ngay else f"{v['ngay'][8:10]}/{v['ngay'][5:7]} "
+        ten = html.escape(v["ten_kh"] or "")
+        if v["ma_kh"]:
+            ten = f"<a href='{_link_khach(v['ma_kh'])}'>{ten}</a>"
+        return (f"<span class=small>{html.escape(ngay_hd + (v['gio'] or ''))} · {ten} "
+                f"({html.escape(v['ma_kh'] or '')}) · {html.escape((v['dich_vu'] or '')[:50])}"
+                f" · HĐ {html.escape(v['code'])}</span>")
+
+    theo_ma = {v["code"]: v for v in visits + visits_khac}
+
     def chon_hd(gia_tri, cls, extra=""):
         s = [f"<select class={cls} {extra}><option value=''>— chọn khách —</option>"]
         for v in visits + visits_khac:
@@ -982,10 +995,9 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     o = [f"<header><b>Ngày {ngay}</b> {nav}<span class=small>{len(photos)} ảnh · "
          f"{len(visits)} hóa đơn</span></header><main>"]
     o.append("<div class=visits><b>Hóa đơn trong ngày:</b><br>" + (
-        "<br>".join(f"<span class=small>{nhan(v)} · HĐ {html.escape(v['code'])}</span>" for v in visits)
+        "<br>".join(dong(v) for v in visits)
         or "<span class=small>Không có hóa đơn ngày này.</span>") + (
-        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh):</b><br>" + "<br>".join(
-            f"<span class=small>{nhan(v)} · HĐ {html.escape(v['code'])}</span>" for v in visits_khac)
+        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh):</b><br>" + "<br>".join(dong(v) for v in visits_khac)
         if visits_khac else "") + "</div>")
     dots: dict[int, list] = {}
     for p in photos:
@@ -998,7 +1010,10 @@ def _trang_ngay(conn, ngay: str) -> bytes:
         for p in ps:
             st = "skip" if p["bo_qua"] else ("ok" if p["xn_hd"] else "")
             hd = p["xn_hd"] or p["goi_y_hd"] or ""
-            chu = html.escape((p["chu_thich"] + " " + (p["ocr"] or "")).strip()[:120])
+            chu = html.escape(((p["chu_thich"] or "") + " " + (p["ocr"] or "")).strip()[:120])
+            v_hd = theo_ma.get(hd)
+            den_kh = (f"<div class=small><a href='{_link_khach(v_hd['ma_kh'])}'>→ diễn tiến "
+                      f"{html.escape(v_hd['ma_kh'])}</a></div>" if v_hd and v_hd["ma_kh"] else "")
             o.append(
                 f"<div class='ph {st}' id='p{p['id']}' data-id='{p['id']}' data-dot='{so}'>"
                 + (f"<img loading=lazy src='/anh/{p['id']}' onclick=\"zoom(this.src)\">"
@@ -1007,7 +1022,7 @@ def _trang_ngay(conn, ngay: str) -> bytes:
                    "background:#eee;text-align:center'>Ảnh còn trên iCloud,<br>chưa tải về máy</div>") +
                 f"<div class=small>{p['thoi_gian'][11:16]} · {html.escape(p['ten_file'])} "
                 f"<span class='tag {p['do_tin']}'>{NHAN_NGAN.get(p['do_tin'], '')}</span></div>"
-                f"<div class=small>{html.escape(p['ly_do'] or '')}{' · ' + chu if chu else ''}</div>"
+                f"<div class=small>{html.escape(p['ly_do'] or '')}{' · ' + chu if chu else ''}</div>{den_kh}"
                 f"{chon_hd(hd, 'hd')}{chon(LOAI_ANH, p['loai_anh'], 'loai', '— trước/sau —')}{chon(VUNG, p['vung'], 'vung', '— vùng —')}"
                 f"<input class=ghi placeholder='ghi chú (tình trạng, kết quả...)' value='{html.escape(p['ghi_chu'] or '')}'>"
                 f"<div style='display:flex;gap:6px;margin-top:6px'>"
@@ -1016,6 +1031,117 @@ def _trang_ngay(conn, ngay: str) -> bytes:
         o.append("</div></div>")
     o.append("</main>")
     return _trang(f"Ảnh {ngay}", "".join(o))
+
+
+# ---------------- Diễn tiến điều trị của 1 khách (trang /khach, /tim) ----------------
+# Ảnh thuộc khách: đã duyệt -> theo xn_hd; chưa duyệt -> theo goi_y_hd khi máy chấm chắc/gợi ý.
+_HD_CUA_ANH = ("v.code = CASE WHEN p.xn_hd IS NOT NULL THEN p.xn_hd"
+               " WHEN p.do_tin IN ('chac','goi_y') THEN p.goi_y_hd END")
+
+
+def _link_khach(ma: str, dv: str = "") -> str:
+    """href (đã escape) tới trang diễn tiến của khách."""
+    u = f"/khach?ma={quote(ma or '', safe='')}"
+    if dv:
+        u += f"&dv={quote(dv, safe='')}"
+    return html.escape(u)
+
+
+def _ds_dv(dich_vu: str | None) -> list[str]:
+    return [x.strip() for x in (dich_vu or "").split(" | ") if x.strip()]
+
+
+def _o_tim(q: str = "") -> str:
+    return ("<form class=tim action='/tim' method=get><input name=q placeholder='Tìm khách: mã KH, SĐT, tên'"
+            f" value='{html.escape(q)}'> <button>Tìm</button></form>")
+
+
+def _tim_khach(conn, q: str, gioi_han: int = 200) -> list[sqlite3.Row]:
+    """Khách CÓ ẢNH khớp mã KH / SĐT / tên (không dấu, chứa chuỗi)."""
+    q = (q or "").strip()
+    kd, so = khong_dau(q), re.sub(r"\D", "", q)
+    if not kd:
+        return []
+    rows = conn.execute(
+        "SELECT v.ma_kh, MAX(v.ten_kh) ten_kh, MAX(v.sdt) sdt, COUNT(*) so_anh, MAX(v.ngay) cuoi "
+        f"FROM photos p JOIN visits v ON {_HD_CUA_ANH} WHERE p.bo_qua=0 AND COALESCE(v.ma_kh,'')!='' "
+        "GROUP BY v.ma_kh ORDER BY cuoi DESC").fetchall()
+    ra = [r for r in rows if kd in khong_dau(r["ma_kh"]) or kd in khong_dau(r["ten_kh"])
+          or (len(so) >= 3 and so in chuan_sdt(r["sdt"] or ""))]
+    return ra[:gioi_han]
+
+
+def _trang_tim(conn, q: str) -> bytes:
+    o = [f"<header><a href='/'>← Tất cả ngày</a><b>Tìm khách có ảnh</b>{_o_tim(q)}</header><main>"]
+    ds = _tim_khach(conn, q)
+    if not (q or "").strip():
+        o.append("<p>Gõ mã KH, SĐT hoặc tên khách.</p>")
+    elif not ds:
+        o.append(f"<p>Không thấy khách có ảnh khớp “{html.escape(q)}”.</p>")
+    else:
+        o.append(f"<div class=visits><b>{len(ds)} khách</b><br>" + "<br>".join(
+            f"<a href='{_link_khach(r['ma_kh'])}'>{html.escape(r['ma_kh'])} · {html.escape(r['ten_kh'] or '')}</a>"
+            f" <span class=small>· SĐT …{html.escape((r['sdt'] or '')[-4:]) or '—'} · {r['so_anh']} ảnh"
+            f" · lần cuối {html.escape(r['cuoi'] or '')}</span>" for r in ds) + "</div>")
+    o.append("</main>")
+    return _trang("Tìm khách", "".join(o))
+
+
+COT_LOAI = [("trước", "Trước"), ("trong", "Trong"), ("sau", "Sau")]
+
+
+def _trang_khach(conn, ma: str, dv: str = "") -> bytes:
+    """Diễn tiến điều trị: mỗi lần (ngày HĐ + dịch vụ) một hàng Trước | Trong | Sau."""
+    ma, dv = (ma or "").strip(), (dv or "").strip()
+    rows = conn.execute(
+        "SELECT p.*, v.code hd, v.ngay ngay_hd, v.gio gio_hd, v.ma_kh, v.ten_kh, v.sdt, v.dich_vu "
+        f"FROM photos p JOIN visits v ON {_HD_CUA_ANH} WHERE p.bo_qua=0 AND v.ma_kh=? "
+        "ORDER BY v.ngay, v.gio, p.thoi_gian", (ma,)).fetchall() if ma else []
+    dau = f"<header><a href='/'>← Tất cả ngày</a>{_o_tim()}</header><main>"
+    if not rows:
+        return _trang("Không có khách", dau + f"<p>Không có ảnh nào của khách mã “{html.escape(ma)}”.</p></main>")
+    cuoi = rows[-1]
+    tat_ca_dv = list(dict.fromkeys(x for r in rows for x in _ds_dv(r["dich_vu"])))
+    if dv:
+        rows = [r for r in rows if dv in _ds_dv(r["dich_vu"])]
+    lan: dict[tuple, list] = {}
+    for r in rows:
+        lan.setdefault((r["ngay_hd"], r["dich_vu"] or ""), []).append(r)
+    chua = sum(1 for r in rows if r["xn_hd"] is None)
+    loc = " · ".join([f"<a href='{_link_khach(ma)}'>{'<b>Tất cả</b>' if not dv else 'Tất cả'}</a>"] + [
+        f"<a href='{_link_khach(ma, x)}'>{'<b>' + html.escape(x) + '</b>' if x == dv else html.escape(x)}</a>"
+        for x in tat_ca_dv])
+    o = [dau, f"<div class=visits><b>{html.escape(ma)} · {html.escape(cuoi['ten_kh'] or '')}</b>"
+         f" <span class=small>SĐT …{html.escape((cuoi['sdt'] or '')[-4:]) or '—'} · {len(lan)} lần điều trị"
+         f" · {len(rows)} ảnh{f' ({chua} chưa duyệt)' if chua else ''}</span>"
+         f"<br><span class=small>Dịch vụ đã làm:</span> {loc}</div>"]
+    if not rows:
+        o.append(f"<p>Không có ảnh dịch vụ “{html.escape(dv)}”.</p>")
+    for (ngay_hd, ten_dv), ds in lan.items():
+        hds = ", ".join(dict.fromkeys(html.escape(r["hd"]) for r in ds))
+        o.append(f"<div class=dot><h3>{ngay_hd[8:10]}/{ngay_hd[5:7]}/{ngay_hd[:4]} · {html.escape(ten_dv)}"
+                 f" <span class=small>HĐ {hds} · {len(ds)} ảnh</span></h3><div class=cot>")
+        def loai(r):  # ô trước/trong/sau; trống hoặc lạ -> 'Chưa phân loại'
+            return r["loai_anh"] if r["loai_anh"] in {k for k, _ in COT_LOAI} else ""
+
+        cot = COT_LOAI + ([("", "Chưa phân loại")] if any(not loai(r) for r in ds) else [])
+        for k, ten in cot:
+            o.append(f"<div><h4>{ten}</h4>")
+            for r in (r for r in ds if loai(r) == k):
+                anh = (f"<img loading=lazy src='/anh/{html.escape(r['id'])}' onclick=\"zoom(this.src)\">"
+                       if r["anh_xem"] and os.path.exists(r["anh_xem"]) else
+                       "<div class=small style='height:120px;display:flex;align-items:center;justify-content:center;"
+                       "background:#eee'>Ảnh chưa tải về máy</div>")
+                nhan = "" if r["xn_hd"] is not None else "<span class='tag cd'>chưa duyệt</span> "
+                chi_tiet = " · ".join(html.escape(x) for x in (r["vung"], r["ghi_chu"]) if x)
+                o.append(f"<div class='ph{' ok' if r['xn_hd'] else ''}'>{anh}<div class=small>{nhan}"
+                         f"<a href='/ngay?d={html.escape(quote(r['ngay'] or ''))}'>{html.escape((r['thoi_gian'] or '')[11:16])}"
+                         f" {html.escape(r['ngay'] or '')}</a></div>"
+                         + (f"<div class=small>{chi_tiet}</div>" if chi_tiet else "") + "</div>")
+            o.append("</div>")
+        o.append("</div></div>")
+    o.append("</main>")
+    return _trang(f"Khách {ma}", "".join(o))
 
 
 def _xem_jpeg(pid: str, path: str) -> str:
@@ -1052,6 +1178,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._gui(_trang_chu(self.conn))
         if u.path == "/ngay":
             return self._gui(_trang_ngay(self.conn, parse_qs(u.query).get("d", [""])[0]))
+        if u.path == "/khach":
+            q = parse_qs(u.query)
+            return self._gui(_trang_khach(self.conn, q.get("ma", [""])[0], q.get("dv", [""])[0]))
+        if u.path == "/tim":
+            return self._gui(_trang_tim(self.conn, parse_qs(u.query).get("q", [""])[0]))
         if u.path.startswith("/anh/"):
             r = self.conn.execute("SELECT anh_xem FROM photos WHERE id=?",
                                   (u.path[5:],)).fetchone()
