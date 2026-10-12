@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -385,6 +386,10 @@ def cmd_xuat(a) -> None:
     if not rows:
         sys.exit("Chưa có ảnh nào được xác nhận trong tháng này. Chạy bước 'duyet' trước.")
 
+    co_exif = shutil.which("exiftool") is not None
+    if not co_exif:
+        print("  ! Chưa có exiftool -> nhãn chỉ nằm ở tên thư mục/file, chưa ghi vào trong file."
+              " Cài: brew install exiftool")
     db = None
     if any(r["nguon"] == "photos" for r in rows):
         import osxphotos
@@ -398,7 +403,10 @@ def cmd_xuat(a) -> None:
         dv = ten_thu_muc((r["dich_vu"] or "").split(" | ")[0])[:40] or "DichVu"
         thu_muc = os.path.join(dich, kh, f"{r['ngay']}_{dv}")
         os.makedirs(thu_muc, exist_ok=True)
-        tien_to = "_".join(x for x in [ten_thu_muc(r["loai_anh"] or ""), r["thoi_gian"][11:].replace(":", "")] if x)
+        # Tên file tự mang mã KH + ngày: file có bị tách lẻ vẫn biết của ai.
+        tien_to = "_".join(x for x in [r["ma_kh"] or "KhachLe", r["ngay"],
+                                       ten_thu_muc(r["loai_anh"] or ""),
+                                       r["thoi_gian"][11:].replace(":", "")] if x)
         ten = f"{tien_to}_{r['ten_file']}"
         dst = os.path.join(thu_muc, ten)
         if not os.path.exists(dst):
@@ -414,6 +422,8 @@ def cmd_xuat(a) -> None:
                 print(f"  ! không thấy file {r['duong_dan']}")
                 continue
         so += 1
+        if co_exif:
+            _ghi_nhan_vao_file(dst, r)
         conn.execute("UPDATE photos SET da_xuat=? WHERE id=?", (dst, r["id"]))
         if a.gan_tu_khoa and r["nguon"] == "photos":
             _gan_tu_khoa(r)
@@ -437,6 +447,36 @@ def cmd_xuat(a) -> None:
     print(f"Đã xuất {so} ảnh vào {dich}\nDanh sách: {csv_path}")
 
 
+def _nhan(r) -> tuple[list[str], str]:
+    """(danh sách từ khóa, câu chú thích) của 1 ảnh đã xác nhận."""
+    tu_khoa = [r["ma_kh"], r["sdt"], r["ten_kh"], r["xn_hd"]]
+    tu_khoa += (r["dich_vu"] or "").split(" | ")
+    tu_khoa += [r["loai_anh"], r["vung"]]
+    tu_khoa = list(dict.fromkeys(k for k in tu_khoa if k))
+    chu_thich = " · ".join(x for x in [r["ma_kh"], r["ten_kh"], r["sdt"], r["ngay"],
+                                       r["dich_vu"], r["loai_anh"], r["vung"], r["ghi_chu"]] if x)
+    return tu_khoa, chu_thich
+
+
+def _ghi_nhan_vao_file(path: str, r) -> None:
+    """Ghi từ khóa + chú thích VÀO TRONG file ảnh (chuẩn IPTC/XMP).
+
+    Nhãn đi theo file: tải về, chép sang ổ khác, đẩy lên Google Drive... vẫn còn.
+    Lightroom, Bridge, Photos (khi nhập lại), Google Photos đọc được.
+    """
+    tu_khoa, chu_thich = _nhan(r)
+    lenh = ["exiftool", "-q", "-overwrite_original", "-P", "-charset", "iptc=UTF8",
+            "-IPTC:CodedCharacterSet=UTF8"]
+    for k in tu_khoa:
+        lenh += [f"-XMP-dc:Subject-={k}", f"-XMP-dc:Subject+={k}",
+                 f"-IPTC:Keywords-={k}", f"-IPTC:Keywords+={k}"]
+    lenh += [f"-XMP-dc:Description={chu_thich}", f"-IPTC:Caption-Abstract={chu_thich}",
+             f"-EXIF:ImageDescription={chu_thich}", path]
+    kq = subprocess.run(lenh, capture_output=True, text=True)
+    if kq.returncode != 0:
+        print(f"  ! exiftool lỗi với {os.path.basename(path)}: {kq.stderr.strip()[:200]}")
+
+
 def _gan_tu_khoa(r) -> None:
     """Ghi mã KH, SĐT, tên... vào Từ khóa + Chú thích của ảnh trong Photos.
 
@@ -447,15 +487,10 @@ def _gan_tu_khoa(r) -> None:
         import photoscript
 
         p = photoscript.Photo(r["id"])
-        moi = [r["ma_kh"], r["sdt"], r["ten_kh"], r["xn_hd"]]
-        moi += (r["dich_vu"] or "").split(" | ")
-        moi += [r["loai_anh"], r["vung"]]
-        moi = [k for k in moi if k]
+        moi, nhan = _nhan(r)
         cu = list(p.keywords or [])
         p.keywords = cu + [k for k in moi if k not in cu]
-        # Chú thích (caption): chắc chắn tìm được trên iPad/iPhone.
-        nhan = " · ".join(x for x in [r["ma_kh"], r["ten_kh"], r["sdt"],
-                                       r["dich_vu"], r["loai_anh"], r["vung"]] if x)
+        # Chú thích (caption): tìm được trên iPad/iPhone.
         mo_ta = p.description or ""
         if r["ma_kh"] and r["ma_kh"] not in mo_ta:
             p.description = f"{mo_ta}\n{nhan}".strip()

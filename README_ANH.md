@@ -9,6 +9,7 @@ rồi xuất ảnh vào thư mục theo từng khách. Ảnh gốc trong Photos 
 2. Cài thư viện:
    ```bash
    pip3 install -r requirements_anh.txt
+   brew install exiftool      # ghi nhãn VÀO TRONG file ảnh (cần Homebrew: brew.sh)
    ```
 3. Cho Terminal quyền đọc Photos: **Cài đặt hệ thống → Quyền riêng tư & Bảo mật →
    Truy cập toàn bộ ổ đĩa → bật Terminal**.
@@ -51,3 +52,17 @@ dịch vụ, trước/sau, vùng → trên iPad/iPhone (cùng Apple ID, bật �
 Ảnh điều trị là dữ liệu sức khỏe nhạy cảm (NĐ 13/2023). `anhkhach.db` và thư mục
 `KhachHang/` chỉ nằm trên máy, đã bị chặn khỏi git. Trang duyệt chỉ mở trên chính máy
 (localhost), không ai ngoài máy truy cập được.
+
+## Lưu trữ để KHÔNG BAO GIỜ mất nhãn
+Nhãn được ghi ở 4 nơi, mất 1 nơi vẫn còn 3:
+
+| Nơi | Đi theo khi chép / đẩy Google Drive? | Dùng để |
+|---|---|---|
+| **Tên thư mục + tên file** (`KH000123_NguyenThiAnh_3456/2025-09-03_TriNamLaser/KH000123_2025-09-03_Truoc_...jpg`) | ✅ luôn còn | Tìm trên Google Drive / Finder theo mã KH, tên |
+| **Bên trong file ảnh** (từ khóa + chú thích IPTC/XMP, cần `exiftool`) | ✅ còn, kể cả file bị tách lẻ | Lightroom, Bridge, nhập lại Photos, Google Photos |
+| **File danh sách CSV** (`danh_sach_anh_YYYY-MM.csv`) + `anhkhach.db` | ✅ (nhớ chép kèm) | Lọc/thống kê bằng Excel, Google Sheet, nghiên cứu |
+| **Từ khóa + chú thích trong Photos** (`--gan-tu-khoa`) | ❌ chỉ trong Photos/iCloud | Tìm nhanh trên iPad/iPhone |
+
+**Sao lưu 3-2-1:** Mac mini (bản chính) + ổ cứng ngoài Time Machine + Google Drive.
+Đẩy cả thư mục `~/KhachHang` lên Drive bằng app **Google Drive for desktop** (tự đồng bộ).
+Dùng tài khoản Google **của công ty** (Workspace), bật xác minh 2 bước, KHÔNG chia sẻ link công khai.
