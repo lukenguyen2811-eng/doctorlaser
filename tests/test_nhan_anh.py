@@ -178,5 +178,117 @@ class GioHoaDon(unittest.TestCase):
         self.assertEqual(self.c.execute("SELECT goi_y_hd, do_tin FROM photos").fetchone()[:], ("H4", "chac"))
 
 
+class TenMotChuLechDichVu(unittest.TestCase):
+    """Ca thật 'Thu-pico': 'Thu' ~ đuôi '... Thư' (mài sẹo) trong khi khách 'THU (KH TỰ ĐẾN)' làm pico."""
+    def setUp(self):
+        self.c = A.ket_noi()
+        self.c.execute("DELETE FROM visits")
+
+    def tearDown(self):
+        self.c.close()
+
+    def them(self, *ds):
+        for code, ten, dv in ds:
+            self.c.execute("INSERT INTO visits (code,ngay,ten_kh,dich_vu) VALUES (?,'2026-09-21',?,?)",
+                           (code, ten, dv))
+
+    def khop(self, chu):
+        return A._khop_nhan(self.c, A.doc_nhan(chu, 2026)[0], "2026-09-21")
+
+    def test_chon_khach_ten_trong_ho_ten_dung_dich_vu(self):
+        self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "TRẦN THU (KH TỰ ĐẾN)", "Picolight"))
+        hd, d, ly_do = self.khop("Thu-pico 21/9/26")
+        self.assertEqual((hd, d), ("HB", 85))
+        self.assertIn("dịch vụ", ly_do)
+
+    def test_khong_ai_dung_dich_vu_ha_goi_y(self):  # âm: không nâng 'chắc' khi dịch vụ lệch
+        self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"))
+        self.assertEqual(self.khop("Thu-pico 21/9/26")[:2], ("HA", 50))
+
+    def test_hai_khach_trong_dung_dich_vu_ha_goi_y(self):  # âm: 2 ứng viên khác -> không đoán
+        self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "Trần Thu KH TU DEN", "Picolight"),
+                  ("HC", "Lê Thu GT", "Pico toàn mặt"))
+        self.assertEqual(self.khop("Thu-pico 21/9/26")[:2], ("HA", 50))
+
+    def test_dich_vu_khop_giu_chac(self):  # không đổi ca đúng
+        self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "TRẦN THU (KH TỰ ĐẾN)", "Picolight"))
+        self.assertEqual(self.khop("Thu-mai 21/9/26")[:2], ("HA", 85))
+
+
+class LanTheoDot(unittest.TestCase):
+    def setUp(self):
+        self.c = A.ket_noi()
+        self.c.execute("DELETE FROM visits")
+        self.c.execute("DELETE FROM photos")
+        for code, ten, gio in [("K1", "Lê Thị Tâm", "10:00"), ("K2", "Võ Ngọc Bích", "10:05"),
+                               ("K3", "Khach Ba", "16:00")]:
+            self.c.execute("INSERT INTO visits (code,ngay,gio,ten_kh,dich_vu) VALUES (?,?,?,?,?)",
+                           (code, "2026-09-07", gio, ten, "Laser"))
+
+    def tearDown(self):
+        self.c.close()
+
+    def ghep(self, anh):
+        for pid, gio, ocr in anh:
+            self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr) VALUES (?,?,?,?,?,?)",
+                           (pid, "2026-09-07", f"2026-09-07T{gio}", "IMG.HEIC", "", ocr))
+        A.ghep_ngay(self.c, "2026-09-07")
+        return {r[0]: (r[1], r[2]) for r in self.c.execute("SELECT id, goi_y_hd, do_tin FROM photos")}
+
+    def test_mot_khach_ca_dot_lan_nhu_cu(self):
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:06:00", ""), ("c", "10:12:00", "")])
+        self.assertEqual(r["a"], ("K1", "chac"))
+        self.assertEqual((r["b"], r["c"]), (("K1", "goi_y"), ("K1", "goi_y")))
+
+    def test_hai_khach_mot_dot_lay_neo_gan_nhat(self):
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:01:00", ""),
+                       ("c", "10:07:00", "Bích-laser 7/9/26"), ("d", "10:09:00", ""),
+                       ("e", "10:04:00", "")])  # e cách a 4', cách c 3' -> theo c
+        self.assertEqual(r["b"], ("K1", "goi_y"))
+        self.assertEqual(r["d"], ("K2", "goi_y"))
+        self.assertEqual(r["e"], ("K2", "goi_y"))
+
+    def test_neo_nhan_chua_khop_chan_lan_ca_dot(self):  # âm: nhãn người khác không khớp HĐ
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:01:00", ""),
+                       ("c", "10:08:00", "Quang-laser 7/9/26"), ("d", "10:09:00", ""),
+                       ("e", "10:14:00", "")])
+        self.assertEqual(r["b"], ("K1", "goi_y"))  # gần a
+        self.assertEqual(r["c"], (None, "chua_ro"))
+        self.assertEqual(r["d"], (None, "chua_ro"))  # gần c (chưa khớp) -> không đoán
+        self.assertEqual(r["e"], (None, "chua_ro"))  # cách c 6' -> quá xa
+
+    def test_neo_xa_hon_3_phut_khong_lan(self):  # âm
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:10:00", "Quang-laser 7/9/26"),
+                       ("x", "10:05:00", "")])
+        self.assertEqual(r["x"], (None, "chua_ro"))
+
+    def test_dot_co_nhan_khong_dung_luat_gio(self):  # âm: luật 1 HĐ gần giờ chỉ cho đợt không nhãn
+        r = self.ghep([("a", "16:00:00", "Quang-laser 7/9/26"), ("b", "16:10:00", "")])
+        self.assertEqual(r["b"], (None, "chua_ro"))
+
+    def test_dot_khong_nhan_van_dung_luat_gio(self):
+        self.assertEqual(self.ghep([("a", "16:02:00", "")])["a"], ("K3", "goi_y"))
+
+    def test_trung_giay_khong_nhan_lan_dot(self):
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26")] +
+                      [(f"t{i}", "10:02:30", "") for i in range(3)])
+        self.assertEqual(r["a"], ("K1", "chac"))
+        self.assertEqual({r[f"t{i}"] for i in range(3)}, {(None, "chua_ro")})
+
+    def test_trung_giay_khong_dung_luat_gio(self):
+        r = self.ghep([(f"t{i}", "16:02:30", "") for i in range(5)])
+        self.assertEqual({r[f"t{i}"] for i in range(5)}, {(None, "chua_ro")})
+        self.assertIn("trùng từng giây", self.c.execute("SELECT ly_do FROM photos WHERE id='t0'").fetchone()[0])
+
+    def test_trung_giay_van_khop_bang_nhan_cua_no(self):
+        r = self.ghep([("t0", "16:02:30", "Tâm-laser 7/9/26"), ("t1", "16:02:30", ""), ("t2", "16:02:30", "")])
+        self.assertEqual(r["t0"], ("K1", "chac"))
+        self.assertEqual(r["t1"], (None, "chua_ro"))
+
+    def test_hai_anh_trung_giay_van_tin(self):  # âm: 2 ảnh chụp liền nhau là chuyện thường
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:02:30", ""), ("c", "10:02:30", "")])
+        self.assertEqual((r["b"], r["c"]), (("K1", "goi_y"), ("K1", "goi_y")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,8 @@ DB_FILE = os.environ.get("ANH_DB", "anhkhach.db")
 PORT = int(os.environ.get("ANH_PORT", "8765"))
 GIO_TRUOC, GIO_SAU = 30, 45  # hóa đơn trong [đầu đợt - 30', cuối đợt + 45'] coi là gần giờ chụp
 DOT_PHUT = 15  # ảnh cách nhau <= 15 phút coi là cùng một đợt chụp
+LAN_GAN_PHUT = 3  # đợt có nhiều khách: ảnh chưa khớp chỉ lấy theo ảnh neo gần nhất nếu cách <= 3 phút
+TRUNG_GIAY = 3  # >= 3 ảnh cùng giờ đến từng giây = giờ nhập/lưu, không phải giờ chụp
 ANH_DUOI = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"}
 
 LOAI_ANH = ["", "trước", "trong", "sau"]
@@ -477,6 +479,15 @@ def _khop_nhan(conn, nhan: dict, ngay_anh: str) -> tuple[str | None, int, str]:
     if len(ung) > 1:  # trùng tên -> dùng mã dịch vụ trên nhãn để tách
         loc = [v for v in ung if _dv_khop(nhan["ma_dv"], v["dich_vu"])]
         ung = loc or ung
+    if len(ung) == 1 and k == len(w) and not gan_dung and not _dv_khop(nhan["ma_dv"], ung[0]["dich_vu"]):
+        # Khớp đuôi tên nhưng dịch vụ lệch ('Thu' ~ '... Thư' mài sẹo, trong khi khách 'THU (KH TỰ ĐẾN)'
+        # làm pico) -> xét khách có tên nằm trong họ tên + dịch vụ khớp; không có thì chỉ gợi ý.
+        khac = [v for v in visits if v["code"] != ung[0]["code"]
+                and set(w) <= set(khong_dau(v["ten_kh"]).split())
+                and _dv_khop(nhan["ma_dv"], v["dich_vu"])]
+        if len(khac) == 1:
+            return khac[0]["code"], 85, f"nhãn '{nhan['goc']}' khớp tên + dịch vụ {khac[0]['ten_kh']}{lech_ngay}"
+        return ung[0]["code"], 50, f"nhãn '{nhan['goc']}' khớp tên {ung[0]['ten_kh']} nhưng lệch dịch vụ{lech_ngay}"
     if len(ung) == 1:
         if k < len(w) or gan_dung:  # chỉ khớp một phần / gần đúng -> chỉ gợi ý, người xác nhận
             return ung[0]["code"], 50, f"nhãn '{nhan['goc']}' khớp một phần tên {ung[0]['ten_kh']}{lech_ngay}"
@@ -504,12 +515,20 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         if truoc and _phut(p["thoi_gian"], truoc) > DOT_PHUT:
             dot += 1
         truoc = p["thoi_gian"]
-        ket_qua[p["id"]] = {"dot": dot, "hd": None, "do_tin": "chua_ro", "ly_do": "", "diem": 0}
+        ket_qua[p["id"]] = {"dot": dot, "hd": None, "do_tin": "chua_ro", "ly_do": "", "diem": 0,
+                            "nhan": False, "gio": dt.datetime.fromisoformat(p["thoi_gian"])}
+    # Giờ trùng đến từng giây ở >= TRUNG_GIAY ảnh: giờ nhập/lưu -> không lan đợt, không dùng luật giờ.
+    dem_giay = {}
+    for p in photos:
+        dem_giay[p["thoi_gian"]] = dem_giay.get(p["thoi_gian"], 0) + 1
+    for p in photos:
+        ket_qua[p["id"]]["trung_giay"] = dem_giay[p["thoi_gian"]] >= TRUNG_GIAY
 
     for p in photos:
         r = ket_qua[p["id"]]
         goc = f"{p['chu_thich']} {p['ocr']} {p['ten_file']}"
-        if not visits and not doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])):
+        r["nhan"] = bool(doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])))
+        if not visits and not r["nhan"]:
             r.update(do_tin="khong_hd", ly_do="ngày này không có hóa đơn")
             continue
         chu = khong_dau(goc)
@@ -528,29 +547,47 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
                 r.update(hd=hd, diem=d, do_tin="chac" if d >= 80 else "goi_y")
                 break
 
-    # Ảnh chưa khớp lấy theo ảnh đã khớp trong cùng đợt (nếu cả đợt chỉ 1 khách).
+    # Ảnh chưa khớp lấy theo ảnh "neo" trong cùng đợt. Neo = ảnh có nhãn (khớp được hay không) hoặc
+    # đã khớp hóa đơn điểm >= 50. Một đợt 15' có thể chứa nhiều khách: chỉ lan cả đợt khi mọi neo cùng
+    # 1 hóa đơn; ngược lại ảnh chưa khớp chỉ lấy theo neo gần nhất nếu neo đó có hóa đơn và cách <= 3'.
+    # Ảnh giờ trùng giây không được làm neo cũng không được nhận hóa đơn theo giờ.
     for so_dot in {r["dot"] for r in ket_qua.values()}:
-        cung = [r for r in ket_qua.values() if r["dot"] == so_dot]
-        khach = {r["hd"] for r in cung if r["hd"] and r["diem"] >= 50}
-        if len(khach) == 1:
-            hd = khach.pop()
-            for r in cung:
-                if not r["hd"] and r["do_tin"] != "khong_hd":
-                    r.update(hd=hd, do_tin="goi_y", ly_do="cùng đợt chụp với ảnh đã khớp tên")
+        cung = [r for r in ket_qua.values() if r["dot"] == so_dot and not r["trung_giay"]]
+        neo = [r for r in cung if r["nhan"] or (r["hd"] and r["diem"] >= 50)]
+        if not neo:
+            continue
+        cho = [r for r in cung if not r["hd"] and not r["nhan"] and r["do_tin"] != "khong_hd"]
+        hd_neo = {r["hd"] for r in neo}
+        if len(hd_neo) == 1 and None not in hd_neo:
+            hd = hd_neo.pop()
+            for r in cho:
+                r.update(hd=hd, do_tin="goi_y", ly_do="cùng đợt chụp với ảnh đã khớp tên")
+            continue
+        for r in cho:
+            xa = min(abs((r["gio"] - n["gio"]).total_seconds()) / 60 for n in neo)
+            gan = {n["hd"] for n in neo if abs((r["gio"] - n["gio"]).total_seconds()) / 60 == xa}
+            if xa <= LAN_GAN_PHUT and len(gan) == 1 and None not in gan:
+                r.update(hd=gan.pop(), do_tin="goi_y",
+                         ly_do=f"đợt có nhiều khách — theo ảnh đã khớp gần nhất (cách {xa:.0f}')")
+            else:
+                r["ly_do"] = r["ly_do"] or "đợt chụp có nhiều khách — người chọn"
 
     # Đợt chưa khớp: giờ hóa đơn thường cách giờ chụp ~2 phút (đo 184 ảnh chắc chắn 09-10/2026:
     # 80% trong -14..+27 phút) -> đợt chỉ có đúng 1 hóa đơn trong [đầu đợt -30', cuối đợt +45'] thì gợi ý.
+    # Chỉ cho đợt không có ảnh nhãn nào; bỏ ảnh giờ trùng giây.
     for so_dot in {r["dot"] for r in ket_qua.values()}:
-        cung = [(p, ket_qua[p["id"]]) for p in photos if ket_qua[p["id"]]["dot"] == so_dot]
-        if any(r["hd"] for _, r in cung):
+        tat_ca = [ket_qua[p["id"]] for p in photos if ket_qua[p["id"]]["dot"] == so_dot]
+        if any(r["hd"] or r["nhan"] for r in tat_ca):
             continue
-        dau = dt.datetime.fromisoformat(cung[0][0]["thoi_gian"])
-        cuoi = dt.datetime.fromisoformat(cung[-1][0]["thoi_gian"])
+        cung = [r for r in tat_ca if not r["trung_giay"]]
+        if not cung:
+            continue
+        dau, cuoi = cung[0]["gio"], cung[-1]["gio"]
         gan = [v for v in visits if v["gio"] and
                dau - dt.timedelta(minutes=GIO_TRUOC) <= dt.datetime.fromisoformat(f"{ngay}T{v['gio'][:5]}")
                <= cuoi + dt.timedelta(minutes=GIO_SAU)]
         if len(gan) == 1:
-            for _, r in cung:
+            for r in cung:
                 if r["do_tin"] != "khong_hd":
                     r.update(hd=gan[0]["code"], do_tin="goi_y",
                              ly_do=f"chỉ 1 hóa đơn gần giờ chụp ({gan[0]['gio'][:5]})")
@@ -560,6 +597,10 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         for r in ket_qua.values():
             if not r["hd"] and r["do_tin"] != "khong_hd":
                 r.update(hd=visits[0]["code"], do_tin="goi_y", ly_do="cả ngày chỉ có 1 hóa đơn")
+
+    for r in ket_qua.values():
+        if r["trung_giay"] and not r["hd"] and r["do_tin"] != "khong_hd":
+            r["ly_do"] = r["ly_do"] or "giờ ảnh trùng từng giây với nhiều ảnh khác (giờ nhập, không phải giờ chụp) — người chọn"
 
     for pid, r in ket_qua.items():
         conn.execute(
