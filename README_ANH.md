@@ -21,7 +21,7 @@ rồi xuất ảnh vào thư mục theo từng khách. Ảnh gốc trong Photos 
 Mỗi lần mở Terminal mới: `cd ~/doctorlaser && source .venv/bin/activate` (khi đó `python3` là bản 3.12 của dự án).
 ```bash
 python3 anhkhach.py hoadon 2025-09        # 1. kéo hóa đơn tháng 9 từ KiotViet
-python3 anhkhach.py quet 2025-09 --ocr    # 2. đọc ảnh tháng 9 trong Photos (+ đọc chữ trong ảnh)
+python3 anhkhach.py quet 2025-09 --ocr --tai-goc   # 2. đọc ảnh tháng 9 (+ tải bản gốc từ iCloud, đọc nhãn trên ảnh)
 python3 anhkhach.py ghep 2025-09          # 3. máy tự gợi ý
 python3 anhkhach.py duyet                 # 4. mở trang duyệt (dùng Safari)
 python3 anhkhach.py baocao 2025-09        # 5. xem tỷ lệ máy đoán đúng

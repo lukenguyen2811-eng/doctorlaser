@@ -146,38 +146,83 @@ def cmd_hoadon(a) -> None:
 
 
 # ------------------------- 2. QUÉT ẢNH -------------------------
-def _quet_photos(tu: str, den: str, ocr: bool) -> list[tuple]:
+ANH_GOC = os.environ.get("ANH_GOC", "anh_goc")  # bản gốc tải tạm từ iCloud (chỉ tháng đang xử lý)
+
+
+def _tai_ban_goc(p, thang_dir: str) -> str | None:
+    """Tải bản gốc (bản ĐÃ SỬA nếu có — nhãn nhân viên thường viết bằng công cụ sửa ảnh) về máy."""
+    os.makedirs(thang_dir, exist_ok=True)
+    co = [os.path.join(thang_dir, f) for f in os.listdir(thang_dir) if f.startswith(p.uuid)]
+    if co:
+        return co[0]
+    sua = bool(p.hasadjustments)
+    loi = "Photos không trả về file"
+    for _ in range(2):  # iCloud đôi khi chậm -> thử lại 1 lần
+        try:
+            out = p.export(thang_dir, f"{p.uuid}.jpeg" if sua else None, edited=sua,
+                           use_photos_export=True, timeout=180)
+        except Exception as e:  # noqa: BLE001
+            out, loi = [], str(e)[:120]
+        if out:
+            dich = os.path.join(thang_dir, p.uuid + os.path.splitext(out[0])[1].lower())
+            os.replace(out[0], dich)
+            return dich
+    print(f"  ! không tải được {p.original_filename}: {loi}")
+    return None
+
+
+def _doc_chu(path: str, huong) -> str:
+    try:
+        from osxphotos.text_detection import detect_text
+
+        return " ".join(t for t, tin in detect_text(path, huong or None) if tin >= 0.5)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False) -> list[tuple]:
     try:
         import osxphotos
     except ImportError:
-        sys.exit("Chưa cài osxphotos. Chạy:  pip3 install -r requirements_anh.txt")
+        sys.exit("Chưa cài osxphotos. Chạy:  .venv/bin/pip install -r requirements_anh.txt")
 
     print("Đang mở thư viện Photos (lần đầu có thể mất vài phút)...")
     db = osxphotos.PhotosDB()
     d0 = dt.datetime.fromisoformat(tu)
     d1 = dt.datetime.fromisoformat(den) + dt.timedelta(days=1)
+    ds = [p for p in db.photos(from_date=d0, to_date=d1)
+          if not (p.ismovie or p.intrash or getattr(p, "screenshot", False))]
+    thang_dir = os.path.join(ANH_GOC, tu[:7])
     rows, thieu = [], 0
-    for p in db.photos(from_date=d0, to_date=d1):
-        if p.ismovie or p.intrash or getattr(p, "screenshot", False):
-            continue
+    for i, p in enumerate(ds, 1):
         t = p.date.astimezone().replace(tzinfo=None) if p.date.tzinfo else p.date
         cac_chu = [p.title or "", p.description or "", " ".join(p.keywords or []),
                    " ".join(p.albums or []), " ".join(x for x in (p.persons or []) if x != "_UNKNOWN_")]
+        goc = (p.path_edited if p.hasadjustments else None) or p.path
+        if goc and not os.path.exists(goc):
+            goc = None
+        if not goc and tai_goc:
+            goc = _tai_ban_goc(p, thang_dir)
+        if not goc:
+            thieu += 1
         chu_ocr = ""
         if ocr:
-            try:
-                chu_ocr = " ".join(x[0] for x in p.detected_text(confidence_threshold=0.5))
-            except Exception:  # noqa: BLE001
-                pass
-        xem = next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None) or p.path
-        if not p.path:
-            thieu += 1
+            if goc:
+                chu_ocr = _doc_chu(goc, p.orientation)
+            else:
+                try:
+                    chu_ocr = " ".join(x[0] for x in p.detected_text(confidence_threshold=0.5))
+                except Exception:  # noqa: BLE001
+                    pass
+        xem = goc or next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None) or p.path
         rows.append((p.uuid, "photos", t.date().isoformat(), t.isoformat(timespec="seconds"),
-                     p.original_filename, p.path or "", xem or "",
+                     p.original_filename, goc or p.path or "", xem or "",
                      " / ".join(x for x in cac_chu if x.strip()), chu_ocr))
+        if i % 25 == 0 or i == len(ds):
+            print(f"  {i}/{len(ds)} ảnh...", flush=True)
     if thieu:
-        print(f"  ! {thieu} ảnh chỉ có trên iCloud (chưa tải bản gốc về máy). Vẫn duyệt được,"
-              " lúc xuất sẽ tự tải. Nên bật Photos > Cài đặt > iCloud > 'Tải bản gốc về máy Mac'.")
+        print(f"  ! {thieu} ảnh chưa có bản gốc trên máy (đang đọc bản xem trước nhỏ -> khó đọc nhãn)."
+              " Chạy lại với --tai-goc để tải bản gốc tháng này từ iCloud.")
     return rows
 
 
@@ -224,7 +269,7 @@ def _quet_thu_muc(goc: str, tu: str, den: str) -> list[tuple]:
 def cmd_quet(a) -> None:
     y, m = thang(a.thang)
     tu, den = khoang_thang(y, m)
-    rows = _quet_thu_muc(a.thu_muc, tu, den) if a.thu_muc else _quet_photos(tu, den, a.ocr)
+    rows = _quet_thu_muc(a.thu_muc, tu, den) if a.thu_muc else _quet_photos(tu, den, a.ocr, a.tai_goc)
     conn = ket_noi()
     for r in rows:
         # Giữ nguyên phần đã duyệt nếu quét lại.
@@ -804,6 +849,8 @@ def main() -> None:
     s.add_argument("thang")
     s.add_argument("--thu-muc", help="đọc từ thư mục ảnh thay vì thư viện Photos")
     s.add_argument("--ocr", action="store_true", help="đọc chữ trong ảnh (tên khách viết tay...)")
+    s.add_argument("--tai-goc", action="store_true",
+                   help="tải bản gốc tháng này từ iCloud (ảnh chưa có trên máy) để đọc nhãn rõ")
     s.set_defaults(f=cmd_quet)
     s = sub.add_parser("ghep", help="máy tự gợi ý ảnh nào của khách nào")
     s.add_argument("thang")
