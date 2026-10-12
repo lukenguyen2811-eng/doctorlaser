@@ -4,6 +4,8 @@ Cơ chế: OAuth2 client_credentials -> access token (1 giờ) -> gọi API kèm
 header Retailer + Bearer. Tài liệu: KiotViet Public API v1.2.
 """
 
+from __future__ import annotations
+
 import calendar
 import re
 import time

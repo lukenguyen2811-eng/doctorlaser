@@ -8,6 +8,8 @@ hồ sơ khách trên KIOT là thấy "buổi này có ảnh" và bấm mở.
 - bot Telegram (/anh) tra cứu:               tra_cuu(chuoi)
 """
 
+from __future__ import annotations
+
 import os
 import re
 

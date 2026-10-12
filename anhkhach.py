@@ -17,6 +17,8 @@ Toàn bộ dữ liệu nằm trong file `anhkhach.db` trên máy. Ảnh KHÔNG b
 sửa trong Photos (trừ khi bật --gan-tu-khoa: chỉ THÊM từ khóa vào ảnh).
 """
 
+from __future__ import annotations
+
 import argparse
 import calendar
 import datetime as dt
