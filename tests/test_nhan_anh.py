@@ -137,5 +137,46 @@ class KhopNhan(unittest.TestCase):
         self.assertIn("Hóa đơn ngày khác", trang)
 
 
+class GioHoaDon(unittest.TestCase):
+    def setUp(self):
+        self.c = A.ket_noi()
+        self.c.execute("DELETE FROM visits")
+        self.c.execute("DELETE FROM photos")
+        for code, gio in [("H1", "09:50"), ("H2", "11:00"), ("H3", "11:20"), ("H4", "15:00")]:
+            self.c.execute("INSERT INTO visits (code,ngay,gio,ten_kh,dich_vu) VALUES (?,?,?,?,?)",
+                           (code, "2026-09-05", gio, "Khach " + code, "Laser"))
+
+    def tearDown(self):
+        self.c.close()
+
+    def ghep(self, gio_anh):
+        for i, g in enumerate(gio_anh):
+            self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr) VALUES (?,?,?,?,?,?)",
+                           (f"p{i}", "2026-09-05", f"2026-09-05T{g}:00", "IMG.HEIC", "", ""))
+        A.ghep_ngay(self.c, "2026-09-05")
+        return {r[0]: (r[1], r[2]) for r in self.c.execute("SELECT id, goi_y_hd, do_tin FROM photos")}
+
+    def test_mot_hoa_don_gan_gio(self):
+        r = self.ghep(["09:40", "09:45"])
+        self.assertEqual(r["p0"], ("H1", "goi_y"))
+        self.assertEqual(r["p1"], ("H1", "goi_y"))
+
+    def test_hai_hoa_don_gan_gio_nguoi_chon(self):
+        self.assertEqual(self.ghep(["10:55"])["p0"], (None, "chua_ro"))  # H2 11:00, H3 11:20
+
+    def test_khong_hoa_don_nao_gan(self):
+        self.assertEqual(self.ghep(["13:00"])["p0"], (None, "chua_ro"))
+
+    def test_hoa_don_som_hon_30_phut_khong_tinh(self):
+        self.assertEqual(self.ghep(["15:40"])["p0"], (None, "chua_ro"))  # H4 15:00 = 40' trước
+
+    def test_nhan_tren_anh_thang_gio(self):
+        self.c.execute("UPDATE visits SET ten_kh='Lê Thị Tâm' WHERE code='H4'")
+        self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr) VALUES"
+                       " ('q','2026-09-05','2026-09-05T09:45:00','IMG.HEIC','','Tâm-laser 5/9/26')")
+        A.ghep_ngay(self.c, "2026-09-05")
+        self.assertEqual(self.c.execute("SELECT goi_y_hd, do_tin FROM photos").fetchone()[:], ("H4", "chac"))
+
+
 if __name__ == "__main__":
     unittest.main()

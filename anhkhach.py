@@ -37,6 +37,7 @@ from urllib.parse import parse_qs, urlparse
 
 DB_FILE = os.environ.get("ANH_DB", "anhkhach.db")
 PORT = int(os.environ.get("ANH_PORT", "8765"))
+GIO_TRUOC, GIO_SAU = 30, 45  # hóa đơn trong [đầu đợt - 30', cuối đợt + 45'] coi là gần giờ chụp
 DOT_PHUT = 15  # ảnh cách nhau <= 15 phút coi là cùng một đợt chụp
 ANH_DUOI = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"}
 
@@ -536,6 +537,23 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
             for r in cung:
                 if not r["hd"] and r["do_tin"] != "khong_hd":
                     r.update(hd=hd, do_tin="goi_y", ly_do="cùng đợt chụp với ảnh đã khớp tên")
+
+    # Đợt chưa khớp: giờ hóa đơn thường cách giờ chụp ~2 phút (đo 184 ảnh chắc chắn 09-10/2026:
+    # 80% trong -14..+27 phút) -> đợt chỉ có đúng 1 hóa đơn trong [đầu đợt -30', cuối đợt +45'] thì gợi ý.
+    for so_dot in {r["dot"] for r in ket_qua.values()}:
+        cung = [(p, ket_qua[p["id"]]) for p in photos if ket_qua[p["id"]]["dot"] == so_dot]
+        if any(r["hd"] for _, r in cung):
+            continue
+        dau = dt.datetime.fromisoformat(cung[0][0]["thoi_gian"])
+        cuoi = dt.datetime.fromisoformat(cung[-1][0]["thoi_gian"])
+        gan = [v for v in visits if v["gio"] and
+               dau - dt.timedelta(minutes=GIO_TRUOC) <= dt.datetime.fromisoformat(f"{ngay}T{v['gio'][:5]}")
+               <= cuoi + dt.timedelta(minutes=GIO_SAU)]
+        if len(gan) == 1:
+            for _, r in cung:
+                if r["do_tin"] != "khong_hd":
+                    r.update(hd=gan[0]["code"], do_tin="goi_y",
+                             ly_do=f"chỉ 1 hóa đơn gần giờ chụp ({gan[0]['gio'][:5]})")
 
     # Còn lại: nếu cả ngày chỉ 1 khách -> gợi ý khách đó.
     if len(visits) == 1:
