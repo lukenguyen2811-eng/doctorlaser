@@ -3,3 +3,4 @@
 osxphotos>=0.68
 Pillow>=10.0
 pillow-heif>=0.16
+openpyxl>=3.1   # hoadon_cu.py đọc file Excel hóa đơn cũ
