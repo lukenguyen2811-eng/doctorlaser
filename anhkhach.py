@@ -39,7 +39,7 @@ DB_FILE = os.environ.get("ANH_DB", "anhkhach.db")
 PORT = int(os.environ.get("ANH_PORT", "8765"))
 GIO_TRUOC, GIO_SAU = 30, 45  # hóa đơn trong [đầu đợt - 30', cuối đợt + 45'] coi là gần giờ chụp
 DOT_PHUT = 15  # ảnh cách nhau <= 15 phút coi là cùng một đợt chụp
-LAN_GAN_PHUT = 3  # đợt có nhiều khách: ảnh chưa khớp chỉ lấy theo ảnh neo gần nhất nếu cách <= 3 phút
+CHUOI_GIAY = 60  # đợt có nhiều khách: chỉ lan theo chuỗi ảnh chụp liền, 2 ảnh kề nhau cách <= 60 giây
 TRUNG_GIAY = 3  # >= 3 ảnh cùng giờ đến từng giây = giờ nhập/lưu, không phải giờ chụp
 ANH_DUOI = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"}
 
@@ -563,12 +563,24 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
             for r in cho:
                 r.update(hd=hd, do_tin="goi_y", ly_do="cùng đợt chụp với ảnh đã khớp tên")
             continue
+        # Chỉ lan theo CHUỖI ảnh chụp liền (2 ảnh kề nhau cách <= CHUOI_GIAY): quãng trống dài hơn
+        # là lúc đổi khách (soát 25 ảnh: 2 ca sai đều lan qua quãng trống > 60s).
+        la_neo = {id(n) for n in neo}
         for r in cho:
-            xa = min(abs((r["gio"] - n["gio"]).total_seconds()) / 60 for n in neo)
-            gan = {n["hd"] for n in neo if abs((r["gio"] - n["gio"]).total_seconds()) / 60 == xa}
-            if xa <= LAN_GAN_PHUT and len(gan) == 1 and None not in gan:
-                r.update(hd=gan.pop(), do_tin="goi_y",
-                         ly_do=f"đợt có nhiều khách — theo ảnh đã khớp gần nhất (cách {xa:.0f}')")
+            i = cung.index(r)
+            tim = []  # (giây tới neo, hd) của neo đầu tiên gặp mỗi phía
+            for buoc in (-1, 1):
+                j = i
+                while 0 <= j + buoc < len(cung) and \
+                        abs((cung[j + buoc]["gio"] - cung[j]["gio"]).total_seconds()) <= CHUOI_GIAY:
+                    j += buoc
+                    if id(cung[j]) in la_neo:
+                        tim.append((abs((cung[j]["gio"] - r["gio"]).total_seconds()), cung[j]["hd"]))
+                        break
+            tim.sort()
+            if tim and tim[0][1] and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > tim[0][0]):
+                r.update(hd=tim[0][1], do_tin="goi_y",
+                         ly_do=f"đợt có nhiều khách — cùng loạt chụp liền với ảnh đã khớp (cách {tim[0][0] / 60:.0f}')")
             else:
                 r["ly_do"] = r["ly_do"] or "đợt chụp có nhiều khách — người chọn"
 

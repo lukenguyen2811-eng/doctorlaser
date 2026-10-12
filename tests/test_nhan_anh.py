@@ -240,13 +240,26 @@ class LanTheoDot(unittest.TestCase):
         self.assertEqual(r["a"], ("K1", "chac"))
         self.assertEqual((r["b"], r["c"]), (("K1", "goi_y"), ("K1", "goi_y")))
 
-    def test_hai_khach_mot_dot_lay_neo_gan_nhat(self):
-        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:01:00", ""),
-                       ("c", "10:07:00", "Bích-laser 7/9/26"), ("d", "10:09:00", ""),
-                       ("e", "10:04:00", "")])  # e cách a 4', cách c 3' -> theo c
+    def test_hai_khach_mot_dot_lan_theo_chuoi_chup_lien(self):
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:00:30", ""),
+                       ("c", "10:07:00", "Bích-laser 7/9/26"), ("d", "10:07:40", ""),
+                       ("e", "10:04:00", "")])  # e lẻ loi giữa 2 khách -> người chọn
         self.assertEqual(r["b"], ("K1", "goi_y"))
         self.assertEqual(r["d"], ("K2", "goi_y"))
-        self.assertEqual(r["e"], ("K2", "goi_y"))
+        self.assertEqual(r["e"], (None, "chua_ro"))
+
+    def test_chuoi_dai_van_lan(self):  # mỗi ảnh cách ảnh trước 50s -> cả loạt là 1 khách
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26")] +
+                      [(f"x{i}", f"10:0{(i * 50) // 60}:{(i * 50) % 60:02d}", "") for i in range(1, 6)] +
+                      [("c", "10:12:00", "Bích-laser 7/9/26")])
+        self.assertEqual(r["x5"], ("K1", "goi_y"))  # cách a 4'10" nhưng cùng loạt liền
+
+    def test_quang_trong_qua_60_giay_cat_chuoi(self):  # âm: soát thật 415201A3, BB0D2F19
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:00:40", ""),
+                       ("x", "10:02:20", ""), ("y", "10:02:30", ""),  # trống 100s sau b = đổi khách
+                       ("c", "10:09:00", "Bích-laser 7/9/26")])
+        self.assertEqual(r["b"], ("K1", "goi_y"))
+        self.assertEqual((r["x"], r["y"]), ((None, "chua_ro"), (None, "chua_ro")))
 
     def test_neo_nhan_chua_khop_chan_lan_ca_dot(self):  # âm: nhãn người khác không khớp HĐ
         r = self.ghep([("a", "10:00:00", "Tâm-laser 7/9/26"), ("b", "10:01:00", ""),
