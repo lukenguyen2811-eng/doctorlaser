@@ -105,6 +105,7 @@ WELCOME = (
     "/kiemtradata - xem data ngày vừa chốt (bản 19h để sale rà trước)\n"
     "/stats - tổng data CRM (rác/quan tâm/lead) + trạng thái\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
+    "/anh - ảnh điều trị của khách (vd /anh 0909123456, /anh KH000123, /anh HD012345)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
     "/refresh - tải lại dữ liệu mới nhất\n"
     "/help - hướng dẫn"
@@ -189,6 +190,29 @@ async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as e:  # noqa: BLE001
         log.exception("refresh failed")
         await update.message.reply_text(f"Lỗi khi tải dữ liệu: {e}")
+
+
+async def cmd_anh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tra ảnh điều trị theo SĐT / mã KH / mã hóa đơn (chỉ mục lưu trên KIOT)."""
+    if not _allowed(update):
+        return
+    q = " ".join(context.args).strip()
+    if not q:
+        await update.message.reply_text(
+            "Gõ kèm SĐT, mã khách hoặc mã hóa đơn, ví dụ:\n/anh 0909123456\n/anh KH000123"
+        )
+        return
+    import anhkiot
+
+    try:
+        items = await asyncio.to_thread(anhkiot.tra_cuu, q)
+    except Exception as e:  # noqa: BLE001
+        log.exception("tra ảnh lỗi")
+        await update.message.reply_text(f"Không tra được ảnh: {e}")
+        return
+    await update.message.reply_text(
+        anhkiot.dinh_dang(items), parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
 
 
 async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1107,6 +1131,7 @@ def main() -> None:
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
+    app.add_handler(CommandHandler("anh", cmd_anh))
     app.add_handler(CommandHandler("ads", cmd_ads))
     app.add_handler(CommandHandler("baocaoads", cmd_baocaoads))
     app.add_handler(CommandHandler("adsnow", cmd_adsnow))

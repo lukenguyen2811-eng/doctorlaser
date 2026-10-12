@@ -22,7 +22,7 @@ python3 anhkhach.py quet 2025-09 --ocr    # 2. đọc ảnh tháng 9 trong Photo
 python3 anhkhach.py ghep 2025-09          # 3. máy tự gợi ý
 python3 anhkhach.py duyet                 # 4. mở trang duyệt (dùng Safari)
 python3 anhkhach.py baocao 2025-09        # 5. xem tỷ lệ máy đoán đúng
-python3 anhkhach.py xuat 2025-09 ~/KhachHang --gan-tu-khoa   # 6. xuất ảnh theo khách
+python3 anhkhach.py xuat 2025-09 ~/KhachHang --gan-tu-khoa --kiot   # 6. xuất ảnh theo khách + báo KIOT
 ```
 Nếu ảnh đã được xuất sẵn ra một thư mục: `python3 anhkhach.py quet 2025-09 --thu-muc ~/AnhXuat`
 (tên thư mục con/tên file có tên khách cũng được dùng để ghép).
@@ -66,3 +66,14 @@ Nhãn được ghi ở 4 nơi, mất 1 nơi vẫn còn 3:
 **Sao lưu 3-2-1:** Mac mini (bản chính) + ổ cứng ngoài Time Machine + Google Drive.
 Đẩy cả thư mục `~/KhachHang` lên Drive bằng app **Google Drive for desktop** (tự đồng bộ).
 Dùng tài khoản Google **của công ty** (Workspace), bật xác minh 2 bước, KHÔNG chia sẻ link công khai.
+
+## Tra cứu nhanh cho nhân viên (app KIOT + bot Telegram)
+Ảnh **không** được tải lên KIOT. KIOT chỉ giữ **chỉ mục theo hóa đơn**: ngày, dịch vụ, số ảnh
+trước/sau, và link mở ảnh trên Google Drive (mặc định là tìm mã KH trong Drive công ty).
+
+- Cần `KIOT_INGEST_TOKEN` trong `.env` (copy `INGEST_TOKEN` của service kiot trên Railway).
+- Đẩy chỉ mục: `python3 anhkhach.py daykiot 2025-09` (hoặc thêm `--kiot` khi `xuat`).
+  Gửi lại nhiều lần không sao — KIOT ghi đè theo mã hóa đơn.
+- **Trên KIOT:** mở hồ sơ khách hoặc hóa đơn → mục **📷 Ảnh điều trị** → **Mở ảnh**.
+- **Trên Telegram:** `/anh 0909123456`, `/anh KH000123` hoặc `/anh HD012345`.
+  (Bot trên Railway cũng cần biến `KIOT_INGEST_TOKEN` — bot đã dùng sẵn cho các lệnh KIOT khác.)

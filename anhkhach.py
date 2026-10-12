@@ -445,6 +445,49 @@ def cmd_xuat(a) -> None:
                         r["xn_hd"], r["dich_vu"], r["loai_anh"], r["vung"], r["ghi_chu"],
                         r["da_xuat"]])
     print(f"Đã xuất {so} ảnh vào {dich}\nDanh sách: {csv_path}")
+    if a.kiot:
+        _day_kiot(conn, tu, den)
+
+
+def chi_muc_kiot(conn, tu: str, den: str) -> list[dict]:
+    """Gom ảnh đã xác nhận theo hóa đơn -> chỉ mục gửi KIOT (không có ảnh, chỉ số đếm)."""
+    rows = conn.execute(
+        "SELECT p.xn_hd, p.loai_anh, p.vung, v.ma_kh, v.sdt, v.ten_kh, v.ngay, v.dich_vu "
+        "FROM photos p JOIN visits v ON v.code=p.xn_hd "
+        "WHERE p.ngay BETWEEN ? AND ? AND p.bo_qua=0", (tu, den)).fetchall()
+    gom: dict[str, dict] = {}
+    for r in rows:
+        it = gom.setdefault(r["xn_hd"], {
+            "hoa_don": r["xn_hd"], "ma_kh": r["ma_kh"], "sdt": r["sdt"], "ten_kh": r["ten_kh"],
+            "ngay": r["ngay"], "dich_vu": r["dich_vu"], "so_anh": 0,
+            "loai": {"truoc": 0, "trong": 0, "sau": 0}, "vung": [], "link": ""})
+        it["so_anh"] += 1
+        k = {"trước": "truoc", "trong": "trong", "sau": "sau"}.get(r["loai_anh"] or "")
+        if k:
+            it["loai"][k] += 1
+        if r["vung"] and r["vung"] not in it["vung"]:
+            it["vung"].append(r["vung"])
+    return list(gom.values())
+
+
+def _day_kiot(conn, tu: str, den: str) -> None:
+    import anhkiot
+
+    items = chi_muc_kiot(conn, tu, den)
+    if not items:
+        print("Không có hóa đơn nào có ảnh đã xác nhận để đẩy lên KIOT.")
+        return
+    kq = anhkiot.day_chi_muc(items)
+    loi = f", lỗi {len(kq['loi'])}" if kq["loi"] else ""
+    print(f"KIOT: thêm {kq['them']}, cập nhật {kq['cap_nhat']} hóa đơn có ảnh{loi}.")
+    for e in kq["loi"][:10]:
+        print(f"  ! {e.get('hoa_don')}: {e.get('ly_do')}")
+
+
+def cmd_daykiot(a) -> None:
+    y, m = thang(a.thang)
+    tu, den = khoang_thang(y, m)
+    _day_kiot(ket_noi(), tu, den)
 
 
 def _nhan(r) -> tuple[list[str], str]:
@@ -709,7 +752,11 @@ def main() -> None:
     s.add_argument("thang")
     s.add_argument("dich", help="thư mục đích, ví dụ ~/KhachHang")
     s.add_argument("--gan-tu-khoa", action="store_true", help="thêm từ khóa vào ảnh trong Photos")
+    s.add_argument("--kiot", action="store_true", help="đẩy chỉ mục ảnh lên app KIOT")
     s.set_defaults(f=cmd_xuat)
+    s = sub.add_parser("daykiot", help="đẩy chỉ mục ảnh (theo hóa đơn) lên app KIOT")
+    s.add_argument("thang")
+    s.set_defaults(f=cmd_daykiot)
     a = ap.parse_args()
     a.f(a)
 
