@@ -99,6 +99,9 @@ def ket_noi() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS photos_ngay ON photos(ngay);
         """
     )
+    # Cột thêm sau: DB cũ chưa có -> thêm, giữ nguyên dữ liệu.
+    if "khuon_mat" not in {r[1] for r in conn.execute("PRAGMA table_info(photos)")}:
+        conn.execute("ALTER TABLE photos ADD COLUMN khuon_mat TEXT")  # mã người (uuid) app Ảnh nhận ra
     return conn
 
 
@@ -305,13 +308,22 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: b
         xem = goc or xem_nho or p.path
         rows.append((p.uuid, "photos", t.date().isoformat(), t.isoformat(timespec="seconds"),
                      p.original_filename, goc or p.path or "", xem or "",
-                     " / ".join(x for x in cac_chu if x.strip()), chu_ocr))
+                     " / ".join(x for x in cac_chu if x.strip()), chu_ocr, _ma_nguoi(p)))
         if i % 25 == 0 or i == len(ds):
             print(f"  {i}/{len(ds)} ảnh...", flush=True)
     if thieu:
         print(f"  ! {thieu} ảnh chưa có bản gốc trên máy (đang đọc bản xem trước nhỏ -> khó đọc nhãn)."
               " Chạy lại với --tai-goc để tải bản gốc tháng này từ iCloud.")
     return rows
+
+
+def _ma_nguoi(p) -> str:
+    """Mã người (uuid nội bộ của app Ảnh) có trên ảnh, cách nhau dấu cách. CHỈ mã — không lưu ảnh
+    khuôn mặt, toạ độ hay vector; dữ liệu khuôn mặt không rời app Ảnh."""
+    try:
+        return " ".join(sorted({pi.uuid for pi in (p.person_info or []) if getattr(pi, "uuid", None)}))
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _ngay_chup_file(path: str) -> dt.datetime:
@@ -350,7 +362,7 @@ def _quet_thu_muc(goc: str, tu: str, den: str) -> list[tuple]:
             # Tên thư mục con + tên file cũng là "chú thích" (hay chứa tên khách).
             rel = os.path.relpath(path, goc)
             rows.append((pid, "thu_muc", ngay, t.isoformat(timespec="seconds"), f,
-                         path, path, os.path.splitext(rel)[0].replace(os.sep, " / "), ""))
+                         path, path, os.path.splitext(rel)[0].replace(os.sep, " / "), "", ""))
     return rows
 
 
@@ -363,11 +375,12 @@ def cmd_quet(a) -> None:
         # Giữ nguyên phần đã duyệt nếu quét lại.
         conn.execute(
             "INSERT INTO photos (id, nguon, ngay, thoi_gian, ten_file, duong_dan, anh_xem,"
-            " chu_thich, ocr) VALUES (?,?,?,?,?,?,?,?,?)"
+            " chu_thich, ocr, khuon_mat) VALUES (?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET ngay=excluded.ngay, thoi_gian=excluded.thoi_gian,"
             " duong_dan=excluded.duong_dan, anh_xem=excluded.anh_xem,"
             " chu_thich=excluded.chu_thich,"
-            " ocr=CASE WHEN excluded.ocr != '' THEN excluded.ocr ELSE photos.ocr END",
+            " ocr=CASE WHEN excluded.ocr != '' THEN excluded.ocr ELSE photos.ocr END,"
+            " khuon_mat=CASE WHEN excluded.khuon_mat != '' THEN excluded.khuon_mat ELSE photos.khuon_mat END",
             r,
         )
     conn.commit()
@@ -640,6 +653,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
             if not r["hd"] and r["do_tin"] != "khong_hd":
                 r.update(hd=visits[0]["code"], do_tin="goi_y", ly_do="cả ngày chỉ có 1 hóa đơn")
 
+    _goi_y_khuon_mat(conn, ngay, photos, ket_qua)
+
     for r in ket_qua.values():
         if r["trung_giay"] and not r["hd"] and r["do_tin"] != "khong_hd":
             r["ly_do"] = r["ly_do"] or "giờ ảnh trùng từng giây với nhiều ảnh khác (giờ nhập, không phải giờ chụp) — người chọn"
@@ -655,6 +670,55 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         if loai:
             conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
+
+
+def _nguoi_cua_khach(conn, ngay: str, photos, ket_qua) -> dict[str, set]:
+    """mã người (app Ảnh) -> các mã KH, từ ảnh ĐÃ DUYỆT (xn_hd) hoặc máy chấm 'chac'.
+    Ngày khác lấy trong DB; ngày đang ghép lấy kết quả vừa tính."""
+    m: dict[str, set] = {}
+
+    def them(km, ma):
+        for u in (km or "").split():
+            if ma:
+                m.setdefault(u, set()).add(ma)
+
+    for r in conn.execute(
+            "SELECT p.khuon_mat, v.ma_kh FROM photos p JOIN visits v ON v.code = "
+            "COALESCE(p.xn_hd, CASE WHEN p.do_tin='chac' THEN p.goi_y_hd END) "
+            "WHERE p.bo_qua=0 AND p.ngay != ? AND COALESCE(p.khuon_mat,'') != ''", (ngay,)):
+        them(r["khuon_mat"], r["ma_kh"])
+    for p in photos:
+        r = ket_qua[p["id"]]
+        hd = p["xn_hd"] or (r["hd"] if r["do_tin"] == "chac" else None)
+        if hd and not p["bo_qua"] and p["khuon_mat"]:
+            v = conn.execute("SELECT ma_kh FROM visits WHERE code=?", (hd,)).fetchone()
+            them(p["khuon_mat"], v["ma_kh"] if v else None)
+    return m
+
+
+def _goi_y_khuon_mat(conn, ngay: str, photos, ket_qua) -> None:
+    """Ảnh chưa có HĐ sau mọi luật: trùng mã người với ảnh đã xác nhận của ĐÚNG 1 khách có HĐ cùng
+    ngày (ngày chụp hoặc ngày ghi trên nhãn) -> CHỈ gợi ý, không bao giờ 'chac'.
+    Mã người gắn với >= 2 khách (nhân viên/bác sĩ hay lọt ảnh, hoặc app Ảnh gộp nhầm) thì bỏ."""
+    cho = [p for p in photos if p["khuon_mat"] and not ket_qua[p["id"]]["hd"]
+           and ket_qua[p["id"]]["do_tin"] != "khong_hd"]
+    if not cho:
+        return
+    m = _nguoi_cua_khach(conn, ngay, photos, ket_qua)
+    for p in cho:
+        r = ket_qua[p["id"]]
+        ngays = {ngay} | {n["ngay"] for n in doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])) if n["ngay"]}
+        khach = {next(iter(m[u])) for u in p["khuon_mat"].split() if len(m.get(u, ())) == 1}
+        ung = {}
+        for ma in khach:
+            vs = conn.execute(f"SELECT * FROM visits WHERE ma_kh=? AND ngay IN ({','.join('?' * len(ngays))})"
+                              " ORDER BY ngay != ?, gio", (ma, *sorted(ngays), ngay)).fetchall()
+            if vs:
+                ung[ma] = vs[0]
+        if len(ung) == 1:
+            v = next(iter(ung.values()))
+            r.update(hd=v["code"], do_tin="goi_y", diem=40,
+                     ly_do="cùng khuôn mặt với ảnh đã xác nhận của khách")
 
 
 def cmd_ghep(a) -> None:
