@@ -908,6 +908,21 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     return _trang(f"Ảnh {ngay}", "".join(o))
 
 
+def _xem_jpeg(pid: str, path: str) -> str:
+    """HEIC/TIFF chỉ Safari xem được -> đổi sang JPEG (sips, lưu đệm trong anh_goc/_xem) cho Chrome."""
+    if os.path.splitext(path)[1].lower() not in (".heic", ".heif", ".tif", ".tiff"):
+        return path
+    dich = os.path.join(ANH_GOC, "_xem", re.sub(r"[^\w-]", "", pid) + ".jpg")
+    if not os.path.exists(dich):
+        os.makedirs(os.path.dirname(dich), exist_ok=True)
+        try:
+            subprocess.run(["sips", "-s", "format", "jpeg", "-Z", "1600", path, "--out", dich],
+                           check=True, capture_output=True, timeout=60)
+        except Exception:  # noqa: BLE001
+            return path
+    return dich
+
+
 class _Handler(BaseHTTPRequestHandler):
     conn: sqlite3.Connection
 
@@ -931,11 +946,12 @@ class _Handler(BaseHTTPRequestHandler):
             r = self.conn.execute("SELECT anh_xem FROM photos WHERE id=?",
                                   (u.path[5:],)).fetchone()
             if r and r[0] and os.path.exists(r[0]):
-                ext = os.path.splitext(r[0])[1].lower()
+                f = _xem_jpeg(u.path[5:], r[0])
+                ext = os.path.splitext(f)[1].lower()
                 ctype = {".png": "image/png", ".heic": "image/heic", ".heif": "image/heif",
                          ".tif": "image/tiff", ".tiff": "image/tiff"}.get(ext, "image/jpeg")
-                with open(r[0], "rb") as f:
-                    return self._gui(f.read(), ctype)
+                with open(f, "rb") as fh:
+                    return self._gui(fh.read(), ctype)
             return self._gui(b"", "text/plain", 404)
         self._gui(b"not found", "text/plain", 404)
 
