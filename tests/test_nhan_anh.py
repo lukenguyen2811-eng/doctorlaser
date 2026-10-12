@@ -69,6 +69,9 @@ class KhopNhan(unittest.TestCase):
             self.c.execute("INSERT INTO visits (code,ngay,ten_kh,dich_vu) VALUES (?,?,?,?)",
                            (code, ngay, ten, dv))
 
+    def tearDown(self):
+        self.c.close()
+
     def khop(self, chu, ngay_anh):
         return A._khop_nhan(self.c, A.doc_nhan(chu, 2026)[0], ngay_anh)
 
