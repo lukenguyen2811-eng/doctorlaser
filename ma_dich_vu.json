@@ -1,5 +1,5 @@
 {
-  "_ghi_chu": "Mã dịch vụ nhân viên viết tắt trên ảnh -> chữ (không dấu) có trong tên dịch vụ KiotViet. BẢN NHÁP 12/10/2026 soạn từ 330 nhãn tháng 9-10, CHỜ nhân viên/BS sửa. Sửa xong chạy lại: anhkhach.py ghep YYYY-MM. Chưa thấy tên dịch vụ Laserlift trên KiotViet 09-10 (chỉ có sản phẩm EYELIFT SERUM -> KHÔNG khớp chữ 'lift' trơn).",
+  "_ghi_chu": "Mã dịch vụ nhân viên viết tắt trên ảnh -> chữ (không dấu) có trong tên dịch vụ KiotViet. Soạn 12/10/2026 từ 330 nhãn tháng 9-10; Lượng DUYỆT 12/10/2026 (laserlifi = Laserlift). Thêm/sửa mã khi nhân viên dùng mã mới. Sửa xong chạy lại: anhkhach.py ghep YYYY-MM. Chưa thấy tên dịch vụ Laserlift trên KiotViet 09-10 (chỉ có sản phẩm EYELIFT SERUM -> KHÔNG khớp chữ 'lift' trơn).",
   "csd": {
     "nghia": "chăm sóc da (mụn, peel, điện di, IPL)",
     "khop": [
