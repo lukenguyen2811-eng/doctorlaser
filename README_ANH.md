@@ -30,7 +30,7 @@ Nếu ảnh đã được xuất sẵn ra một thư mục: `python3 anhkhach.py
 ## Máy ghép thế nào
 | Mức | Khi nào |
 |---|---|
-| **Chắc chắn** | Chú thích/tiêu đề/album/từ khóa/chữ trong ảnh/tên file chứa **SĐT, mã KH hoặc họ tên đầy đủ** của 1 khách có hóa đơn cùng ngày |
+| **Chắc chắn** | Chú thích/tiêu đề/album/từ khóa/chữ trong ảnh/tên file chứa **SĐT, mã KH hoặc họ tên đầy đủ** của 1 khách có hóa đơn cùng ngày; hoặc **nhãn nhân viên ghi trên ảnh** dạng `Tên-dịch vụ ngày/tháng/năm` (vd `Giang-seo 9/10/26`, cần chạy `quet --ocr`) khớp đúng 1 khách — trùng tên thì dùng chữ viết tắt dịch vụ để tách |
 | **Gợi ý** | Khớp một phần tên (tên đệm + tên); cùng **đợt chụp** (cách nhau ≤15 phút) với ảnh đã khớp; hoặc cả ngày chỉ có 1 hóa đơn |
 | **Chưa rõ** | Có hóa đơn nhưng không có dấu hiệu nào → người chọn |
 | **Không HĐ** | Ngày đó không có hóa đơn (ảnh cá nhân, ảnh khách chưa thanh toán...) |

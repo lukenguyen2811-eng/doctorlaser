@@ -259,6 +259,62 @@ def _diem(v: sqlite3.Row, chu: str, so: str) -> tuple[int, str]:
     return 0, ""
 
 
+# Nhãn nhân viên ghi trên ảnh: "Giang-seo 9/10/26", "Thu-tt 9/10/26", "Ngọc Anh - nam 9/10".
+_NHAN = re.compile(
+    r"([^\W\d_]+(?:\s+[^\W\d_]+)?)\s*[-–—]\s*([^\W\d_]{1,10})\s+"
+    r"(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*(\d{2,4}))?"
+)
+
+
+def doc_nhan(chu: str, nam_mac_dinh: int) -> list[dict]:
+    """Tìm các nhãn 'Tên-dịch vụ ngày/tháng/năm' trong chữ đọc được trên ảnh."""
+    ra = []
+    for m in _NHAN.finditer(chu or ""):
+        ten, ma_dv, d, mo, y = m.groups()
+        nam = int(y) if y else nam_mac_dinh
+        nam = nam + 2000 if nam < 100 else nam
+        try:
+            ngay = dt.date(nam, int(mo), int(d)).isoformat()
+        except ValueError:
+            ngay = None
+        ra.append({"goc": m.group(0).strip(), "ten": khong_dau(ten), "ma_dv": khong_dau(ma_dv),
+                   "ngay": ngay})
+    return ra
+
+
+def _dv_khop(ma: str, dich_vu: str) -> bool:
+    """'seo' ~ 'Trị sẹo rỗ'; 'xx' ~ 'Xóa xăm'; 'tln' ~ 'Triệt lông nách'."""
+    tu = khong_dau(dich_vu).split()
+    if not ma or not tu:
+        return False
+    if ma in tu or (len(ma) >= 3 and any(w.startswith(ma) for w in tu)):
+        return True
+    dau = "".join(w[0] for w in tu)
+    return len(ma) >= 2 and ma in dau
+
+
+def _khop_nhan(conn, nhan: dict, ngay_anh: str) -> tuple[str | None, int, str]:
+    """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp)."""
+    ngay = nhan["ngay"] or ngay_anh
+    visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
+    w = nhan["ten"].split()
+
+    def cung_ten(v):
+        t = khong_dau(v["ten_kh"]).split()
+        return bool(t) and (t[-len(w):] == w)
+
+    ung = [v for v in visits if cung_ten(v)]
+    if len(ung) > 1:  # trùng tên -> dùng mã dịch vụ trên nhãn để tách
+        loc = [v for v in ung if _dv_khop(nhan["ma_dv"], v["dich_vu"])]
+        ung = loc or ung
+    lech = f" (nhãn ghi ngày {ngay})" if ngay != ngay_anh else ""
+    if len(ung) == 1:
+        return ung[0]["code"], 85, f"nhãn '{nhan['goc']}' khớp {ung[0]['ten_kh']}{lech}"
+    if len(ung) > 1:
+        return None, 0, f"nhãn '{nhan['goc']}' trùng {len(ung)} khách{lech} — người chọn"
+    return None, 0, f"nhãn '{nhan['goc']}' không thấy khách tên này trong hóa đơn ngày {ngay}"
+
+
 def _phut(a: str, b: str) -> float:
     return abs((dt.datetime.fromisoformat(a) - dt.datetime.fromisoformat(b)).total_seconds()) / 60
 
@@ -281,17 +337,25 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
 
     for p in photos:
         r = ket_qua[p["id"]]
-        if not visits:
+        goc = f"{p['chu_thich']} {p['ocr']} {p['ten_file']}"
+        if not visits and not doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])):
             r.update(do_tin="khong_hd", ly_do="ngày này không có hóa đơn")
             continue
-        goc = f"{p['chu_thich']} {p['ocr']} {p['ten_file']}"
         chu = khong_dau(goc)
         # Các dãy số dạng SĐT (cho phép cách/chấm/gạch: 0909 123 456).
         so = " ".join(re.sub(r"\D", "", x) for x in re.findall(r"\d[\d .\-]{7,}\d", goc))
         diem = sorted(((_diem(v, chu, so), v["code"]) for v in visits), reverse=True)
-        (d, ly_do), code = diem[0]
+        (d, ly_do), code = diem[0] if diem else ((0, ""), None)
         if d and (len(diem) == 1 or diem[1][0][0] < d):
             r.update(hd=code, diem=d, ly_do=ly_do, do_tin="chac" if d >= 80 else "goi_y")
+            continue
+        # Nhãn nhân viên ghi trên ảnh (chỉ có tên + dịch vụ viết tắt + ngày).
+        for nhan in doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])):
+            hd, d, ly_do = _khop_nhan(conn, nhan, ngay)
+            r["ly_do"] = ly_do
+            if hd:
+                r.update(hd=hd, diem=d, do_tin="chac")
+                break
 
     # Ảnh chưa khớp lấy theo ảnh đã khớp trong cùng đợt (nếu cả đợt chỉ 1 khách).
     for so_dot in {r["dot"] for r in ket_qua.values()}:
