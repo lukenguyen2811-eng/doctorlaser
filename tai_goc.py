@@ -4,7 +4,7 @@ Photos qua AppleScript chỉ xuất từng ảnh một (~2 ảnh/phút). PhotoKi
 cùng xin iCloud -> nhanh hơn nhiều. Chỉ tải bản tạm của tháng đang xử lý; ảnh trong Photos/iCloud
 không bị sửa. Chạy trong Terminal của Mac Ảnh (lần đầu macOS hỏi quyền truy cập Ảnh -> Cho phép):
 
-    .venv/bin/python tai_goc.py 2026-10            # 6 luồng
+    .venv/bin/python tai_goc.py 2026-10            # 6 luồng, chỉ ảnh chưa có bản nào trên máy
     .venv/bin/python tai_goc.py 2026-10 --luong 10
 Xong thì chạy:  .venv/bin/python anhkhach.py quet 2026-10 --ocr --tai-goc
 """
@@ -17,10 +17,10 @@ import subprocess
 import sys
 import time
 
-from anhkhach import ANH_GOC, khoang_thang, thang
+from anhkhach import ANH_GOC, _co_xem, khoang_thang, thang
 
 
-def can_tai(tu: str, den: str, thang_dir: str) -> list[str]:
+def can_tai(tu: str, den: str, thang_dir: str, tai_het: bool = False) -> list[str]:
     import osxphotos
 
     db = osxphotos.PhotosDB()
@@ -32,7 +32,7 @@ def can_tai(tu: str, den: str, thang_dir: str) -> list[str]:
         if p.ismovie or p.intrash or getattr(p, "screenshot", False) or p.uuid in da_co:
             continue
         goc = (p.path_edited if p.hasadjustments else None) or p.path
-        if not (goc and os.path.exists(goc)):
+        if not (goc and os.path.exists(goc)) and (tai_het or not _co_xem(p)):
             ra.append(p.uuid)
     return ra
 
@@ -63,6 +63,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("thang")
     ap.add_argument("--luong", type=int, default=6)
+    ap.add_argument("--tai-het", action="store_true", help="tải cả ảnh đã có bản xem trước")
     ap.add_argument("--con", type=int, help=argparse.SUPPRESS)
     a = ap.parse_args()
     y, m = thang(a.thang)
@@ -80,7 +81,7 @@ def main() -> None:
         request_photokit_authorization()
         if not check_photokit_authorization():
             sys.exit("Chưa có quyền truy cập Ảnh: Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Ảnh → bật Terminal, rồi chạy lại.")
-    ds = can_tai(tu, den, thang_dir)
+    ds = can_tai(tu, den, thang_dir, a.tai_het)
     print(f"Cần tải {len(ds)} ảnh tháng {m:02d}/{y}, {a.luong} luồng...", flush=True)
     if not ds:
         return
