@@ -1,23 +1,146 @@
 {
-  "_ghi_chu": "Mã dịch vụ nhân viên viết tắt trên ảnh -> chữ (không dấu) có trong tên dịch vụ KiotViet. BẢN NHÁP 12/10/2026 soạn từ 330 nhãn tháng 9-10, CHỜ nhân viên/BS sửa. Sửa xong chạy lại: anhkhach.py ghep YYYY-MM",
-  "csd":        {"nghia": "chăm sóc da (mụn, peel, điện di, IPL)", "khop": ["csd", "cham soc da", "peel", "dien di", "ipl"]},
-  "seo":        {"nghia": "trị sẹo rỗ / sẹo", "khop": ["seo"]},
-  "sl":         {"nghia": "sẹo lồi", "khop": ["seo loi"]},
-  "mv":         {"nghia": "mài viền sẹo", "khop": ["mai vien"]},
-  "pico":       {"nghia": "laser Pico (nám, đốm nâu, tàn nhang, thâm)", "khop": ["pico", "dom nau", "nam", "tan nhang", "tham"]},
-  "prp":        {"nghia": "tiêm PRP", "khop": ["prp"]},
-  "co2":        {"nghia": "laser CO2 (fractional, mụn thịt, nốt ruồi, mài viền)", "khop": ["co2", "fractional", "mun thit", "not ruoi", "fordyce", "mai vien"]},
-  "fractional": {"nghia": "laser fractional", "khop": ["fractional"]},
-  "xx":         {"nghia": "xoá xăm", "khop": ["xoa xam"]},
-  "dvm":        {"nghia": "dặm/xoá vein mặt", "khop": ["vein mat"]},
-  "vein":       {"nghia": "vein (mặt, chân)", "khop": ["vein"]},
-  "dnr":        {"nghia": "đốt nốt ruồi", "khop": ["not ruoi"]},
-  "ha":         {"nghia": "filler HA", "khop": ["filler"]},
-  "filler":     {"nghia": "filler", "khop": ["filler"]},
-  "botox":      {"nghia": "botox", "khop": ["botox"]},
-  "meso":       {"nghia": "meso / skin booster", "khop": ["meso", "skin booster"]},
-  "tt":         {"nghia": "trị thâm", "khop": ["tham"]},
-  "mun":        {"nghia": "mụn", "khop": ["mun"]},
-  "cang":       {"nghia": "căng chỉ", "khop": ["cang chi"]},
-  "_ocr_sai":   {"gsd": "csd", "isd": "csd", "fractiona": "fractional", "fractionai": "fractional"}
+  "_ghi_chu": "Mã dịch vụ nhân viên viết tắt trên ảnh -> chữ (không dấu) có trong tên dịch vụ KiotViet. BẢN NHÁP 12/10/2026 soạn từ 330 nhãn tháng 9-10, CHỜ nhân viên/BS sửa. Sửa xong chạy lại: anhkhach.py ghep YYYY-MM. Chưa thấy tên dịch vụ Laserlift trên KiotViet 09-10 (chỉ có sản phẩm EYELIFT SERUM -> KHÔNG khớp chữ 'lift' trơn).",
+  "csd": {
+    "nghia": "chăm sóc da (mụn, peel, điện di, IPL)",
+    "khop": [
+      "csd",
+      "cham soc da",
+      "peel",
+      "dien di",
+      "ipl"
+    ]
+  },
+  "seo": {
+    "nghia": "trị sẹo rỗ / sẹo",
+    "khop": [
+      "seo"
+    ]
+  },
+  "sl": {
+    "nghia": "sẹo lồi",
+    "khop": [
+      "seo loi"
+    ]
+  },
+  "mv": {
+    "nghia": "mài viền sẹo",
+    "khop": [
+      "mai vien"
+    ]
+  },
+  "pico": {
+    "nghia": "laser Pico (nám, đốm nâu, tàn nhang, thâm)",
+    "khop": [
+      "pico",
+      "dom nau",
+      "nam",
+      "tan nhang",
+      "tham"
+    ]
+  },
+  "prp": {
+    "nghia": "tiêm PRP",
+    "khop": [
+      "prp"
+    ]
+  },
+  "co2": {
+    "nghia": "laser CO2 (fractional, mụn thịt, nốt ruồi, mài viền)",
+    "khop": [
+      "co2",
+      "fractional",
+      "mun thit",
+      "not ruoi",
+      "fordyce",
+      "mai vien"
+    ]
+  },
+  "fractional": {
+    "nghia": "laser fractional",
+    "khop": [
+      "fractional"
+    ]
+  },
+  "xx": {
+    "nghia": "xoá xăm",
+    "khop": [
+      "xoa xam"
+    ]
+  },
+  "dvm": {
+    "nghia": "dặm/xoá vein mặt",
+    "khop": [
+      "vein mat"
+    ]
+  },
+  "vein": {
+    "nghia": "vein (mặt, chân)",
+    "khop": [
+      "vein"
+    ]
+  },
+  "dnr": {
+    "nghia": "đốt nốt ruồi",
+    "khop": [
+      "not ruoi"
+    ]
+  },
+  "ha": {
+    "nghia": "filler HA",
+    "khop": [
+      "filler"
+    ]
+  },
+  "filler": {
+    "nghia": "filler",
+    "khop": [
+      "filler"
+    ]
+  },
+  "botox": {
+    "nghia": "botox",
+    "khop": [
+      "botox"
+    ]
+  },
+  "meso": {
+    "nghia": "meso / skin booster",
+    "khop": [
+      "meso",
+      "skin booster"
+    ]
+  },
+  "tt": {
+    "nghia": "trị thâm",
+    "khop": [
+      "tham"
+    ]
+  },
+  "mun": {
+    "nghia": "mụn",
+    "khop": [
+      "mun"
+    ]
+  },
+  "cang": {
+    "nghia": "căng chỉ",
+    "khop": [
+      "cang chi"
+    ]
+  },
+  "laserlift": {
+    "nghia": "Laserlift (BS xác nhận 12/10: laserlifi = Laserlift)",
+    "khop": [
+      "laser lift",
+      "laserlift",
+      "lifting"
+    ]
+  },
+  "_ocr_sai": {
+    "gsd": "csd",
+    "isd": "csd",
+    "fractiona": "fractional",
+    "fractionai": "fractional",
+    "laserlifi": "laserlift"
+  }
 }

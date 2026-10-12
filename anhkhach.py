@@ -44,6 +44,7 @@ TRUNG_GIAY = 3  # >= 3 ảnh cùng giờ đến từng giây = giờ nhập/lưu
 ANH_DUOI = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"}
 
 LOAI_ANH = ["", "trước", "trong", "sau"]
+LOAI_NHAN = {"truoc": "trước", "trc": "trước", "sau": "sau"}  # chữ trên nhãn -> ô trước/sau
 VUNG = ["", "mặt", "trán", "má", "mũi", "cằm", "cổ", "nách", "tay", "chân",
         "lưng", "bụng", "ngực", "bikini", "toàn thân", "khác"]
 
@@ -414,8 +415,12 @@ def doc_nhan(chu: str, nam_mac_dinh: int) -> list[dict]:
             except ValueError:
                 pass
         goc = chu[m.start():m.end() + (n.end() if n else 0)]
+        # Chữ dịch vụ trước ngày: 'sau filler mắt', 'meso trước' -> 'sau'/'trước' là loại ảnh, không phải mã.
+        tu = khong_dau(m.group(2) + " " + sau[:n.start() if n else 0]).split()
+        loai = next((LOAI_NHAN[w] for w in tu if w in LOAI_NHAN), "")
+        tu = [w for w in tu if w not in LOAI_NHAN]
         ra.append({"goc": " ".join(goc.split()), "ten": khong_dau(m.group(1)),
-                   "ma_dv": khong_dau(m.group(2)).split(" ")[0], "ngay": ngay})
+                   "ma_dv": tu[0] if tu else "", "ngay": ngay, "loai": loai})
     return ra
 
 
@@ -639,6 +644,12 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
             "UPDATE photos SET dot=?, goi_y_hd=?, do_tin=?, ly_do=? WHERE id=?",
             (r["dot"], r["hd"], r["do_tin"], r["ly_do"], pid),
         )
+    # Nhãn ghi 'sau'/'trước' -> điền sẵn ô trước/sau, chỉ khi ô còn trống và ảnh chưa được người duyệt.
+    for p in photos:
+        loai = next((n["loai"] for n in doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])) if n["loai"]), "")
+        if loai:
+            conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
+                         " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
 
 
 def cmd_ghep(a) -> None:

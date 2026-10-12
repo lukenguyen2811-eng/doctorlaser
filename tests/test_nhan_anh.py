@@ -305,18 +305,44 @@ class LanTheoDot(unittest.TestCase):
         self.assertEqual((r["b"], r["c"]), (("K1", "goi_y"), ("K1", "goi_y")))
 
 
+class TruocSau(unittest.TestCase):
+    def test_doc_chu_sau_truoc(self):
+        n = A.doc_nhan("Hoàng Anh- sau filler mắt 7/9/26", 2026)[0]
+        self.assertEqual((n["ten"], n["ma_dv"], n["loai"], n["ngay"]), ("hoang anh", "filler", "sau", "2026-09-07"))
+        self.assertEqual(A.doc_nhan("Tâm-meso trước 5/10/26", 2026)[0]["loai"], "trước")
+        self.assertEqual(A.doc_nhan("Tâm-pico 5/10/26", 2026)[0]["loai"], "")
+        self.assertEqual(A.doc_nhan("Tâm-pico 5/10/26 sau", 2026)[0]["loai"], "")  # sau ngày: không tính
+
+    def test_dien_o_truoc_sau_khong_de_nguoi_duyet(self):
+        c = A.ket_noi()
+        c.execute("DELETE FROM photos")
+        c.execute("DELETE FROM visits")
+        c.execute("INSERT INTO visits (code,ngay,gio,ten_kh,dich_vu) VALUES ('V','2026-09-07','10:00','Lê Hoàng Anh','Filler')")
+        for pid, loai, xn in [("a", None, None), ("b", "trước", None), ("c", None, "V")]:
+            c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr,loai_anh,xn_hd) VALUES"
+                      " (?, '2026-09-07', '2026-09-07T10:0'||?||':00', 'I.HEIC', '', 'Hoàng Anh- sau filler 7/9/26', ?, ?)",
+                      (pid, len(pid), loai, xn))
+        A.ghep_ngay(c, "2026-09-07")
+        r = dict(c.execute("SELECT id, loai_anh FROM photos").fetchall())
+        self.assertEqual(r, {"a": "sau", "b": "trước", "c": None})  # b: người đã chọn; c: đã duyệt
+        self.assertEqual(c.execute("SELECT goi_y_hd FROM photos WHERE id='a'").fetchone()[0], "V")
+        c.close()
+
+
 class BangMaDichVu(unittest.TestCase):
     def test_ma_viet_tat_cua_nhan_vien(self):
         for ma, dv in [("co2", "Laser Fractional"), ("co2", "Laser đốt mụn thịt mặt lần lẻ"),
                        ("ha", "Dặm filler làm đầy"), ("csd", "Điện di C sau sẹo"), ("csd", "Peel da mụn lần lẻ"),
                        ("dvm", "Xóa vein mặt lần lẻ"), ("dnr", "Laser nốt ruồi lần lẻ"),
                        ("pico", "Laser đốm nâu lần lẻ"), ("xx", "Laser xóa xăm"), ("gsd", "CSD mụn lần lẻ"),
-                       ("sl", "Tiêm sẹo lồi"), ("mv", "Combo cắt sẹo rỗ và mài viền")]:
+                       ("sl", "Tiêm sẹo lồi"), ("mv", "Combo cắt sẹo rỗ và mài viền"),
+                       ("laserlifi", "Laser Lifting mặt")]:
             self.assertTrue(A._dv_khop(ma, dv), (ma, dv))
 
     def test_khong_khop_nham(self):  # âm
         for ma, dv in [("xx", "Laser Picolight nám"), ("ha", "Tiêm botox"), ("dvm", "Xóa vein chân"),
-                       ("sl", "Điều trị sẹo rỗ"), ("pico", "Tiêm PRP"), ("tt", "Tiêm meso")]:
+                       ("sl", "Điều trị sẹo rỗ"), ("pico", "Tiêm PRP"), ("tt", "Tiêm meso"),
+                       ("laserlift", "EYELIFT SERUM")]:
             self.assertFalse(A._dv_khop(ma, dv), (ma, dv))
 
     def test_bang_nap_duoc(self):
