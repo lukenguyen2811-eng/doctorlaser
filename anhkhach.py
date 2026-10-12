@@ -242,7 +242,12 @@ def _doc_chu(path: str, huong) -> str:
         return ""
 
 
-def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False) -> list[tuple]:
+def _co_xem(p) -> bool:
+    """Ảnh đã có bản xem trước trên máy (thường đủ đọc nhãn) -> khỏi tải bản gốc."""
+    return any(os.path.exists(x) for x in (p.path_derivatives or []))
+
+
+def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: bool = False) -> list[tuple]:
     try:
         import osxphotos
     except ImportError:
@@ -256,9 +261,9 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False) -> list[tu
           if not (p.ismovie or p.intrash or getattr(p, "screenshot", False))]
     thang_dir = os.path.join(ANH_GOC, tu[:7])
     if tai_goc:
-        def chua_co(p):
+        def chua_co(p):  # mặc định chỉ tải ảnh chưa có gì trên máy; --tai-het: tải cả ảnh có bản xem trước
             g = (p.path_edited if p.hasadjustments else None) or p.path
-            return not (g and os.path.exists(g))
+            return not (g and os.path.exists(g)) and (tai_het or not _co_xem(p))
 
         _tai_theo_lo([p for p in ds if chua_co(p)], thang_dir)
     rows, thieu = [], 0
@@ -269,20 +274,26 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False) -> list[tu
         goc = (p.path_edited if p.hasadjustments else None) or p.path
         if goc and not os.path.exists(goc):
             goc = None
-        if not goc and tai_goc:
+        if not goc and os.path.isdir(thang_dir):  # bản gốc đã tải lần trước
+            goc = next((os.path.join(thang_dir, f) for f in os.listdir(thang_dir)
+                        if f.startswith(p.uuid)), None)
+        if not goc and tai_goc and (tai_het or not _co_xem(p)):
             goc = _tai_ban_goc(p, thang_dir)
         if not goc:
             thieu += 1
+        xem_nho = next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None)
         chu_ocr = ""
         if ocr:
             if goc:
                 chu_ocr = _doc_chu(goc, p.orientation)
-            else:
+            elif xem_nho:  # bản xem trước đã xoay đúng chiều; ngưỡng 0,3 vẫn đọc được tên viết tay
+                chu_ocr = _doc_chu(xem_nho, None)
+            if not chu_ocr:
                 try:
                     chu_ocr = " ".join(x[0] for x in p.detected_text(confidence_threshold=OCR_TIN))
                 except Exception:  # noqa: BLE001
                     pass
-        xem = goc or next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None) or p.path
+        xem = goc or xem_nho or p.path
         rows.append((p.uuid, "photos", t.date().isoformat(), t.isoformat(timespec="seconds"),
                      p.original_filename, goc or p.path or "", xem or "",
                      " / ".join(x for x in cac_chu if x.strip()), chu_ocr))
@@ -337,7 +348,7 @@ def _quet_thu_muc(goc: str, tu: str, den: str) -> list[tuple]:
 def cmd_quet(a) -> None:
     y, m = thang(a.thang)
     tu, den = khoang_thang(y, m)
-    rows = _quet_thu_muc(a.thu_muc, tu, den) if a.thu_muc else _quet_photos(tu, den, a.ocr, a.tai_goc)
+    rows = _quet_thu_muc(a.thu_muc, tu, den) if a.thu_muc else _quet_photos(tu, den, a.ocr, a.tai_goc, a.tai_het)
     conn = ket_noi()
     for r in rows:
         # Giữ nguyên phần đã duyệt nếu quét lại.
@@ -971,7 +982,9 @@ def main() -> None:
     s.add_argument("--thu-muc", help="đọc từ thư mục ảnh thay vì thư viện Photos")
     s.add_argument("--ocr", action="store_true", help="đọc chữ trong ảnh (tên khách viết tay...)")
     s.add_argument("--tai-goc", action="store_true",
-                   help="tải bản gốc tháng này từ iCloud (ảnh chưa có trên máy) để đọc nhãn rõ")
+                   help="tải bản gốc từ iCloud cho ảnh chưa có bản nào trên máy")
+    s.add_argument("--tai-het", action="store_true",
+                   help="cùng --tai-goc: tải cả ảnh đã có bản xem trước (chậm, đọc nhãn rõ hơn)")
     s.set_defaults(f=cmd_quet)
     s = sub.add_parser("ghep", help="máy tự gợi ý ảnh nào của khách nào")
     s.add_argument("thang")
