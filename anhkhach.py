@@ -832,6 +832,11 @@ def _trang_chu(conn) -> bytes:
 def _trang_ngay(conn, ngay: str) -> bytes:
     visits = conn.execute("SELECT * FROM visits WHERE ngay=? ORDER BY gio", (ngay,)).fetchall()
     photos = conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)).fetchall()
+    # Nhãn ghi ngày khác ngày chụp (chụp 10/10, nhãn 'Nam-xx 9/10') -> hóa đơn ngày khác cũng phải chọn được.
+    co = {v["code"] for v in visits}
+    khac = sorted({p[k] for p in photos for k in ("goi_y_hd", "xn_hd") if p[k] and p[k] not in co})
+    visits_khac = [conn.execute("SELECT * FROM visits WHERE code=?", (c,)).fetchone() for c in khac]
+    visits_khac = [v for v in visits_khac if v]
     ngays = [r[0] for r in conn.execute("SELECT DISTINCT ngay FROM photos ORDER BY ngay")]
     i = ngays.index(ngay) if ngay in ngays else -1
     nav = "<a href='/'>← Tất cả ngày</a>"
@@ -841,11 +846,12 @@ def _trang_ngay(conn, ngay: str) -> bytes:
         nav += f" · <a href='/ngay?d={ngays[i + 1]}'>{ngays[i + 1]} ›</a>"
 
     def nhan(v):
-        return html.escape(f"{v['gio']} · {v['ten_kh']} ({v['ma_kh']}) · {v['dich_vu'][:50]}")
+        ngay_hd = "" if v["ngay"] == ngay else f"{v['ngay'][8:10]}/{v['ngay'][5:7]} "
+        return html.escape(f"{ngay_hd}{v['gio']} · {v['ten_kh']} ({v['ma_kh']}) · {v['dich_vu'][:50]}")
 
     def chon_hd(gia_tri, cls, extra=""):
         s = [f"<select class={cls} {extra}><option value=''>— chọn khách —</option>"]
-        for v in visits:
+        for v in visits + visits_khac:
             sel = " selected" if v["code"] == gia_tri else ""
             s.append(f"<option value='{html.escape(v['code'])}'{sel}>{nhan(v)}</option>")
         return "".join(s) + "</select>"
@@ -859,7 +865,10 @@ def _trang_ngay(conn, ngay: str) -> bytes:
          f"{len(visits)} hóa đơn</span></header><main>"]
     o.append("<div class=visits><b>Hóa đơn trong ngày:</b><br>" + (
         "<br>".join(f"<span class=small>{nhan(v)} · HĐ {html.escape(v['code'])}</span>" for v in visits)
-        or "<span class=small>Không có hóa đơn ngày này.</span>") + "</div>")
+        or "<span class=small>Không có hóa đơn ngày này.</span>") + (
+        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh):</b><br>" + "<br>".join(
+            f"<span class=small>{nhan(v)} · HĐ {html.escape(v['code'])}</span>" for v in visits_khac)
+        if visits_khac else "") + "</div>")
     dots: dict[int, list] = {}
     for p in photos:
         dots.setdefault(p["dot"] or 0, []).append(p)

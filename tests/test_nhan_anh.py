@@ -125,6 +125,17 @@ class KhopNhan(unittest.TestCase):
         r = dict(self.c.execute("SELECT id, do_tin FROM photos").fetchall())
         self.assertEqual(r["p1"], "goi_y")
 
+    def test_trang_duyet_chon_duoc_hoa_don_ngay_khac(self):
+        self.c.execute("DELETE FROM photos")
+        self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr,dot)"
+                       " VALUES ('p9','2026-10-10','2026-10-10T09:43:00','IMG.jpg','','Hoà-Ha mắt 8/10/26',0)")
+        A.ghep_ngay(self.c, "2026-10-10")
+        self.assertEqual(self.c.execute("SELECT goi_y_hd FROM photos").fetchone()[0], None)  # trùng 2 Hoà
+        self.c.execute("UPDATE photos SET goi_y_hd='HD2'")
+        trang = A._trang_ngay(self.c, "2026-10-10").decode()
+        self.assertIn("<option value='HD2' selected>08/10", trang)
+        self.assertIn("Hóa đơn ngày khác", trang)
+
 
 if __name__ == "__main__":
     unittest.main()
