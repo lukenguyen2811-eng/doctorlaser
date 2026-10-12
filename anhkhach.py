@@ -172,6 +172,65 @@ def _tai_ban_goc(p, thang_dir: str) -> str | None:
     return None
 
 
+LO_TAI = int(os.environ.get("ANH_LO", "20"))  # số ảnh mỗi lần nhờ Photos xuất cùng lúc
+
+_XUAT_LO = """
+on run argv
+    set thePath to item 1 of argv
+    set theTimeOut to (item 2 of argv) as integer
+    tell application "Photos"
+        set itemList to {}
+        repeat with i from 3 to count of argv
+            set end of itemList to media item id (item i of argv)
+        end repeat
+        with timeout of theTimeOut seconds
+            export itemList to POSIX file thePath with using originals
+        end timeout
+    end tell
+end run
+"""
+
+
+def _tai_theo_lo(ds: list, thang_dir: str) -> None:
+    """Tải bản gốc từ iCloud theo LOẠT: 1 lệnh xuất cho LO_TAI ảnh -> Photos tải song song,
+    thay vì chờ từng ảnh (~40-60 giây/ảnh). Ảnh đã sửa, hoặc trùng tên file trong cùng loạt,
+    để lại cho cách tải từng ảnh (_tai_ban_goc)."""
+    os.makedirs(thang_dir, exist_ok=True)
+    da_co = {f.split(".")[0] for f in os.listdir(thang_dir)}
+    can = [p for p in ds if p.uuid not in da_co and not p.hasadjustments]
+    if not can:
+        return
+    print(f"Tải bản gốc theo loạt: {len(can)} ảnh, mỗi loạt {LO_TAI}...", flush=True)
+    xong = 0
+    for i in range(0, len(can), LO_TAI):
+        lo = can[i:i + LO_TAI]
+        theo_ten: dict[str, list] = {}
+        for p in lo:
+            theo_ten.setdefault(os.path.splitext(p.original_filename or "")[0].lower(), []).append(p)
+        tam = os.path.join(thang_dir, f".lo_{i}")
+        shutil.rmtree(tam, ignore_errors=True)
+        os.makedirs(tam)
+        han = 120 + 30 * len(lo)
+        try:
+            subprocess.run(["osascript", "-e", _XUAT_LO, os.path.abspath(tam), str(han)]
+                           + [f"{p.uuid}/L0/001" for p in lo],
+                           check=True, capture_output=True, text=True, timeout=han + 30)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! loạt {i // LO_TAI + 1} lỗi ({str(getattr(e, 'stderr', '') or e)[:100]})"
+                  " -> các ảnh này tải từng ảnh sau", flush=True)
+        for f in sorted(os.listdir(tam)):
+            goc, duoi = os.path.splitext(f)
+            ung = theo_ten.get(goc.lower(), [])
+            if len(ung) != 1 or duoi.lower() not in ANH_DUOI:  # bỏ .mov của Live Photo, tên trùng
+                continue
+            dich = os.path.join(thang_dir, ung[0].uuid + duoi.lower())
+            if not os.path.exists(dich):
+                os.replace(os.path.join(tam, f), dich)
+                xong += 1
+        shutil.rmtree(tam, ignore_errors=True)
+        print(f"  {min(i + LO_TAI, len(can))}/{len(can)} ảnh đã thử, tải được {xong}", flush=True)
+
+
 def _doc_chu(path: str, huong) -> str:
     try:
         from osxphotos.text_detection import detect_text
@@ -196,6 +255,12 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False) -> list[tu
     ds = [p for p in db.photos(from_date=d0, to_date=d1)
           if not (p.ismovie or p.intrash or getattr(p, "screenshot", False))]
     thang_dir = os.path.join(ANH_GOC, tu[:7])
+    if tai_goc:
+        def chua_co(p):
+            g = (p.path_edited if p.hasadjustments else None) or p.path
+            return not (g and os.path.exists(g))
+
+        _tai_theo_lo([p for p in ds if chua_co(p)], thang_dir)
     rows, thieu = [], 0
     for i, p in enumerate(ds, 1):
         t = p.date.astimezone().replace(tzinfo=None) if p.date.tzinfo else p.date
