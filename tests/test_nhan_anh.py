@@ -135,6 +135,8 @@ class KhopNhan(unittest.TestCase):
         trang = A._trang_ngay(self.c, "2026-10-10").decode()
         self.assertIn("<option value='HD2' selected>08/10", trang)
         self.assertIn("Hóa đơn ngày khác", trang)
+        self.assertIn("chưa tải về máy", trang)  # ảnh chưa có file -> chữ, không khung vỡ
+        self.assertNotIn("src='/anh/p9'", trang)
 
 
 class GioHoaDon(unittest.TestCase):

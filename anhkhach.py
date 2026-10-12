@@ -965,7 +965,10 @@ def _trang_ngay(conn, ngay: str) -> bytes:
             chu = html.escape((p["chu_thich"] + " " + (p["ocr"] or "")).strip()[:120])
             o.append(
                 f"<div class='ph {st}' id='p{p['id']}' data-id='{p['id']}' data-dot='{so}'>"
-                f"<img loading=lazy src='/anh/{p['id']}' onclick=\"zoom(this.src)\">"
+                + (f"<img loading=lazy src='/anh/{p['id']}' onclick=\"zoom(this.src)\">"
+                   if p["anh_xem"] and os.path.exists(p["anh_xem"]) else
+                   "<div class=small style='height:200px;display:flex;align-items:center;justify-content:center;"
+                   "background:#eee;text-align:center'>Ảnh còn trên iCloud,<br>chưa tải về máy</div>") +
                 f"<div class=small>{p['thoi_gian'][11:16]} · {html.escape(p['ten_file'])} "
                 f"<span class='tag {p['do_tin']}'>{NHAN_NGAN.get(p['do_tin'], '')}</span></div>"
                 f"<div class=small>{html.escape(p['ly_do'] or '')}{' · ' + chu if chu else ''}</div>"
