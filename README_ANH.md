@@ -44,8 +44,8 @@ Nếu ảnh đã được xuất sẵn ra một thư mục: `python3 anhkhach.py
 ~/KhachHang/KH000123_NguyenThiAnh_3456/2025-09-03_TriNamLaser/Truoc_100000_IMG_1234.HEIC
 ~/KhachHang/danh_sach_anh_2025-09.csv     # mở bằng Excel/Numbers để lọc, tìm kiếm
 ```
-Với `--gan-tu-khoa`, ảnh trong Photos được **thêm** từ khóa `KH:KH000123`, `KH:Nguyễn Thị Ánh`,
-`DV:Trị nám Laser`, `Loai:trước`... → gõ vào ô tìm kiếm của Photos (Mac/iPhone) là ra.
+Với `--gan-tu-khoa`, ảnh trong Photos được **thêm** từ khóa và chú thích: mã KH, SĐT, họ tên,
+dịch vụ, trước/sau, vùng → trên iPad/iPhone (cùng Apple ID, bật Ảnh iCloud) gõ mã KH hoặc SĐT vào ô Tìm kiếm của app Ảnh là ra.
 
 ## Bảo mật
 Ảnh điều trị là dữ liệu sức khỏe nhạy cảm (NĐ 13/2023). `anhkhach.db` và thư mục

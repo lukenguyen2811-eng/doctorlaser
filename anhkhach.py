@@ -438,17 +438,27 @@ def cmd_xuat(a) -> None:
 
 
 def _gan_tu_khoa(r) -> None:
-    """Thêm từ khóa vào ảnh trong Photos để tìm được ngay trên iPhone/iCloud."""
+    """Ghi mã KH, SĐT, tên... vào Từ khóa + Chú thích của ảnh trong Photos.
+
+    Ảnh đồng bộ qua iCloud -> trên iPad/iPhone gõ mã KH hoặc SĐT vào ô Tìm kiếm
+    của app Ảnh là ra. Chỉ THÊM, không xóa từ khóa/chú thích cũ.
+    """
     try:
         import photoscript
 
         p = photoscript.Photo(r["id"])
-        moi = [f"KH:{r['ma_kh']}", f"KH:{r['ten_kh']}", f"HD:{r['xn_hd']}"]
-        moi += [f"DV:{x}" for x in (r["dich_vu"] or "").split(" | ") if x]
-        moi += [f"Loai:{r['loai_anh']}"] if r["loai_anh"] else []
-        moi += [f"Vung:{r['vung']}"] if r["vung"] else []
+        moi = [r["ma_kh"], r["sdt"], r["ten_kh"], r["xn_hd"]]
+        moi += (r["dich_vu"] or "").split(" | ")
+        moi += [r["loai_anh"], r["vung"]]
+        moi = [k for k in moi if k]
         cu = list(p.keywords or [])
         p.keywords = cu + [k for k in moi if k not in cu]
+        # Chú thích (caption): chắc chắn tìm được trên iPad/iPhone.
+        nhan = " · ".join(x for x in [r["ma_kh"], r["ten_kh"], r["sdt"],
+                                       r["dich_vu"], r["loai_anh"], r["vung"]] if x)
+        mo_ta = p.description or ""
+        if r["ma_kh"] and r["ma_kh"] not in mo_ta:
+            p.description = f"{mo_ta}\n{nhan}".strip()
     except Exception as e:  # noqa: BLE001
         print(f"  ! không gắn được từ khóa cho {r['ten_file']}: {e}")
 
