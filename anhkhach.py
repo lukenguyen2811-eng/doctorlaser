@@ -147,6 +147,7 @@ def cmd_hoadon(a) -> None:
 
 # ------------------------- 2. QUÉT ẢNH -------------------------
 ANH_GOC = os.environ.get("ANH_GOC", "anh_goc")  # bản gốc tải tạm từ iCloud (chỉ tháng đang xử lý)
+OCR_TIN = 0.3  # ngưỡng tin cậy chữ đọc được
 
 
 def _tai_ban_goc(p, thang_dir: str) -> str | None:
@@ -175,7 +176,9 @@ def _doc_chu(path: str, huong) -> str:
     try:
         from osxphotos.text_detection import detect_text
 
-        return " ".join(t for t, tin in detect_text(path, huong or None) if tin >= 0.5)
+        # Tên viết tay trên nhãn thường chỉ được Vision chấm 0.3 (ngày in thì 1.0) -> lấy từ 0.3;
+        # chữ đọc thừa không hại vì nhãn còn phải khớp tên khách có hóa đơn cùng ngày.
+        return " ".join(t for t, tin in detect_text(path, huong or None) if tin >= OCR_TIN)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -211,7 +214,7 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False) -> list[tu
                 chu_ocr = _doc_chu(goc, p.orientation)
             else:
                 try:
-                    chu_ocr = " ".join(x[0] for x in p.detected_text(confidence_threshold=0.5))
+                    chu_ocr = " ".join(x[0] for x in p.detected_text(confidence_threshold=OCR_TIN))
                 except Exception:  # noqa: BLE001
                     pass
         xem = goc or next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None) or p.path
@@ -306,26 +309,34 @@ def _diem(v: sqlite3.Row, chu: str, so: str) -> tuple[int, str]:
     return 0, ""
 
 
-# Nhãn nhân viên ghi trên ảnh: "Giang-seo 9/10/26", "Thu-tt 9/10/26", "Ngọc Anh - nam 9/10".
-_NHAN = re.compile(
-    r"([^\W\d_]+(?:\s+[^\W\d_]+)?)\s*[-–—]\s*([^\W\d_]{1,10})\s+"
-    r"(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*(\d{2,4}))?"
-)
+# Nhãn nhân viên ghi trên ảnh: "Giang-seo 9/10/26", "Trang-meso mắt 5/10/26", "Triết-co2 nốt ruồi",
+# "Quỳnh / pico 7/10/26", "Cheng wei- csd C32•8/10/26". Đầu nhãn = tên (1-3 chữ) + gạch/xuyệt
+# + dịch vụ; ngày tìm ở đoạn ngay sau (có thể thiếu -> dùng ngày chụp).
+_NHAN_DAU = re.compile(r"([^\W\d_]+(?:\s+[^\W\d_]+){0,2})\s*[-–—/]\s*([^\W\d_][^\s/]*)")
+_NHAN_NGAY = re.compile(r"(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*(\d{2,4}))?")
 
 
 def doc_nhan(chu: str, nam_mac_dinh: int) -> list[dict]:
     """Tìm các nhãn 'Tên-dịch vụ ngày/tháng/năm' trong chữ đọc được trên ảnh."""
+    chu = chu or ""
+    dau = list(_NHAN_DAU.finditer(chu))
     ra = []
-    for m in _NHAN.finditer(chu or ""):
-        ten, ma_dv, d, mo, y = m.groups()
-        nam = int(y) if y else nam_mac_dinh
-        nam = nam + 2000 if nam < 100 else nam
-        try:
-            ngay = dt.date(nam, int(mo), int(d)).isoformat()
-        except ValueError:
-            ngay = None
-        ra.append({"goc": m.group(0).strip(), "ten": khong_dau(ten), "ma_dv": khong_dau(ma_dv),
-                   "ngay": ngay})
+    for i, m in enumerate(dau):
+        het = dau[i + 1].start() if i + 1 < len(dau) else len(chu)
+        sau = chu[m.end():min(het, m.end() + 30)]
+        n = _NHAN_NGAY.search(sau)
+        ngay = None
+        if n:
+            d, mo, y = n.groups()
+            nam = int(y) if y else nam_mac_dinh
+            nam = nam + 2000 if nam < 100 else nam
+            try:
+                ngay = dt.date(nam, int(mo), int(d)).isoformat()
+            except ValueError:
+                pass
+        goc = chu[m.start():m.end() + (n.end() if n else 0)]
+        ra.append({"goc": " ".join(goc.split()), "ten": khong_dau(m.group(1)),
+                   "ma_dv": khong_dau(m.group(2)).split(" ")[0], "ngay": ngay})
     return ra
 
 
@@ -340,25 +351,61 @@ def _dv_khop(ma: str, dich_vu: str) -> bool:
     return len(ma) >= 2 and ma in dau
 
 
+def _lech_1(a: str, b: str) -> bool:
+    """a, b khác nhau đúng 1 chữ (thay, thêm hoặc bớt)."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) == 1
+    ngan, dai = sorted((a, b), key=len)
+    return any(dai[:i] + dai[i + 1:] == ngan for i in range(len(dai)))
+
+
 def _khop_nhan(conn, nhan: dict, ngay_anh: str) -> tuple[str | None, int, str]:
     """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp)."""
-    ngay = nhan["ngay"] or ngay_anh
+    ngay, sai = nhan["ngay"] or ngay_anh, ""
+    if abs((dt.date.fromisoformat(ngay) - dt.date.fromisoformat(ngay_anh)).days) > 7:
+        # OCR đọc sai số ('8/10/16', '3/11 0/26') -> nhãn viết cùng ngày chụp.
+        ngay, sai = ngay_anh, f" (ngày trên nhãn đọc ra {nhan['ngay']}, dùng ngày chụp)"
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     w = nhan["ten"].split()
+    lech_ngay = (f" (nhãn ghi ngày {ngay})" if ngay != ngay_anh else "") + sai
 
-    def cung_ten(v):
+    def cung_ten(v, k):
         t = khong_dau(v["ten_kh"]).split()
-        return bool(t) and (t[-len(w):] == w)
+        return len(t) >= k and t[-k:] == w[-k:]
 
-    ung = [v for v in visits if cung_ten(v)]
+    # Chữ thừa phía trước tên ('Laser Trang') -> thử bớt dần từ trái: 3 chữ, 2 chữ, 1 chữ.
+    ung, k = [], len(w)
+    for k in range(len(w), 0, -1):
+        ung = [v for v in visits if cung_ten(v, k)]
+        if ung:
+            break
+    gan_dung = False
+    if not ung and w:
+        # Tên KiotViet có đuôi ghi chú ('... Trang KH TU DEN', '... Vy KH7332 GT'), tên nước ngoài
+        # đảo thứ tự ('Cheng Wei' ~ 'Wu Cheng Wei') -> tên nằm trong họ tên; OCR sai 1 chữ
+        # ('Thann' ~ 'Thanh'). Chỉ "chắc" khi tên nằm trong họ tên VÀ dịch vụ trên nhãn khớp hóa đơn.
+        def trong(v):
+            return set(w) <= set(khong_dau(v["ten_kh"]).split())
+
+        def lech(v):
+            t = khong_dau(v["ten_kh"]).split()
+            return bool(t) and len(w[-1]) >= 4 and _lech_1(w[-1], t[-1])
+
+        ung = [v for v in visits if trong(v)]
+        if len(ung) == 1 and _dv_khop(nhan["ma_dv"], ung[0]["dich_vu"]):
+            return ung[0]["code"], 85, f"nhãn '{nhan['goc']}' khớp tên + dịch vụ {ung[0]['ten_kh']}{lech_ngay}"
+        ung, gan_dung = ung or [v for v in visits if lech(v)], True
     if len(ung) > 1:  # trùng tên -> dùng mã dịch vụ trên nhãn để tách
         loc = [v for v in ung if _dv_khop(nhan["ma_dv"], v["dich_vu"])]
         ung = loc or ung
-    lech = f" (nhãn ghi ngày {ngay})" if ngay != ngay_anh else ""
     if len(ung) == 1:
-        return ung[0]["code"], 85, f"nhãn '{nhan['goc']}' khớp {ung[0]['ten_kh']}{lech}"
+        if k < len(w) or gan_dung:  # chỉ khớp một phần / gần đúng -> chỉ gợi ý, người xác nhận
+            return ung[0]["code"], 50, f"nhãn '{nhan['goc']}' khớp một phần tên {ung[0]['ten_kh']}{lech_ngay}"
+        return ung[0]["code"], 85, f"nhãn '{nhan['goc']}' khớp {ung[0]['ten_kh']}{lech_ngay}"
     if len(ung) > 1:
-        return None, 0, f"nhãn '{nhan['goc']}' trùng {len(ung)} khách{lech} — người chọn"
+        return None, 0, f"nhãn '{nhan['goc']}' trùng {len(ung)} khách{lech_ngay} — người chọn"
     return None, 0, f"nhãn '{nhan['goc']}' không thấy khách tên này trong hóa đơn ngày {ngay}"
 
 
@@ -401,7 +448,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
             hd, d, ly_do = _khop_nhan(conn, nhan, ngay)
             r["ly_do"] = ly_do
             if hd:
-                r.update(hd=hd, diem=d, do_tin="chac")
+                r.update(hd=hd, diem=d, do_tin="chac" if d >= 80 else "goi_y")
                 break
 
     # Ảnh chưa khớp lấy theo ảnh đã khớp trong cùng đợt (nếu cả đợt chỉ 1 khách).
