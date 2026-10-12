@@ -10,3 +10,4 @@ anhkhach.db
 KhachHang/
 doctorlaser.db
 export/
+.venv/

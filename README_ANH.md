@@ -6,9 +6,11 @@ rồi xuất ảnh vào thư mục theo từng khách. Ảnh gốc trong Photos 
 
 ## Cài đặt (1 lần)
 1. Làm theo `README_MAC.md` để có file `.env` với KiotViet.
-2. Cài thư viện:
+2. Cài Python mới (Python 3.9 có sẵn của macOS KHÔNG chạy được osxphotos) + môi trường riêng:
    ```bash
-   pip3 install -r requirements_anh.txt
+   brew install python@3.12
+   cd ~/doctorlaser && /opt/homebrew/bin/python3.12 -m venv .venv
+   .venv/bin/pip install -r requirements_anh.txt
    brew install exiftool      # ghi nhãn VÀO TRONG file ảnh (cần Homebrew: brew.sh)
    ```
 3. Cho Terminal quyền đọc Photos: **Cài đặt hệ thống → Quyền riêng tư & Bảo mật →
@@ -16,6 +18,7 @@ rồi xuất ảnh vào thư mục theo từng khách. Ảnh gốc trong Photos 
 4. (Nên) Photos → Cài đặt → iCloud → **Tải bản gốc về máy Mac này** (nếu đủ ổ cứng).
 
 ## Làm thử 1 tháng (ví dụ tháng 9/2025)
+Mỗi lần mở Terminal mới: `cd ~/doctorlaser && source .venv/bin/activate` (khi đó `python3` là bản 3.12 của dự án).
 ```bash
 python3 anhkhach.py hoadon 2025-09        # 1. kéo hóa đơn tháng 9 từ KiotViet
 python3 anhkhach.py quet 2025-09 --ocr    # 2. đọc ảnh tháng 9 trong Photos (+ đọc chữ trong ảnh)
