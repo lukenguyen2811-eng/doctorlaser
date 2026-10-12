@@ -419,11 +419,31 @@ def doc_nhan(chu: str, nam_mac_dinh: int) -> list[dict]:
     return ra
 
 
+def _nap_ma_dv() -> tuple[dict, dict]:
+    """Bảng mã viết tắt -> chữ trong tên dịch vụ KiotViet (ma_dich_vu.json, nhân viên sửa được)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ma_dich_vu.json"),
+                  encoding="utf-8") as f:
+            b = json.load(f)
+    except (OSError, ValueError):
+        return {}, {}
+    return ({k: [khong_dau(x) for x in v["khop"]] for k, v in b.items() if not k.startswith("_")},
+            b.get("_ocr_sai", {}))
+
+
+MA_DV, MA_DV_OCR = _nap_ma_dv()
+
+
 def _dv_khop(ma: str, dich_vu: str) -> bool:
-    """'seo' ~ 'Trị sẹo rỗ'; 'xx' ~ 'Xóa xăm'; 'tln' ~ 'Triệt lông nách'."""
+    """'seo' ~ 'Trị sẹo rỗ'; 'xx' ~ 'Xóa xăm'; 'tln' ~ 'Triệt lông nách'; 'co2' ~ 'Laser Fractional'
+    (bảng ma_dich_vu.json)."""
     tu = khong_dau(dich_vu).split()
     if not ma or not tu:
         return False
+    ma = MA_DV_OCR.get(ma, ma)
+    chuoi = f" {' '.join(tu)} "
+    if any(f" {k} " in chuoi or (len(k) >= 4 and f" {k}" in chuoi) for k in MA_DV.get(ma, [])):
+        return True
     if ma in tu or (len(ma) >= 3 and any(w.startswith(ma) for w in tu)):
         return True
     dau = "".join(w[0] for w in tu)

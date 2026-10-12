@@ -305,5 +305,24 @@ class LanTheoDot(unittest.TestCase):
         self.assertEqual((r["b"], r["c"]), (("K1", "goi_y"), ("K1", "goi_y")))
 
 
+class BangMaDichVu(unittest.TestCase):
+    def test_ma_viet_tat_cua_nhan_vien(self):
+        for ma, dv in [("co2", "Laser Fractional"), ("co2", "Laser đốt mụn thịt mặt lần lẻ"),
+                       ("ha", "Dặm filler làm đầy"), ("csd", "Điện di C sau sẹo"), ("csd", "Peel da mụn lần lẻ"),
+                       ("dvm", "Xóa vein mặt lần lẻ"), ("dnr", "Laser nốt ruồi lần lẻ"),
+                       ("pico", "Laser đốm nâu lần lẻ"), ("xx", "Laser xóa xăm"), ("gsd", "CSD mụn lần lẻ"),
+                       ("sl", "Tiêm sẹo lồi"), ("mv", "Combo cắt sẹo rỗ và mài viền")]:
+            self.assertTrue(A._dv_khop(ma, dv), (ma, dv))
+
+    def test_khong_khop_nham(self):  # âm
+        for ma, dv in [("xx", "Laser Picolight nám"), ("ha", "Tiêm botox"), ("dvm", "Xóa vein chân"),
+                       ("sl", "Điều trị sẹo rỗ"), ("pico", "Tiêm PRP"), ("tt", "Tiêm meso")]:
+            self.assertFalse(A._dv_khop(ma, dv), (ma, dv))
+
+    def test_bang_nap_duoc(self):
+        self.assertIn("co2", A.MA_DV)
+        self.assertEqual(A.MA_DV_OCR.get("gsd"), "csd")
+
+
 if __name__ == "__main__":
     unittest.main()
