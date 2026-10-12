@@ -55,6 +55,11 @@ Nếu ảnh đã được xuất sẵn ra một thư mục: `python3 anhkhach.py
 Với `--gan-tu-khoa`, ảnh trong Photos được **thêm** từ khóa và chú thích: mã KH, SĐT, họ tên,
 dịch vụ, trước/sau, vùng → trên iPad/iPhone (cùng Apple ID, bật Ảnh iCloud) gõ mã KH hoặc SĐT vào ô Tìm kiếm của app Ảnh là ra.
 
+Với `--album`, ảnh **đã duyệt** được cho vào album trong thư mục album **Doctor Laser** của app Ảnh:
+album theo khách `KH000123 · Tên` và album theo dịch vụ `DV · <dịch vụ đầu của HĐ>`. Chỉ THÊM: album có sẵn
+thì dùng lại, ảnh đã có thì bỏ qua, không gỡ ảnh khỏi album nào. Mã cũ `CU-KH…` là album riêng (khách khác).
+Không tạo album theo ngày — app Ảnh đã tự nhóm theo ngày (Thư viện → Ngày).
+
 ## Bảo mật
 Ảnh điều trị là dữ liệu sức khỏe nhạy cảm (NĐ 13/2023). `anhkhach.db` và thư mục
 `KhachHang/` chỉ nằm trên máy, đã bị chặn khỏi git. Trang duyệt chỉ mở trên chính máy

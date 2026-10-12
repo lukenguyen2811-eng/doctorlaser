@@ -736,7 +736,7 @@ def cmd_xuat(a) -> None:
         import osxphotos
 
         db = osxphotos.PhotosDB()
-    so = 0
+    so, theo_album = 0, {}
     for r in rows:
         kh = f"{r['ma_kh'] or 'KhachLe'}_{ten_thu_muc(r['ten_kh'])}"
         if r["sdt"]:
@@ -768,7 +768,12 @@ def cmd_xuat(a) -> None:
         conn.execute("UPDATE photos SET da_xuat=? WHERE id=?", (dst, r["id"]))
         if a.gan_tu_khoa and r["nguon"] == "photos":
             _gan_tu_khoa(r)
+        if getattr(a, "album", False) and r["nguon"] == "photos":
+            for ten_al in _ten_album(r):
+                theo_album.setdefault(ten_al, []).append(r["id"])
     conn.commit()
+    if theo_album:
+        _xep_album(theo_album)
 
     # File tổng hợp để mở bằng Excel/Numbers.
     import csv
@@ -859,6 +864,58 @@ def _ghi_nhan_vao_file(path: str, r) -> None:
     kq = subprocess.run(lenh, capture_output=True, text=True)
     if kq.returncode != 0:
         print(f"  ! exiftool lỗi với {os.path.basename(path)}: {kq.stderr.strip()[:200]}")
+
+
+THU_MUC_ALBUM = "Doctor Laser"
+
+
+def _ten_album(r) -> list[str]:
+    """Album theo khách 'KH000123 · Tên' + album theo dịch vụ 'DV · <dịch vụ đầu của HĐ>'.
+    Mã KH giữ nguyên (mã cũ 'CU-KH…' là khách KHÁC 'KH…'). Theo ngày: app Ảnh đã tự nhóm, không tạo."""
+    def gon(x):
+        return " ".join(re.sub(r"[\x00-\x1f]", " ", x or "").split()).strip(" -·|/")
+
+    ra = []
+    if (r["ma_kh"] or "").strip():
+        ten = gon(r["ten_kh"])[:60]
+        ra.append(f"{r['ma_kh'].strip()} · {ten}" if ten else r["ma_kh"].strip())
+    dv = gon((r["dich_vu"] or "").split(" | ")[0])[:60]
+    if dv:
+        ra.append(f"DV · {dv}")
+    return ra
+
+
+def _xep_album(theo_album: dict[str, list[str]]) -> None:
+    """Cho ảnh vào album trong thư mục 'Doctor Laser' của Photos. Chỉ THÊM: tìm album có sẵn
+    trước khi tạo, ảnh đã có trong album thì bỏ qua, không gỡ ảnh khỏi album nào."""
+    try:
+        import photoscript
+
+        lib = photoscript.PhotosLibrary()
+        tm = lib.folder(THU_MUC_ALBUM, top_level=True) or lib.create_folder(THU_MUC_ALBUM)
+        co = {}
+        for al in tm.albums:
+            co.setdefault(al.name, al)
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! không mở được thư mục album '{THU_MUC_ALBUM}' trong Photos: {e}")
+        return
+    tao = them = 0
+    for ten, ids in theo_album.items():
+        try:
+            al = co.get(ten)
+            if al is None:
+                al = co[ten] = tm.create_album(ten)
+                tao += 1
+                da = set()
+            else:
+                da = {p.uuid for p in al.photos()}
+            moi = [i for i in dict.fromkeys(ids) if i not in da]
+            if moi:
+                al.add([photoscript.Photo(i) for i in moi])
+                them += len(moi)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! album '{ten}': {e}")
+    print(f"Album Photos ('{THU_MUC_ALBUM}'): tạo {tao} album mới, thêm {them} ảnh.")
 
 
 def _gan_tu_khoa(r) -> None:
@@ -1257,6 +1314,8 @@ def main() -> None:
     s.add_argument("dich", help="thư mục đích, ví dụ ~/KhachHang")
     s.add_argument("--gan-tu-khoa", action="store_true", help="thêm từ khóa vào ảnh trong Photos")
     s.add_argument("--kiot", action="store_true", help="đẩy chỉ mục ảnh lên app KIOT")
+    s.add_argument("--album", action="store_true",
+                   help="cho ảnh đã duyệt vào album Photos (thư mục 'Doctor Laser'): theo khách + theo dịch vụ")
     s.set_defaults(f=cmd_xuat)
     s = sub.add_parser("daykiot", help="đẩy chỉ mục ảnh (theo hóa đơn) lên app KIOT")
     s.add_argument("thang")
