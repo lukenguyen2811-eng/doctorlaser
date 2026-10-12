@@ -61,5 +61,16 @@ class TaiTheoLo(unittest.TestCase):
         self.assertEqual(self.lenh, [])
 
 
+class CoXem(unittest.TestCase):
+    def test_anh_co_vua_coi_nhu_da_co(self):
+        d = tempfile.mkdtemp()
+        p = types.SimpleNamespace(uuid="U9", path_derivatives=[])
+        self.assertFalse(A._co_xem(p, d))
+        os.makedirs(os.path.join(d, "vua"))
+        open(os.path.join(d, "vua", "U9.jpg"), "w").close()
+        self.assertTrue(A._co_xem(p, d))
+        self.assertFalse(A._co_xem(p))  # không truyền thư mục tháng -> chỉ xét bản xem trước
+
+
 if __name__ == "__main__":
     unittest.main()

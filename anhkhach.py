@@ -246,8 +246,11 @@ def _doc_chu(path: str, huong) -> str:
         return ""
 
 
-def _co_xem(p) -> bool:
-    """Ảnh đã có bản xem trước trên máy (thường đủ đọc nhãn) -> khỏi tải bản gốc."""
+def _co_xem(p, thang_dir: str | None = None) -> bool:
+    """Ảnh đã có bản xem trước trên máy, hoặc ảnh cỡ vừa tai_goc.py --vua đã tải (đủ đọc nhãn)
+    -> khỏi tải bản gốc."""
+    if thang_dir and os.path.exists(os.path.join(thang_dir, "vua", p.uuid + ".jpg")):
+        return True
     return any(os.path.exists(x) for x in (p.path_derivatives or []))
 
 
@@ -267,7 +270,7 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: b
     if tai_goc:
         def chua_co(p):  # mặc định chỉ tải ảnh chưa có gì trên máy; --tai-het: tải cả ảnh có bản xem trước
             g = (p.path_edited if p.hasadjustments else None) or p.path
-            return not (g and os.path.exists(g)) and (tai_het or not _co_xem(p))
+            return not (g and os.path.exists(g)) and (tai_het or not _co_xem(p, thang_dir))
 
         _tai_theo_lo([p for p in ds if chua_co(p)], thang_dir)
     rows, thieu = [], 0
@@ -281,11 +284,13 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: b
         if not goc and os.path.isdir(thang_dir):  # bản gốc đã tải lần trước
             goc = next((os.path.join(thang_dir, f) for f in os.listdir(thang_dir)
                         if f.startswith(p.uuid)), None)
-        if not goc and tai_goc and (tai_het or not _co_xem(p)):
+        if not goc and tai_goc and (tai_het or not _co_xem(p, thang_dir)):
             goc = _tai_ban_goc(p, thang_dir)
         if not goc:
             thieu += 1
-        xem_nho = next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None)
+        vua = os.path.join(thang_dir, "vua", p.uuid + ".jpg")  # ảnh cỡ vừa do tai_goc.py --vua tải
+        xem_nho = next((x for x in (p.path_derivatives or []) if os.path.exists(x)), None) or \
+            (vua if os.path.exists(vua) else None)
         chu_ocr = ""
         if ocr:
             if goc:
