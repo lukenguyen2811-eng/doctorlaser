@@ -135,6 +135,23 @@ class DienTien(unittest.TestCase):
         self.assertNotIn("<script>alert", t)
         self.assertIn("action='/tim'", A._trang_chu(self.c).decode())
 
+    def test_ma_cu_la_khach_khac(self):  # âm: 'CU-KH001' (KiotViet cũ) KHÔNG gộp với 'KH001'
+        self.c.execute("INSERT INTO visits VALUES ('CU-HD5','2019-03-02','08:00','CU-KH001','Nguoi Cu Khac',"
+                       "'0907770000','Laser Pico','')")
+        self.c.execute("INSERT INTO photos (id,nguon,ngay,thoi_gian,ten_file,duong_dan,anh_xem,chu_thich,ocr,"
+                       "xn_hd,do_tin,bo_qua) VALUES ('c1','photos','2019-03-02','2019-03-02T08:05:00','I.jpg',?,?,"
+                       "'','','CU-HD5','chac',0)", (self.file, self.file))
+        t = self.trang("KH001")
+        self.assertNotIn("/anh/c1'", t)
+        self.assertNotIn("2019", t)
+        t = self.trang("CU-KH001")
+        self.assertIn("/anh/c1'", t)
+        self.assertNotIn("/anh/a1'", t)
+        self.assertIn("1 lần điều trị", t)
+        ds = [r["ma_kh"] for r in A._tim_khach(self.c, "KH001")]
+        self.assertEqual(sorted(ds), ["CU-KH001", "KH001"])  # 2 dòng riêng, mỗi dòng 1 link
+        self.assertIn("href='/khach?ma=CU-KH001'", A._trang_tim(self.c, "KH001").decode())
+
     def test_route_http(self):  # gọi thật qua server cục bộ (cổng ngẫu nhiên)
         import threading
         import urllib.request
