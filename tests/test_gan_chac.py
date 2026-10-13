@@ -105,6 +105,18 @@ class GanChac(unittest.TestCase):
         self.assertEqual(cmd[0][3:], ["U1/L0/001", "KH1 · A", "KH1", "chưa duyệt"])
         self.assertEqual(kw["timeout"], G.HAN_GIAY)
 
+    def test_loi_lien_tiep_thi_dung_luot(self):
+        c = A.ket_noi()
+        for i in range(8):
+            c.execute("INSERT INTO photos (id,nguon,ngay,thoi_gian,ten_file,goi_y_hd,do_tin,bo_qua)"
+                      " VALUES (?,'photos','2026-09-02','2026-09-02T10:00:00','I.HEIC','H1','chac',0)", (f"z{i}",))
+        c.commit()
+        goi = []
+        with mock.patch.object(G, "ghi_mot", side_effect=lambda ps, g: goi.append(g) or (_ for _ in ()).throw(RuntimeError("treo"))):
+            self.chay("2026-09", "--ghi")
+        self.assertEqual(len(goi), G.LOI_LIEN)
+        c.close()
+
 
 if __name__ == "__main__":
     unittest.main()

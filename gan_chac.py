@@ -66,6 +66,7 @@ on run argv
     end tell
 end run
 """
+LOI_LIEN = 5  # lỗi liền nhau bấy nhiêu ảnh thì dừng lượt
 HAN_GIAY = 90  # app Ảnh có lúc treo/khởi động lại giữa chừng -> 1 ảnh không được chặn cả lượt
 
 
@@ -132,7 +133,7 @@ def main() -> None:
         return
     import photoscript
 
-    xong = loi = 0
+    xong = loi = lien = 0
     for i, g in enumerate(ds, 1):
         try:
             ghi_mot(photoscript, g)
@@ -141,9 +142,14 @@ def main() -> None:
                           dt.datetime.now().isoformat(timespec="seconds")))
             conn.commit()
             xong += 1
+            lien = 0
         except Exception as e:  # noqa: BLE001
             loi += 1
+            lien += 1
             print(f"  ! {g['ten_file']}: {str(e)[:100]}", flush=True)
+            if lien >= LOI_LIEN:  # app Ảnh treo -> dừng lượt này, lượt sau chạy tiếp
+                print(f"  ! {LOI_LIEN} ảnh lỗi liền nhau — app Ảnh có thể đang treo, dừng lượt này.", flush=True)
+                break
         if i % 50 == 0 or i == len(ds):
             print(f"  {i}/{len(ds)} — ghi được {xong}, lỗi {loi}", flush=True)
     print(f"Xong: {xong} ảnh đã ghi mã KH/SĐT vào app Ảnh, lỗi {loi}.")
