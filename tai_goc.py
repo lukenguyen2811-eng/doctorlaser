@@ -18,6 +18,8 @@ import subprocess
 import sys
 import time
 
+MOI_CON = 40  # số ảnh mỗi tiến trình con tải trước khi thoát (giới hạn bộ nhớ)
+
 from anhkhach import ANH_GOC, _co_xem, khoang_thang, thang
 
 
@@ -42,6 +44,13 @@ def can_tai(tu: str, den: str, thang_dir: str, tai_het: bool = False, vua: bool 
 
 def tai_vua(u: str, dich: str, canh: int = 1600) -> None:
     """Ảnh cỡ vừa (cạnh dài ~1600px, đã xoay đúng chiều) thay vì bản gốc: đủ đọc nhãn, nhẹ hơn nhiều."""
+    import objc
+
+    with objc.autorelease_pool():  # trả bộ nhớ ảnh sau mỗi lần tải
+        _tai_vua(u, dich, canh)
+
+
+def _tai_vua(u: str, dich: str, canh: int) -> None:
     import AppKit
     import Foundation
     import Photos
@@ -133,21 +142,28 @@ def main() -> None:
     if not ds:
         return
     t0, xong, loi = time.time(), 0, 0
-    procs = []
-    for k in range(a.luong):
-        phan = ds[k::a.luong]
-        if not phan:
-            continue
-        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), a.thang, "--con", str(k)] + (["--vua"] if a.vua else []),
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-        p.stdin.write("\n".join(phan))
-        p.stdin.close()
-        procs.append(p)
+    # Mỗi tiến trình con chỉ tải MOI_CON ảnh rồi thoát: PhotoKit/AppKit giữ bộ nhớ ảnh đã tải
+    # (13/10: mỗi con phình 3,3 GB sau 7 giờ -> 21 GB swap, tốc độ 15 -> 5 ảnh/phút).
+    phan_viec = [ds[i:i + MOI_CON] for i in range(0, len(ds), MOI_CON)]
     import selectors
 
     sel = selectors.DefaultSelector()
-    for p in procs:
+    procs, so = [], 0
+
+    def mo_con():
+        nonlocal so
+        phan = phan_viec.pop(0)
+        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), a.thang, "--con", str(so)]
+                             + (["--vua"] if a.vua else []),
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        so += 1
+        p.stdin.write("\n".join(phan))
+        p.stdin.close()
+        procs.append(p)
         sel.register(p.stdout, selectors.EVENT_READ)
+
+    while phan_viec and len(procs) < a.luong:
+        mo_con()
     con_lai = len(procs)
     while con_lai:
         for key, _ in sel.select():
@@ -155,6 +171,9 @@ def main() -> None:
             if not dong:
                 sel.unregister(key.fileobj)
                 con_lai -= 1
+                if phan_viec:
+                    mo_con()
+                    con_lai += 1
                 continue
             if dong.startswith("ok"):
                 xong += 1
