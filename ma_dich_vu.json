@@ -1,5 +1,5 @@
 {
-  "_ghi_chu": "Mã dịch vụ nhân viên viết tắt trên ảnh -> chữ (không dấu) có trong tên dịch vụ KiotViet. Soạn 12/10/2026 từ 330 nhãn tháng 9-10; Lượng DUYỆT 12/10/2026 (laserlifi = Laserlift). Thêm/sửa mã khi nhân viên dùng mã mới. Sửa xong chạy lại: anhkhach.py ghep YYYY-MM. Chưa thấy tên dịch vụ Laserlift trên KiotViet 09-10 (chỉ có sản phẩm EYELIFT SERUM -> KHÔNG khớp chữ 'lift' trơn).",
+  "_ghi_chu": "Mã dịch vụ nhân viên viết tắt trên ảnh -> chữ (không dấu) có trong tên dịch vụ KiotViet. Soạn 12/10/2026 từ 330 nhãn tháng 9-10; Lượng DUYỆT 12/10/2026 (laserlifi = Laserlift). Thêm/sửa mã khi nhân viên dùng mã mới. Sửa xong chạy lại: anhkhach.py ghep YYYY-MM. Chưa thấy tên dịch vụ Laserlift trên KiotViet 09-10 (chỉ có sản phẩm EYELIFT SERUM -> KHÔNG khớp chữ 'lift' trơn). 13/10: thêm nhu/peel nhu (nhũ hoa), nhan (xoá nhăn = botox); OCR 'thể' -> tt (thâm), chỉ ở nhãn có gạch. 'xoá' là động từ chung: mã lấy từ chữ sau.",
   "csd": {
     "nghia": "chăm sóc da (mụn, peel, điện di, IPL)",
     "khop": [
@@ -136,11 +136,31 @@
       "lifting"
     ]
   },
+  "nhu": {
+    "nghia": "trị thâm / peel nhũ hoa (KiotViet: 'TRỊ THÂM NHŨ HOA', 'COMBO TRỊ THÂM NHŨ')",
+    "khop": [
+      "nhu"
+    ]
+  },
+  "peel nhu": {
+    "nghia": "peel nhũ hoa (nhãn 'peel nhũ')",
+    "khop": [
+      "nhu"
+    ]
+  },
+  "nhan": {
+    "nghia": "xoá nhăn (botox) — nhãn 'xoá nhăn'",
+    "khop": [
+      "botox",
+      "xoa nhan"
+    ]
+  },
   "_ocr_sai": {
     "gsd": "csd",
     "isd": "csd",
     "fractiona": "fractional",
     "fractionai": "fractional",
-    "laserlifi": "laserlift"
+    "laserlifi": "laserlift",
+    "the": "tt"
   }
 }

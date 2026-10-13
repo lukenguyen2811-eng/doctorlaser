@@ -398,6 +398,50 @@ class BoChup(unittest.TestCase):
         self.assertNotIn("cùng bộ chụp liền", r["p3"][2] or "")
 
 
+    # --- e25e7d9 soát: ảnh nhân đôi (2 bản cùng 1 giây) đếm 1 tư thế; bộ dài 1 nhãn cắt tại quãng nghỉ ---
+    @staticmethod
+    def doi(n, nhan, buoc=5, dau=0):  # n tư thế, mỗi tư thế 2 bản cùng giây; nhan = {tư thế: chữ} (cả 2 bản)
+        return [(f"p{i}{b}", dau + i * buoc, nhan.get(i, "")) for i in range(n) for b in "ab"]
+
+    def test_anh_nhan_doi_bo_7_tu_the_chac_ca_bo(self):  # 14 ảnh = 7 tư thế, nhãn ở 2 bản tấm đầu
+        r = self.ghep(self.doi(7, {0: "Tâm-laser 7/9/26"}))
+        self.assertEqual({v[:2] for v in r.values()}, {("K1", "chac")})
+
+    def test_anh_nhan_doi_bo_dai_1_nhan_khong_chac(self):  # âm: 2 bản cùng giây = 1 nhãn, không phải 2
+        r = self.ghep(self.doi(10, {0: "Tâm-laser 7/9/26"}))
+        self.assertEqual({r[f"p{i}{b}"][:2] for i in range(1, 10) for b in "ab"}, {("K1", "goi_y")})
+        self.assertIn("chỉ 1 nhãn", r["p3a"][2])
+
+    def test_anh_nhan_doi_khoang_cach_dem_theo_tu_the(self):  # 2 nhãn cách 5 tư thế, đuôi cách > 6 tư thế
+        r = self.ghep(self.doi(14, {0: "Tâm-laser 7/9/26", 5: "Tâm-laser 7/9/26"}))
+        self.assertEqual({r[f"p{i}{b}"][:2] for i in range(1, 12) for b in "ab"}, {("K1", "chac")})
+        self.assertEqual({r[f"p{i}{b}"][:2] for i in (12, 13) for b in "ab"}, {("K1", "goi_y")})
+
+    def test_bo_dai_1_nhan_cat_quang_nghi_30s(self):  # ca thật 42BA8BE0: khách sau vào sau 31s
+        anh = self.doi(5, {0: "Tâm-laser 7/9/26"}, buoc=3) + [(f"q{i}", 12 + 31 + i * 5, "") for i in range(5)]
+        r = self.ghep(anh)
+        self.assertEqual({r[f"p{i}{b}"][:2] for i in range(5) for b in "ab"}, {("K1", "chac")})
+        self.assertEqual({r[f"q{i}"][:2] for i in range(5)}, {("K1", "goi_y")})  # sau quãng nghỉ: chỉ gợi ý
+        self.assertIn("quãng nghỉ", r["q0"][2])
+        self.assertIn("tách tại quãng nghỉ", r["p2a"][2])
+
+    def test_nghi_truoc_khi_du_5_tu_the_khong_cat(self):  # âm: nghỉ 40s sau 3 tư thế -> không cắt, không chắc
+        anh = [(f"p{i}", i * 5, "Tâm-laser 7/9/26" if i == 0 else "") for i in range(3)] + \
+              [(f"q{i}", 10 + 40 + i * 5, "") for i in range(7)]
+        r = self.ghep(anh)
+        self.assertNotIn("chac", {r[x][1] for x in r if x != "p0"})
+
+    def test_bo_ngan_nghi_49s_van_chac(self):  # ca thật 42F8E2B3: đổi ngồi->nằm nghỉ 49s, bộ 7 tư thế 1 khách
+        anh = [(f"p{i}", i * 10, "Tâm-laser 7/9/26" if i == 0 else "") for i in range(5)] + \
+              [("q0", 40 + 49, ""), ("q1", 40 + 49 + 8, "")]
+        r = self.ghep(anh)
+        self.assertEqual({v[:2] for v in r.values()}, {("K1", "chac")})
+
+    def test_phan_co_nhan_van_dai_khong_chac(self):  # âm: cắt xong phần có nhãn vẫn 9 tư thế -> gợi ý
+        anh = self.bo(9, {0: "Tâm-laser 7/9/26"}, buoc=5) + [(f"q{i}", 40 + 31 + i * 5, "") for i in range(5)]
+        r = self.ghep(anh)
+        self.assertNotIn("chac", {r[x][1] for x in r if x != "p0"})
+
 class LechDichVu(unittest.TestCase):
     """Soát 8b3c1c8: nhãn có mã dịch vụ không khớp HĐ nào của khách được chọn (dữ liệu bịa)."""
 
@@ -465,6 +509,76 @@ class LechDichVu(unittest.TestCase):
     def test_dich_vu_khop_khong_doi(self):  # nhiều HĐ cùng khách, mã khớp 1 HĐ -> như cũ
         self.assertEqual(self.khop("Quyên-csd 28/9/26")[:2], ("A2", 85))
 
+
+    def test_ma_mot_chu_coi_nhu_khong_dich_vu(self):  # 'Đông-c' không hạ 40, không lọc theo 'C'
+        self.assertEqual(self.khop("Đông-c 28/9/26")[:2], ("C1", 85))
+        self.assertEqual(self.khop("Đông-M 28/9/26")[:2], ("C1", 85))
+
+    def test_bao_hanh_nam_khong_khop_pico(self):  # ca thật C0DC564F: HĐ ngày kế '( BH 2 NĂM )' không phải nám
+        self.c.execute("INSERT INTO visits (code,ngay,gio,ma_kh,ten_kh,dich_vu) VALUES "
+                       "('D0','2026-09-28','14:00','KD','Đặng Thị Nghĩa','BLEMISH CREAM 10g'),"
+                       "('D1','2026-09-27','14:00','KD','Đặng Thị Nghĩa','COMBO TRIỆT LÔNG MẶT ( BH 2 NĂM )')")
+        hd, d, ly_do = self.khop("Nghĩa-pico 28/9/26")
+        self.assertEqual((hd, d), ("D0", 40))
+        self.assertNotIn("HĐ ngày kế", ly_do)
+
+    def test_xoa_nhan_lay_ma_chu_sau(self):  # ca thật F77067E4: 'xoá nhăn' -> botox, không ăn 'xóa xăm'
+        self.c.execute("INSERT INTO visits (code,ngay,gio,ma_kh,ten_kh,dich_vu) VALUES "
+                       "('H0','2026-09-28','09:00','KH','Trần Thị Hồng','TIÊM BOTOX XÓA NHĂN 1 VÙNG'),"
+                       "('H1','2026-09-28','09:30','KH2','Lê Thị Hồng','Laser xóa xăm')")
+        self.assertEqual(self.khop("Chị Hồng-xóá nhăn 28/9/26")[:2], ("H0", 85))
+        self.c.execute("DELETE FROM visits WHERE code='H0'")
+        hd, d, _ = self.khop("Chị Hồng-xóá nhăn 28/9/26")  # âm: chỉ còn khách xoá xăm -> lệch, 40
+        self.assertEqual((hd, d), ("H1", 40))
+
+
+class MaDongTuVaBaoHanh(unittest.TestCase):
+    def test_xoa_la_dong_tu(self):
+        self.assertEqual(A.doc_nhan("Lan-xoá nốt ruồi 9/10/26", 2026)[0]["ma_dv"], "not")
+        self.assertEqual(A.doc_nhan("Lan-xoa xăm 9/10/26", 2026)[0]["ma_dv"], "xam")
+        self.assertEqual(A.doc_nhan("Lan-xoá 9/10/26", 2026)[0]["ma_dv"], "xoa")  # không có chữ sau: giữ
+        self.assertTrue(A._dv_khop("not", "Laser nốt ruồi lần lẻ"))
+        self.assertTrue(A._dv_khop("xam", "Laser xóa xăm"))
+        self.assertTrue(A._dv_khop("nhan", "DẶM BOTOX XÓA NHĂN"))
+        self.assertTrue(A._dv_chung("xoa"))
+
+    def test_xoa_khong_khop_xoa_xam(self):  # âm
+        self.assertFalse(A._dv_khop("xoa", "Laser xóa xăm"))
+        self.assertFalse(A._dv_khop("xoa", "Xóa vein mặt lần lẻ"))
+        self.assertFalse(A._dv_khop("not", "Laser xóa xăm"))
+        self.assertFalse(A._dv_khop("nhan", "Laser xóa xăm"))
+
+    def test_bao_hanh_nam(self):
+        self.assertFalse(A._dv_khop("pico", "COMBO TRIỆT LÔNG NÁCH ( BH 2 NĂM )"))
+        self.assertFalse(A._dv_khop("pico", "Triệt lông bảo hành 1 năm"))
+        self.assertTrue(A._dv_khop("pico", "Laser Pico trị nám"))  # nám thật vẫn khớp
+        self.assertTrue(A._dv_khop("pico", "Trị nám 5 năm"))  # 'nám' đứng riêng vẫn khớp
+        self.assertTrue(A._dv_khop("tln", "COMBO TRIỆT LÔNG NÁCH ( BH 2 NĂM )"))
+
+    def test_nhu_hoa(self):
+        self.assertEqual(A.doc_nhan("Lan-peel nhũ 9/10/26", 2026)[0]["ma_dv"], "peel nhu")
+        for ma in ("nhu", "peel nhu"):
+            self.assertTrue(A._dv_khop(ma, "TRỊ THÂM NHŨ HOA ( LẦN LẺ )"), ma)
+            self.assertTrue(A._dv_khop(ma, "COMBO TRỊ THÂM NHŨ ( 6 LẦN )"), ma)
+            self.assertFalse(A._dv_khop(ma, "Peel da mụn lần lẻ"), ma)  # âm
+        self.assertEqual(A.doc_nhan("Lan-peel thâm 9/10/26", 2026)[0]["ma_dv"], "peel")  # như cũ
+
+    def test_ocr_the_la_tham(self):
+        self.assertEqual(A.doc_nhan("Lan- thể 9/10/26", 2026)[0]["ma_dv"], "the")
+        self.assertTrue(A._dv_khop("the", "Trị thâm mụn lần lẻ"))
+        self.assertFalse(A._dv_khop("the", "Tiêm botox"))  # âm
+        n = A.doc_nhan("Lan the 9/10/26", 2026)  # âm: nhãn không gạch -> 'the' không thành mã dịch vụ
+        self.assertTrue(not n or n[0]["ma_dv"] == "")
+
+    def test_ten_nhu_nhan_khong_thanh_ma_o_nhan_khong_gach(self):  # âm: ca thật FCE282A8 'Tâm Như peel'
+        n = A.doc_nhan("Tâm Như peel 14/3/26", 2026)[0]
+        self.assertEqual((n["ten"], n["ma_dv"]), ("tam nhu", "peel"))
+        self.assertEqual(A.doc_nhan("Chi Như 06/07/2026", 2026)[0]["ten"], "chi nhu")
+        self.assertEqual(A.doc_nhan("Thành Nhân 06/07/2026", 2026)[0]["ten"], "thanh nhan")
+
+    def test_ma_mot_chu_khong_khop(self):  # âm: 'c' không ăn 'Điện di C'
+        self.assertFalse(A._dv_khop("c", "Điện di C sau sẹo"))
+        self.assertTrue(A._dv_chung("c"))
 
 class TruocSau(unittest.TestCase):
     def test_doc_chu_sau_truoc(self):
