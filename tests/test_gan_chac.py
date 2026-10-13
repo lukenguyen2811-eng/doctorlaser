@@ -27,7 +27,7 @@ class AnhGia:
         KHO[self._u][k] = v
 
 
-GIA = types.SimpleNamespace(Photo=AnhGia)
+GIA = types.SimpleNamespace(Photo=AnhGia, GIA=True)
 
 
 class GanChac(unittest.TestCase):
@@ -87,6 +87,23 @@ class GanChac(unittest.TestCase):
         self.chay("--sua", "--ghi")
         self.assertIn("KH000001", KHO["a"]["keywords"])
         c.close()
+
+    def test_may_ghep_lai_khong_con_chac_thi_go(self):
+        self.chay("2026-09", "--ghi")
+        c = A.ket_noi()
+        c.execute("UPDATE photos SET do_tin='chua_ro', goi_y_hd=NULL WHERE id='a'")
+        c.commit()
+        self.chay("--sua", "--ghi")
+        self.assertEqual(KHO["a"]["keywords"], ["cu"])
+        c.close()
+
+    def test_lenh_osascript_dung_tham_so(self):
+        with mock.patch("subprocess.run") as run:
+            run.return_value = types.SimpleNamespace(returncode=0, stderr="")
+            G.ghi_mot(types.SimpleNamespace(), {"id": "U1", "chu_thich": "KH1 · A", "tu_khoa": ["KH1", "chưa duyệt"]})
+        cmd, kw = run.call_args
+        self.assertEqual(cmd[0][3:], ["U1/L0/001", "KH1 · A", "KH1", "chưa duyệt"])
+        self.assertEqual(kw["timeout"], G.HAN_GIAY)
 
 
 if __name__ == "__main__":

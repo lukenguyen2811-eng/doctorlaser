@@ -43,13 +43,48 @@ def can_gan(conn, tu: str, den: str) -> list[dict]:
     return ra
 
 
+_GHI = """
+on run argv
+    tell application "Photos"
+        set m to media item id (item 1 of argv)
+        set kw to keywords of m
+        if kw is missing value then set kw to {}
+        repeat with i from 3 to count of argv
+            set k to item i of argv
+            if kw does not contain k then set end of kw to k
+        end repeat
+        set keywords of m to kw
+        set d to description of m
+        if d is missing value then set d to ""
+        if d does not contain (item 2 of argv) then
+            if d is "" then
+                set description of m to (item 2 of argv)
+            else
+                set description of m to d & linefeed & (item 2 of argv)
+            end if
+        end if
+    end tell
+end run
+"""
+HAN_GIAY = 90  # app Ảnh có lúc treo/khởi động lại giữa chừng -> 1 ảnh không được chặn cả lượt
+
+
 def ghi_mot(photoscript, g: dict) -> None:
-    p = photoscript.Photo(g["id"])
-    cu = list(p.keywords or [])
-    p.keywords = cu + [k for k in g["tu_khoa"] if k not in cu]
-    mo_ta = p.description or ""
-    if g["chu_thich"] not in mo_ta:
-        p.description = f"{mo_ta}\n{g['chu_thich']}".strip()
+    """Ghi 1 ảnh bằng osascript có thời hạn (photoscript gọi thẳng thì treo mãi khi app Ảnh kẹt)."""
+    if getattr(photoscript, "GIA", False):  # test
+        p = photoscript.Photo(g["id"])
+        cu = list(p.keywords or [])
+        p.keywords = cu + [k for k in g["tu_khoa"] if k not in cu]
+        mo_ta = p.description or ""
+        if g["chu_thich"] not in mo_ta:
+            p.description = f"{mo_ta}\n{g['chu_thich']}".strip()
+        return
+    import subprocess
+
+    kq = subprocess.run(["osascript", "-e", _GHI, f"{g['id']}/L0/001", g["chu_thich"], *g["tu_khoa"]],
+                        capture_output=True, text=True, timeout=HAN_GIAY)
+    if kq.returncode != 0:
+        raise RuntimeError(kq.stderr.strip()[:100])
 
 
 def go_mot(photoscript, id_: str, tu_khoa: list[str], chu_thich: str) -> None:
@@ -71,8 +106,10 @@ def main() -> None:
     if a.sua:
         sai = conn.execute(
             "SELECT g.* FROM da_gan_chac g JOIN photos p ON p.id=g.id"
-            " WHERE p.bo_qua=1 OR (p.xn_hd IS NOT NULL AND p.xn_hd != g.hd)").fetchall()
-        print(f"{len(sai)} ảnh đã ghi nhãn nhưng người duyệt đổi khách / loại -> gỡ")
+            " WHERE p.bo_qua=1 OR (p.xn_hd IS NOT NULL AND p.xn_hd != g.hd)"
+            " OR (p.xn_hd IS NULL AND (p.do_tin != 'chac' OR p.goi_y_hd IS NOT g.hd))").fetchall()
+        print(f"{len(sai)} ảnh đã ghi nhãn nhưng người duyệt đổi khách / loại, hoặc máy ghép lại không còn"
+              " 'chắc chắn' khách đó -> gỡ")
         if a.ghi and sai:
             import photoscript
 
