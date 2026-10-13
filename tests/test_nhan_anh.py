@@ -210,7 +210,10 @@ class TenMotChuLechDichVu(unittest.TestCase):
     def test_hai_khach_trong_dung_dich_vu_ha_goi_y(self):  # âm: 2 ứng viên khác -> không đoán
         self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "Trần Thu KH TU DEN", "Picolight"),
                   ("HC", "Lê Thu GT", "Pico toàn mặt"))
-        self.assertEqual(self.khop("Thu-pico 21/9/26")[:2], ("HA", 50))
+        # Bỏ ghi chú tên -> 'Trần Thu', 'Lê Thu' cùng đuôi 'thu' + cùng pico -> người chọn (không đoán HA).
+        hd, d, ly_do = self.khop("Thu-pico 21/9/26")
+        self.assertEqual((hd, d), (None, 0))
+        self.assertIn("trùng 2 khách", ly_do)
 
     def test_dich_vu_khop_giu_chac(self):  # không đổi ca đúng
         self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "TRẦN THU (KH TỰ ĐẾN)", "Picolight"))
@@ -348,6 +351,218 @@ class BangMaDichVu(unittest.TestCase):
     def test_bang_nap_duoc(self):
         self.assertIn("co2", A.MA_DV)
         self.assertEqual(A.MA_DV_OCR.get("gsd"), "csd")
+
+
+class TenCoGhiChu(unittest.TestCase):
+    """Tên KiotViet kèm ghi chú '(KH TỰ ĐẾN)', '(EM BS LƯƠNG)', 'KH7332 GT'... (soát 04-08/2026)."""
+    def setUp(self):
+        self.c = A.ket_noi()
+        self.c.execute("DELETE FROM visits")
+
+    def tearDown(self):
+        self.c.close()
+
+    def them(self, *ds):
+        for code, ten, dv in ds:
+            self.c.execute("INSERT INTO visits (code,ngay,ten_kh,dich_vu) VALUES (?,'2026-06-15',?,?)",
+                           (code, ten, dv))
+
+    def khop(self, chu):
+        return A._khop_nhan(self.c, A.doc_nhan(chu, 2026)[0], "2026-06-15")
+
+    def test_lam_sach_ten(self):
+        for goc, sach in [("Trần Thị Hoa (EM BS LƯƠNG)", "tran thi hoa"),
+                          ("Phạm Văn Vương (KH TỰ ĐẾN)", "pham van vuong"),
+                          ("Lê Thị Dung (BS LƯƠNG)", "le thi dung"),
+                          ("Đoàn Thanh Vy KH7332 GT", "doan thanh vy"),
+                          ("Ngô Mai GT", "ngo mai"), ("Võ Lan 6366GT", "vo lan"),
+                          ("Hồ Ngọc Hà (KH7332 GT", "ho ngoc ha"),  # thiếu ngoặc đóng
+                          ("Lý Thu Trang NGƯỜI QUEN BS LUONG", "ly thu trang"),
+                          ("Đinh Đức Dũng", "dinh duc dung"), ("(KH TỰ ĐẾN)", "kh tu den")]:
+            self.assertEqual(A.ten_sach(goc), sach, goc)
+
+    def test_ca_that_vuong_khong_lech_sang_luong(self):
+        # Ca thật: 'A Vương-peel' từng ghép vào khách nữ '(EM BS LƯƠNG)' qua lệch 1 chữ vuong~luong.
+        self.them(("HN", "Trần Thị Hoa (EM BS LƯƠNG)", "Tiêm HA môi"),
+                  ("HV", "Phạm Văn Vương (KH TỰ ĐẾN)", "Peel da mụn lần lẻ"))
+        hd, d, ly_do = self.khop("A Vương-peel 15/6/26")
+        self.assertEqual((hd, d), ("HV", 85))
+
+    def test_vuong_khong_con_khach_nao_thi_khong_doan(self):  # âm: không lệch 1 chữ sang ghi chú 'LƯƠNG'
+        self.them(("HN", "Trần Thị Hoa (EM BS LƯƠNG)", "Peel da mụn lần lẻ"))
+        self.assertIsNone(self.khop("A Vương-peel 15/6/26")[0])
+
+    def test_ca_that_dung_tach_bang_dich_vu(self):
+        # Ca thật: 'C Dung-mv'; HĐ 'ĐINH ĐỨC DŨNG' điện di C, '... DUNG (BS LƯƠNG)' cắt sẹo + mài viền.
+        self.them(("H1", "ĐINH ĐỨC DŨNG", "Điện di C"),
+                  ("H2", "LÊ THỊ DUNG (BS LƯƠNG)", "Combo cắt sẹo + mài viền"))
+        hd, d, ly_do = self.khop("C Dung-mv 15/6/26")
+        self.assertEqual((hd, d), ("H2", 85))
+        self.assertIn("dịch vụ", ly_do)
+
+    def test_trung_ten_khong_dau_chon_theo_dau_chi_goi_y(self):
+        self.them(("H1", "ĐINH ĐỨC DŨNG", "Peel da"), ("H2", "LÊ THỊ DUNG (BS LƯƠNG)", "CSD mụn"))
+        self.assertEqual(self.khop("C Dung-csd 15/6/26")[:2], ("H2", 50))
+        self.assertEqual(self.khop("C Dũng-csd 15/6/26")[:2], ("H1", 50))
+
+    def test_trung_ten_cung_dau_nguoi_chon(self):  # âm: cùng dấu, cùng dịch vụ -> không đoán
+        self.them(("H1", "Lê Dung", "CSD"), ("H2", "Võ Dung (KH TỰ ĐẾN)", "CSD mụn"))
+        self.assertIsNone(self.khop("Dung-csd 15/6/26")[0])
+
+    def test_dau_khong_ke_vi_tri_bo_dau(self):  # 'hoà' = 'hòa' -> vẫn trùng, người chọn
+        self.them(("H1", "Nguyễn Thị Hòa", "CSD"), ("H2", "Lý Thị Hoà", "CSD"))
+        self.assertIsNone(self.khop("Hoà-csd 15/6/26")[0])
+
+    def test_xung_ho_giu_khi_khach_ten_dung_nhu_vay(self):  # 'Anh Thư' là tên, không phải xưng hô
+        self.them(("H1", "Nguyễn Anh Thư", "CSD"), ("H2", "Lê Minh Thư", "CSD"))
+        self.assertEqual(self.khop("Anh Thư-csd 15/6/26")[:2], ("H1", 85))
+
+    def test_xung_ho_giu_khi_ho_ten_chua_du_chu(self):  # 'Cô Hạnh' ~ khách 'Lê Cô Hạnh Mỹ'
+        self.them(("H1", "Lê Cô Hạnh Mỹ", "Filler"), ("H2", "Trần Hạnh Như", "Filler"))
+        self.assertEqual(self.khop("Cô Hạnh-filler 15/6/26")[:2], ("H1", 85))
+
+    def test_nhan_ghi_dung_chu_ghi_chu(self):  # nhân viên làm dịch vụ: tên KiotViet '... KTV'
+        self.them(("H1", "Nguyễn Thị Hoa KTV", "Xóa vein mặt lần lẻ"), ("H2", "Lê Thị Hoa", "Peel"))
+        self.assertEqual(self.khop("KTV-dvm 15/6/26")[:2], ("H1", 85))
+
+    def test_ten_goi_trong_ngoac(self):  # 'X (LISA)': ngoặc là tên gọi, không phải ghi chú
+        self.them(("H1", "Nguyễn Thị Hoa (LISA)", "Xóa vein mặt lần lẻ"), ("H2", "Lê Mai (KH TỰ ĐẾN)", "CSD"))
+        self.assertEqual(self.khop("Lisa-dvm 15/6/26")[:2], ("H1", 85))
+        self.assertEqual(self.khop("Lisa-csd 15/6/26")[:2], ("H1", 50))  # lệch dịch vụ -> gợi ý
+        self.assertEqual(A._bi_danh("Lê Mai (KH TỰ ĐẾN) (BS LƯƠNG) (MẪU NÁM 9)"), [])
+
+    def test_ten_trung_chu_ghi_chu_khong_khop(self):  # âm: khách tên Lương không ăn '(BS LƯƠNG)'
+        self.them(("H1", "Lê Thị Hoa (BS LƯƠNG)", "CSD"), ("H2", "Trần Hoa (EM BS LUONG)", "CSD"))
+        self.assertIsNone(self.khop("Lương-csd 15/6/26")[0])
+
+    def test_xung_ho_mot_chu_khong_bo(self):  # 'Anh-csd' = khách tên Anh
+        self.them(("H1", "Võ Minh Anh", "CSD"))
+        self.assertEqual(self.khop("Anh-csd 15/6/26")[:2], ("H1", 85))
+
+    def test_lech_dich_vu_tim_khach_khac_ca_khi_khop_mot_phan(self):
+        # Nhãn có chữ thừa ('Laser Thu') -> k < len(w): vẫn tìm khách khác đúng dịch vụ, chỉ gợi ý.
+        self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "TRẦN THU (KH TỰ ĐẾN)", "Picolight"))
+        self.c.execute("DELETE FROM visits WHERE code='HB'")
+        self.them(("HB", "Trần Thu Hiền", "Picolight"))
+        hd, d, ly_do = self.khop("Laser Thu-pico 15/6/26")
+        self.assertEqual((hd, d), ("HB", 50))
+        self.assertIn("một phần", ly_do)
+
+    def test_diem_dung_ten_da_lam_sach(self):
+        v = {"sdt": "", "ma_kh": "KH000001", "ten_kh": "Phạm Văn Vương (KH TỰ ĐẾN)"}
+        self.assertEqual(A._diem(v, "pham van vuong peel", "")[0], 80)
+        self.assertEqual(A._diem(v, "kh tu den", "")[0], 0)  # âm: chữ ghi chú không phải tên
+
+
+class NhanKhongGach(unittest.TestCase):
+    def test_doc_nhan_khong_gach(self):
+        n = A.doc_nhan("Cheng wei 13/7/26", 2026)
+        self.assertEqual([(x["ten"], x["ma_dv"], x["ngay"], x["gach"]) for x in n],
+                         [("cheng wei", "", "2026-07-13", False)])
+        n = A.doc_nhan("Thanh seo 13/7/26", 2026)[0]
+        self.assertEqual((n["ten"], n["ma_dv"]), ("thanh", "seo"))
+        self.assertEqual(A.doc_nhan("Thu Ha 13/7/26", 2026)[0]["ten"], "thu ha")  # 'ha' = tên Hà
+
+    def test_khong_phai_nhan(self):  # âm
+        for chu in ["6/10/26", "Doctor Laser 1/10/26", "HSD 13/7/26", "Het han 13/7/27",
+                    "Pico 13/7/26", "C 13/7/26", "Thanh 13/7/1990", "Thanh 13/7", "Lan 32/7/26"]:
+            self.assertEqual(A.doc_nhan(chu, 2026), [], chu)
+
+    def test_co_nhan_gach_thi_bo_qua_dang_khong_gach(self):
+        ds = A.doc_nhan("Tam-meso mắt 5/10/26", 2026)
+        self.assertEqual([(n["ten"], n["gach"]) for n in ds], [("tam", True)])
+
+    def setUp(self):
+        self.c = A.ket_noi()
+        self.c.execute("DELETE FROM visits")
+        self.c.execute("DELETE FROM photos")
+        for code, ten, gio in [("W1", "Wu Cheng Wei", "10:00"), ("W2", "Lê Văn Bảo", "10:10"),
+                               ("W3", "Trần Minh Khoa", "16:00")]:
+            self.c.execute("INSERT INTO visits (code,ngay,gio,ten_kh,dich_vu) VALUES (?,'2026-07-13',?,?,'CSD')",
+                           (code, gio, ten))
+
+    def tearDown(self):
+        self.c.close()
+
+    def khop(self, chu):
+        return A._khop_nhan(self.c, A.doc_nhan(chu, 2026)[0], "2026-07-13")
+
+    def test_khop_ten_trong_ho_ten_chi_goi_y(self):
+        hd, d, ly_do = self.khop("Cheng wei 13/7/26")
+        self.assertEqual((hd, d), ("W1", 50))
+        self.assertIn("không có gạch", ly_do)
+
+    def test_mot_khach_hai_hoa_don_chon_som_nhat(self):  # ca thật 6EAABB53: dịch vụ 14:03 + mua kem 16:46
+        self.c.execute("INSERT INTO visits (code,ngay,gio,ma_kh,ten_kh,dich_vu) VALUES"
+                       " ('S2','2026-07-13','16:46','KH9','Lý Gia Hân (BS LƯƠNG)','Kem rửa mặt'),"
+                       " ('S1','2026-07-13','14:03','KH9','Lý Gia Hân (BS LƯƠNG)','Điều trị sẹo rỗ')")
+        self.assertEqual(self.khop("Gia Hân 13/7/26")[:2], ("S1", 50))
+
+    def test_hai_khach_khac_nhau_cung_ten_nguoi_chon(self):  # âm: khác mã KH -> không đoán
+        self.c.execute("INSERT INTO visits (code,ngay,gio,ma_kh,ten_kh,dich_vu) VALUES"
+                       " ('S2','2026-07-13','16:46','KH8','Lý Gia Hân','CSD'),"
+                       " ('S1','2026-07-13','14:03','KH9','Võ Gia Hân (BS LƯƠNG)','CSD')")
+        self.assertIsNone(self.khop("Gia Hân 13/7/26")[0])
+
+    def test_khop_du_ho_ten_moi_chac(self):
+        self.assertEqual(self.khop("Le Van Bao 13/7/26")[:2], ("W2", 85))
+        self.assertEqual(self.khop("Bao 13/7/26")[:2], ("W2", 50))  # 1 chữ -> chỉ gợi ý
+
+    def test_nhan_khong_gach_chan_luat_gio(self):
+        # Ảnh 16:02 có nhãn không gạch tên người không có HĐ -> không được 'chỉ 1 HĐ gần giờ' (W3).
+        self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr) VALUES"
+                       " ('a','2026-07-13','2026-07-13T16:02:00','I.HEIC','','Quang Huy 13/7/26')")
+        A.ghep_ngay(self.c, "2026-07-13")
+        self.assertEqual(self.c.execute("SELECT goi_y_hd, do_tin FROM photos").fetchone()[:], (None, "chua_ro"))
+
+    def test_chu_chung_khong_chan_luat_gio(self):  # âm: 'Doctor Laser 1/10/26' không phải nhãn
+        self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr) VALUES"
+                       " ('a','2026-07-13','2026-07-13T16:02:00','I.HEIC','','Doctor Laser 13/7/26')")
+        A.ghep_ngay(self.c, "2026-07-13")
+        self.assertEqual(self.c.execute("SELECT goi_y_hd, do_tin FROM photos").fetchone()[:], ("W3", "goi_y"))
+
+
+class NeoManhMoiLanCaDot(unittest.TestCase):
+    def setUp(self):
+        self.c = A.ket_noi()
+        self.c.execute("DELETE FROM visits")
+        self.c.execute("DELETE FROM photos")
+        for code, ten, dv in [("K1", "Lê Thị Tâm", "Laser"), ("K2", "Võ Thị Thanh Trúc", "Laser"),
+                              ("K3", "Khách Ba", "Peel")]:
+            self.c.execute("INSERT INTO visits (code,ngay,gio,ten_kh,dich_vu) VALUES (?,'2026-08-03',NULL,?,?)",
+                           (code, ten, dv))
+
+    def tearDown(self):
+        self.c.close()
+
+    def ghep(self, anh):
+        for pid, gio, ocr in anh:
+            self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr) VALUES (?,?,?,?,?,?)",
+                           (pid, "2026-08-03", f"2026-08-03T{gio}", "IMG.HEIC", "", ocr))
+        A.ghep_ngay(self.c, "2026-08-03")
+        return {r[0]: (r[1], r[2], r[3]) for r in self.c.execute("SELECT id, goi_y_hd, do_tin, ly_do FROM photos")}
+
+    def test_neo_50_chi_lan_loat_chup_lien(self):
+        r = self.ghep([("a", "10:00:00", "Laser Tâm-laser 3/8/26"), ("b", "10:00:40", ""),
+                       ("c", "10:06:00", "")])  # c cách b > 60s: không cùng loạt
+        self.assertEqual(r["a"][:2], ("K1", "goi_y"))
+        self.assertEqual(r["b"][:2], ("K1", "goi_y"))
+        self.assertIn("lan từ ảnh khớp một phần tên", r["b"][2])
+        self.assertEqual(r["c"][:2], (None, "chua_ro"))
+
+    def test_neo_manh_van_lan_ca_dot(self):
+        r = self.ghep([("a", "10:00:00", "Tâm-laser 3/8/26"), ("c", "10:06:00", "")])
+        self.assertEqual(r["c"][:2], ("K1", "goi_y"))
+        self.assertEqual(r["c"][2], "cùng đợt chụp với ảnh đã khớp tên")
+
+    def test_mot_phan_ten_khong_chan_nhan_85(self):
+        # OCR có 'thanh truc' (khớp một phần tên K2 = 50) và nhãn 'Tâm-laser' (85) -> lấy nhãn.
+        r = self.ghep([("a", "10:00:00", "thanh truc. Tâm-laser 3/8/26")])
+        self.assertEqual(r["a"][:2], ("K1", "chac"))
+
+    def test_mot_phan_ten_giu_khi_nhan_khong_hon(self):  # âm: nhãn không khớp -> giữ gợi ý 50
+        r = self.ghep([("a", "10:00:00", "thanh truc. Quang-laser 3/8/26")])
+        self.assertEqual(r["a"][:2], ("K2", "goi_y"))
 
 
 if __name__ == "__main__":
