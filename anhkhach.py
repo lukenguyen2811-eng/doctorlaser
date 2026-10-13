@@ -41,6 +41,8 @@ GIO_TRUOC, GIO_SAU = 30, 45  # hóa đơn trong [đầu đợt - 30', cuối đ�
 DOT_PHUT = 15  # ảnh cách nhau <= 15 phút coi là cùng một đợt chụp
 CHUOI_GIAY = 60  # đợt có nhiều khách: chỉ lan theo chuỗi ảnh chụp liền, 2 ảnh kề nhau cách <= 60 giây
 TRUNG_GIAY = 3  # >= 3 ảnh cùng giờ đến từng giây = giờ nhập/lưu, không phải giờ chụp
+BO_GIAY = 60  # bộ chụp: mỗi khách chụp mặt 5 kiểu liên tục, 2 ảnh kề nhau cách <= 60 giây
+BO_TOI_DA = 7  # bộ <= 7 ảnh có 1 nhãn khớp chắc = 1 khách; bộ dài hơn có thể là 2 khách liền nhau
 ANH_DUOI = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".tif", ".tiff"}
 
 LOAI_ANH = ["", "trước", "trong", "sau"]
@@ -475,6 +477,9 @@ _KHONG_PHAI_TEN = {"doctor", "laser", "dr", "clinic", "spa", "bs", "bac", "si", 
 # Chữ dịch vụ thường gặp trong nhãn không gạch ('Thanh seo', 'Lan nách'); 'ha' trùng tên Hà -> bỏ.
 _TU_DV_THEM = {"nach", "not", "ruoi", "dien", "di", "peel", "tln", "tl", "mat"}
 XUNG_HO = {"a", "c", "chi", "anh", "em", "co", "chu", "be"}
+# Mã dịch vụ chung/rác trên nhãn ('Lan-tri', 'Mai-tiem', 'test'): khớp thì vẫn dùng để chọn HĐ,
+# không khớp thì coi như nhãn không ghi dịch vụ (không hạ điểm 'lệch dịch vụ').
+DV_CHUNG = {"tri", "tiem", "test", "giai", "kham", "dieu", "dtri", "lam"}
 
 
 def _nhan_khong_gach(chu: str) -> list[dict]:
@@ -570,6 +575,15 @@ def _dv_khop(ma: str, dich_vu: str) -> bool:
     return len(ma) >= 2 and ma in dau
 
 
+def _dv_gan_dung(ma: str, dich_vu: str) -> bool:
+    """Mã OCR đọc sai 1 chữ so với đúng 1 mã trong bảng ('picc'~'pico', 'cad'~'csd') rồi khớp dịch vụ.
+    Chỉ dùng để KHÔNG hạ điểm 'lệch dịch vụ', không bao giờ nâng lên chắc."""
+    if not ma or len(ma) < 3 or ma in MA_DV:
+        return False
+    k = [k for k in MA_DV if _lech_1(ma, k)]
+    return len(k) == 1 and _dv_khop(k[0], dich_vu)
+
+
 def _lech_1(a: str, b: str) -> bool:
     """a, b khác nhau đúng 1 chữ (thay, thêm hoặc bớt)."""
     if a == b or abs(len(a) - len(b)) > 1:
@@ -601,6 +615,20 @@ def _khop_nhan(conn, nhan: dict, ngay_anh: str) -> tuple[str | None, int, str]:
     if len(w) > 1 and w[0] in XUNG_HO and not any(set(w) <= set(t(v)) for v in visits):
         w, wg = w[1:], wg[1:]
     v, d, ly_do = _khop_ten(visits, t, T, nhan, w, wg)
+    if v is not None and d < 50 and nhan["ma_dv"]:
+        # Lệch dịch vụ: HĐ có thể nhập hôm trước/hôm sau -> khách cùng tên, dịch vụ khớp ở ngày ±1
+        # (đúng 1 ngày có) -> chỉ gợi ý 50.
+        ke = []
+        for lech in (-1, 1):
+            n = (dt.date.fromisoformat(ngay) + dt.timedelta(days=lech)).isoformat()
+            vs = conn.execute("SELECT * FROM visits WHERE ngay=?", (n,)).fetchall()
+            T2 = {x["code"]: _tu_ten_kh(x["ten_kh"]) for x in vs}
+            v2, d2, _ = _khop_ten(vs, lambda x: [k for _, k in T2[x["code"]]], T2, nhan, w, wg)
+            if v2 is not None and d2 >= 50 and _dv_khop(nhan["ma_dv"], v2["dich_vu"]):
+                ke.append((n, v2))
+        if len(ke) == 1:
+            n, v2 = ke[0]
+            return v2["code"], 50, f"nhãn '{nhan['goc']}' khớp tên + dịch vụ {v2['ten_kh']} — HĐ ngày kế ({n})"
     if v is None:
         if d:
             return None, 0, f"nhãn '{nhan['goc']}' trùng {d} khách{lech_ngay} — người chọn"
@@ -660,7 +688,7 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
             ung, theo_dau = dau, True
     if len(ung) == 1 and theo_dau:
         return ung[0], 50, "trùng tên không dấu, chọn khách trùng cả dấu"
-    if len(ung) == 1 and dv and not gan_dung and not _dv_khop(dv, ung[0]["dich_vu"]):
+    if len(ung) == 1 and dv and dv not in DV_CHUNG and not gan_dung and not _dv_khop(dv, ung[0]["dich_vu"]):
         # Khớp đuôi tên nhưng dịch vụ lệch ('Thu' ~ '... Thư' mài sẹo, trong khi khách 'THU (KH TỰ ĐẾN)'
         # làm pico) -> xét khách có tên nằm trong họ tên + dịch vụ khớp; không có thì chỉ gợi ý.
         khac = [v for v in visits if v["code"] != ung[0]["code"]
@@ -669,20 +697,109 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
             if k == len(w):
                 return khac[0], 85, "khớp tên + dịch vụ"
             return khac[0], 50, "khớp một phần tên + dịch vụ"
-        return ung[0], 50, "khớp tên nhưng lệch dịch vụ"
+        if _dv_gan_dung(dv, ung[0]["dich_vu"]):  # OCR đọc sai 1 chữ của mã ('picc', 'tractional')
+            return ung[0], 50, "khớp tên, mã dịch vụ đọc gần đúng"
+        # Không HĐ nào của khách khớp mã dịch vụ trên nhãn: điểm 40 = không làm neo lan/bộ chụp.
+        return ung[0], 40, "khớp tên nhưng lệch dịch vụ"
     if len(ung) == 1:
         if k < len(w) or gan_dung:  # chỉ khớp một phần / gần đúng -> chỉ gợi ý, người xác nhận
             return ung[0], 50, "khớp một phần tên"
         return ung[0], 85, "khớp tên + dịch vụ" if loc_dv else "khớp"
     if len(ung) > 1 and len({v["ma_kh"] for v in ung}) == 1 and ung[0]["ma_kh"]:
         # Cùng 1 khách có nhiều hóa đơn trong ngày (dịch vụ + mua sản phẩm) -> hóa đơn sớm nhất, chỉ gợi ý.
-        v = min(ung, key=lambda v: v["gio"] or "99")
+        gan = [x for x in ung if not loc_dv and _dv_gan_dung(dv, x["dich_vu"])]
+        v = min(gan or ung, key=lambda v: v["gio"] or "99")
+        if dv and dv not in DV_CHUNG and not loc_dv and not gan:  # soát 8b3c1c8: 15/83 ảnh mã dịch vụ không khớp HĐ nào của khách mà vẫn lan
+            return v, 40, f"khớp tên nhưng lệch dịch vụ (không HĐ nào trong {len(ung)} HĐ của khách khớp mã) —"
         return v, 50, f"cùng 1 khách có {len(ung)} hóa đơn trong ngày, chọn hóa đơn sớm nhất —"
     return None, len(ung), ""
 
 
 def _phut(a: str, b: str) -> float:
     return abs((dt.datetime.fromisoformat(a) - dt.datetime.fromisoformat(b)).total_seconds()) / 60
+
+
+def _hd_neo(r: dict) -> str | None:
+    """HĐ mà ảnh neo được phép lan; neo < 50 (khớp tên lệch dịch vụ) coi như nhãn chưa khớp."""
+    return r["hd"] if r["diem"] >= 50 else None
+
+
+def _bo_chup(ds: list[dict]) -> None:
+    """Luật BỘ CHỤP: phòng khám chụp mỗi khách 5 kiểu liên tục (chính diện, nghiêng 45°/90° hai bên),
+    nhãn viết tay thường chỉ ở tấm chính diện. Bộ = chuỗi ảnh liền nhau, 2 ảnh kề cách <= BO_GIAY
+    (bỏ ảnh trùng giây). Neo = ảnh có nhãn hoặc đã khớp HĐ điểm >= 50.
+    - Bộ <= BO_TOI_DA ảnh, mọi neo cùng 1 HĐ, có neo chắc -> cả bộ 'chac'.
+    - Bộ dài hơn: >= 2 neo cùng 1 HĐ + có neo chắc -> 'chac' (ảnh cách neo gần nhất > BO_TOI_DA-1 tấm
+      chỉ gợi ý); 1 neo -> chỉ gợi ý (khách sau có thể không viết nhãn); neo 2+ khách -> cắt tại quãng
+      nghỉ dài nhất giữa 2 neo khác khách liên tiếp, mỗi phần chỉ gợi ý theo neo của phần đó.
+    - Không có neo chắc: neo chỉ gợi ý cùng 1 HĐ -> các tấm còn lại gợi ý theo neo. Ảnh có HĐ khác (kể cả người đã duyệt HĐ khác) chặn nâng."""
+    cung = [r for r in ds if not r["trung_giay"]]
+    bo, truoc = [], None
+    for r in cung:
+        if truoc is None or (r["gio"] - truoc["gio"]).total_seconds() > BO_GIAY:
+            bo.append([])
+        bo[-1].append(r)
+        truoc = r
+    for b in bo:
+        if len(b) < 2:
+            continue
+        neo = [i for i, r in enumerate(b) if r["nhan"] or (r["hd"] and r["diem"] >= 50)]
+        if not neo:
+            continue
+        hd_neo = [_hd_neo(b[i]) for i in neo]
+        mot_hd = None not in hd_neo and len(set(hd_neo)) == 1
+        if not any(b[i]["diem"] >= 80 for i in neo):
+            # Neo chỉ gợi ý (khớp một phần tên): không nâng 'chac' nhưng không để sót tấm nghiêng —
+            # mọi tấm còn lại trong bộ ít nhất gợi ý theo neo (khi không có nhãn/HĐ khác trong bộ).
+            hd = hd_neo[0]
+            if mot_hd and not any((r["hd"] and r["hd"] != hd) or (r["xn"] and r["xn"] != hd) for r in b):
+                for r in b:
+                    if not r["hd"] and r["do_tin"] != "khong_hd":
+                        r.update(hd=hd, do_tin="goi_y", diem=40,
+                                 ly_do=f"cùng bộ chụp liền {len(b)} ảnh với ảnh gợi ý")
+            continue
+        if mot_hd:
+            hd = hd_neo[0]
+            # Ảnh khác (không phải neo) đã có HĐ khác, hoặc người duyệt chọn HĐ khác -> bộ lẫn khách.
+            if any((r["hd"] and r["hd"] != hd) or (r["xn"] and r["xn"] != hd) for r in b):
+                continue
+            nguon = next(b[i] for i in neo if b[i]["diem"] >= 80)
+            nhan = re.search(r"nhãn '([^']*)'", nguon["ly_do"] or "")
+            tu = f"ảnh có nhãn '{nhan.group(1)}'" if nhan else "ảnh đã khớp chắc"
+            dai = len(b) > BO_TOI_DA
+            for i, r in enumerate(b):
+                if r["diem"] >= 80 or r["do_tin"] == "khong_hd":
+                    continue
+                if dai and (len(neo) < 2 or min(abs(i - j) for j in neo) > BO_TOI_DA - 1):
+                    if not r["hd"]:
+                        r.update(hd=hd, do_tin="goi_y", diem=40,
+                                 ly_do=f"bộ chụp liền dài {len(b)} ảnh, chỉ {len(neo)} nhãn với {tu}"
+                                 " — có thể 2 khách liền nhau, người chọn" if len(neo) < 2 else
+                                 f"bộ chụp liền dài {len(b)} ảnh, ảnh xa nhãn với {tu} — người chọn")
+                    continue
+                r.update(hd=hd, do_tin="chac", diem=80,
+                         ly_do=f"cùng bộ chụp liền {len(b)} ảnh với {tu}")
+            continue
+        if len(b) <= BO_TOI_DA:
+            continue
+        # Bộ dài có neo nhiều khách (hoặc nhãn chưa khớp): cắt tại quãng nghỉ dài nhất giữa 2 neo khác
+        # khách liên tiếp; mỗi phần gợi ý theo neo của phần đó (phần có neo chưa khớp thì bỏ).
+        cat = []
+        for x, y in zip(neo, neo[1:]):
+            if _hd_neo(b[x]) != _hd_neo(b[y]) or _hd_neo(b[x]) is None:
+                k = max(range(x, y), key=lambda k: (b[k + 1]["gio"] - b[k]["gio"]).total_seconds())
+                cat.append(k + 1)
+        for dau, cuoi in zip([0] + cat, cat + [len(b)]):
+            phan = b[dau:cuoi]
+            hds = {_hd_neo(r) for r in phan if r["nhan"] or (r["hd"] and r["diem"] >= 50)}
+            if len(hds) != 1 or None in hds:
+                continue
+            hd = hds.pop()
+            for r in phan:
+                if not r["hd"] and not r["nhan"] and r["do_tin"] != "khong_hd" and r["xn"] in (None, hd):
+                    r.update(hd=hd, do_tin="goi_y", diem=40,
+                             ly_do=f"tách bộ dài theo quãng nghỉ ({len(b)} ảnh liền, {len(phan)} ảnh phần này)"
+                             " — cùng phần với ảnh đã khớp")
 
 
 def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
@@ -700,7 +817,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
             dot += 1
         truoc = p["thoi_gian"]
         ket_qua[p["id"]] = {"dot": dot, "hd": None, "do_tin": "chua_ro", "ly_do": "", "diem": 0,
-                            "nhan": False, "gio": dt.datetime.fromisoformat(p["thoi_gian"])}
+                            "nhan": False, "gio": dt.datetime.fromisoformat(p["thoi_gian"]),
+                            "xn": p["xn_hd"]}
     # Giờ trùng đến từng giây ở >= TRUNG_GIAY ảnh: giờ nhập/lưu -> không lan đợt, không dùng luật giờ.
     dem_giay = {}
     for p in photos:
@@ -736,6 +854,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         if tho and not r["hd"]:
             r.update(hd=tho[0], diem=tho[1], ly_do=tho[2], do_tin="goi_y")
 
+    _bo_chup([ket_qua[p["id"]] for p in photos])
+
     # Ảnh chưa khớp lấy theo ảnh "neo" trong cùng đợt. Neo = ảnh có nhãn (khớp được hay không) hoặc
     # đã khớp hóa đơn điểm >= 50. Một đợt 15' có thể chứa nhiều khách: chỉ lan cả đợt khi mọi neo cùng
     # 1 hóa đơn VÀ có neo khớp mạnh (>= 80); neo chỉ khớp một phần/gần đúng (50) thì chỉ lan theo loạt
@@ -746,7 +866,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         if not neo:
             continue
         cho = [r for r in cung if not r["hd"] and not r["nhan"] and r["do_tin"] != "khong_hd"]
-        hd_neo = {r["hd"] for r in neo}
+        hd_neo = {_hd_neo(r) for r in neo}
         mot_hd = len(hd_neo) == 1 and None not in hd_neo
         if mot_hd and any(r["diem"] >= 80 for r in neo):
             hd = hd_neo.pop()
@@ -765,7 +885,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
                         abs((cung[j + buoc]["gio"] - cung[j]["gio"]).total_seconds()) <= CHUOI_GIAY:
                     j += buoc
                     if id(cung[j]) in la_neo:
-                        tim.append((abs((cung[j]["gio"] - r["gio"]).total_seconds()), cung[j]["hd"],
+                        tim.append((abs((cung[j]["gio"] - r["gio"]).total_seconds()), _hd_neo(cung[j]),
                                     cung[j]["diem"]))
                         break
             tim.sort(key=lambda x: x[0])
