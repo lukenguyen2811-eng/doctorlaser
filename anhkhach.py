@@ -643,59 +643,8 @@ def _lech_1(a: str, b: str) -> bool:
     return any(dai[:i] + dai[i + 1:] == ngan for i in range(len(dai)))
 
 
-GOI_NGAY = 180  # buổi theo gói: tìm HĐ cùng dịch vụ của khách cùng tên trong 180 ngày trước ngày chụp
-_CHU_GOI = re.compile(r"\b(?:goi|combo|lieu trinh|buoi)\b")
-
-
-def _hd_truoc(conn, ngay_anh: str, bo_nho: dict | None) -> list[dict]:
-    """HĐ trong GOI_NGAY ngày TRƯỚC ngày chụp (không gồm ngày chụp), mỗi HĐ kèm tập chữ tên đã làm sạch.
-    Nạp 1 lần cho mỗi ngày chụp (bo_nho do ghep_ngay giữ), dùng chỉ mục visits_ngay."""
-    if bo_nho is not None and ngay_anh in bo_nho:
-        return bo_nho[ngay_anh]
-    d = dt.date.fromisoformat(ngay_anh)
-    ds = [dict(v, tu=set(ten_sach(v["ten_kh"]).split())) for v in conn.execute(
-        "SELECT * FROM visits WHERE ngay BETWEEN ? AND ?",
-        ((d - dt.timedelta(days=GOI_NGAY)).isoformat(), (d - dt.timedelta(days=1)).isoformat()))]
-    if bo_nho is not None:
-        bo_nho[ngay_anh] = ds
-    return ds
-
-
-def _co_goi(ma: str, dich_vu: str) -> bool:
-    """HĐ có dòng dịch vụ khớp mã VÀ là gói ('COMBO CSD ( 10 LẦN )', 'GÓI SẸO RỖ'); 'combo ... lần lẻ' không tính."""
-    return any(_dv_khop(ma, x) and _CHU_GOI.search(khong_dau(x)) and "lan le" not in khong_dau(x)
-               for x in _ds_dv(dich_vu))
-
-
-def _buoi_theo_goi(conn, nhan: dict, w: list[str], ngay_anh: str, bo_nho: dict | None) -> tuple[str | None, str]:
-    """Luật BUỔI THEO GÓI: ngày đó không có HĐ của khách tên này -> có thể là buổi làm theo gói đã mua
-    trước (không ra HĐ mới). Khách cùng tên (chữ nhãn nằm trong họ tên đã làm sạch) có HĐ cùng dịch vụ
-    trong GOI_NGAY ngày trước: đúng 1 mã KH -> HĐ gần nhất; nhiều mã KH -> chỉ chọn khi đúng 1 khách có
-    HĐ gói/combo dịch vụ đó. Trả (mã HĐ hoặc None, lý do). Chỉ gợi ý — người gọi cho điểm 50."""
-    ma = nhan["ma_dv"]
-    if _dv_chung(ma) or not w:  # nhãn không ghi dịch vụ: quá rủi ro
-        return None, ""
-    ung: dict[str, list] = {}
-    for v in _hd_truoc(conn, ngay_anh, bo_nho):
-        if set(w) <= v["tu"] and _dv_khop(ma, v["dich_vu"] or ""):
-            ung.setdefault(v["ma_kh"] or v["code"], []).append(v)
-    if not ung:
-        return None, ""
-    if len(ung) > 1:
-        goi = [k for k, vs in ung.items() if any(_co_goi(ma, v["dich_vu"] or "") for v in vs)]
-        if len(goi) != 1:
-            return None, (f"; buổi theo gói? {len(ung)} khách cùng tên có HĐ '{ma}' trong {GOI_NGAY} ngày trước"
-                          " — người chọn")
-        ung = {goi[0]: ung[goi[0]]}
-    v = max(next(iter(ung.values())), key=lambda v: (v["ngay"], v["gio"] or ""))
-    dv = _ds_dv(v["dich_vu"])
-    gon = next((x for x in dv if _dv_khop(ma, x)), dv[0] if dv else "")[:40]
-    return v["code"], f"buổi theo gói — HĐ {gon} ngày {v['ngay'][8:10]}/{v['ngay'][5:7]}/{v['ngay'][2:4]}"
-
-
-def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None) -> tuple[str | None, int, str]:
-    """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp). Không thấy khách tên
-    này trong ngày -> thử luật BUỔI THEO GÓI (HĐ cũ cùng dịch vụ, chỉ gợi ý 50)."""
+def _khop_nhan(conn, nhan: dict, ngay_anh: str) -> tuple[str | None, int, str]:
+    """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp)."""
     ngay, sai = nhan["ngay"] or ngay_anh, ""
     if abs((dt.date.fromisoformat(ngay) - dt.date.fromisoformat(ngay_anh)).days) > 7:
         # OCR đọc sai số ('8/10/16', '3/11 0/26') -> nhãn viết cùng ngày chụp.
@@ -732,11 +681,7 @@ def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None) -> t
     if v is None:
         if d:
             return None, 0, f"nhãn '{nhan['goc']}' trùng {d} khách{lech_ngay} — người chọn"
-        khong = f"nhãn '{nhan['goc']}' không thấy khách tên này trong hóa đơn ngày {ngay}"
-        hd_goi, ly_goi = _buoi_theo_goi(conn, nhan, w, ngay_anh, bo_nho)
-        if hd_goi:  # không bao giờ 'chac': điểm 50 = gợi ý, vẫn làm neo gợi ý cho bộ chụp
-            return hd_goi, 50, f"nhãn '{nhan['goc']}' {ly_goi}"
-        return None, 0, khong + ly_goi
+        return None, 0, f"nhãn '{nhan['goc']}' không thấy khách tên này trong hóa đơn ngày {ngay}"
     ly_do = f"nhãn '{nhan['goc']}' {ly_do} {v['ten_kh']}{lech_ngay}"
     if d > 50 and not nhan.get("gach", True) and not (len(w) >= 2 and t(v) == w):
         d, ly_do = 50, ly_do + " — nhãn không có gạch, chưa khớp đủ họ tên: chỉ gợi ý"
@@ -940,7 +885,6 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
     ).fetchall()
     if not photos:
         return
-    bo_nho: dict = {}  # HĐ 180 ngày trước (luật buổi theo gói), nạp 1 lần cho ngày này
 
     # Chia đợt chụp: ảnh cách ảnh trước > DOT_PHUT phút thì sang đợt mới.
     dot, truoc, ket_qua = 0, None, {}
@@ -977,7 +921,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         # Nhãn nhân viên ghi trên ảnh (chỉ có tên + dịch vụ viết tắt + ngày). Khớp một phần tên ở trên
         # (50) không chặn nhãn: nhãn cho điểm cao hơn thì lấy nhãn.
         for nhan in doc_nhan(f"{p['chu_thich']} {p['ocr']}", int(ngay[:4])):
-            hd, d, ly_do = _khop_nhan(conn, nhan, ngay, bo_nho)
+            hd, d, ly_do = _khop_nhan(conn, nhan, ngay)
             r["ly_do"] = ly_do
             if hd:
                 if not tho or d > tho[1]:
@@ -985,14 +929,6 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
                 break
         if tho and not r["hd"]:
             r.update(hd=tho[0], diem=tho[1], ly_do=tho[2], do_tin="goi_y")
-
-    if not visits:
-        # Ngày không HĐ nào (Tết...) mà nhãn khớp HĐ cũ (buổi theo gói): ảnh cùng đợt không còn là
-        # 'không HĐ' -> để bộ chụp/đợt lan gợi ý; còn sót thì 'chưa rõ', người chọn.
-        dot_co = {r["dot"] for r in ket_qua.values() if r["hd"]}
-        for r in ket_qua.values():
-            if r["do_tin"] == "khong_hd" and r["dot"] in dot_co:
-                r["do_tin"] = "chua_ro"
 
     _bo_chup([ket_qua[p["id"]] for p in photos])
 
@@ -1498,16 +1434,12 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     if 0 <= i < len(ngays) - 1:
         nav += f" · <a href='/ngay?d={ngays[i + 1]}'>{ngays[i + 1]} ›</a>"
 
-    def ngay_cua(v):  # HĐ ngày khác: 'dd/mm '; khác năm (HĐ gói mua từ năm trước): 'dd/mm/yy '
-        if v["ngay"] == ngay:
-            return ""
-        return f"{v['ngay'][8:10]}/{v['ngay'][5:7]}" + (f"/{v['ngay'][2:4]}" if v["ngay"][:4] != ngay[:4] else "") + " "
-
     def nhan(v):
-        return html.escape(f"{ngay_cua(v)}{v['gio']} · {v['ten_kh']} ({v['ma_kh']}) · {v['dich_vu'][:50]}")
+        ngay_hd = "" if v["ngay"] == ngay else f"{v['ngay'][8:10]}/{v['ngay'][5:7]} "
+        return html.escape(f"{ngay_hd}{v['gio']} · {v['ten_kh']} ({v['ma_kh']}) · {v['dich_vu'][:50]}")
 
     def dong(v):  # 1 dòng hóa đơn; tên khách là link sang trang diễn tiến
-        ngay_hd = ngay_cua(v)
+        ngay_hd = "" if v["ngay"] == ngay else f"{v['ngay'][8:10]}/{v['ngay'][5:7]} "
         ten = html.escape(v["ten_kh"] or "")
         if v["ma_kh"]:
             ten = f"<a href='{_link_khach(v['ma_kh'])}'>{ten}</a>"
