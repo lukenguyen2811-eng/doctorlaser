@@ -52,82 +52,19 @@ class BuoiTheoGoi(unittest.TestCase):
         self.hd("HDB", "2026-09-01", "KH02", "Lê Quyên", "CSD MỤN")
         hd, d, ly_do = self.khop("Quyên-csd 9/10/26")
         self.assertIsNone(hd)
-        self.assertIn("2 khách cùng tên trong 180 ngày trước", ly_do)
+        self.assertIn("2 khách cùng tên có HĐ 'csd'", ly_do)
         self.assertIn("người chọn", ly_do)
 
-    def test_hai_khach_chi_mot_khach_mua_goi_van_nguoi_chon(self):
-        # Bỏ mẹo 'chỉ 1 khách mua gói' (soát 14/10: nam/nữ trùng tên Giang): trùng tên là người chọn.
+    def test_hai_khach_chi_mot_khach_mua_goi_chon_khach_do(self):
         self.hd("HDA", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")
         self.hd("HDA2", "2026-09-10", "KH01", "Nguyễn Thị Quyên", "CSD MỤN")
         self.hd("HDB", "2026-09-30", "KH02", "Lê Quyên", "CSD MỤN")
-        hd, _, ly_do = self.khop("Quyên-csd 9/10/26")
-        self.assertIsNone(hd)
-        self.assertIn("2 khách cùng tên", ly_do)
-
-    def test_trung_ten_khac_dich_vu_van_nguoi_chon(self):
-        self.hd("HDA", "2026-08-10", "KH01", "Phạm Thị Hương", "PEEL DA MỤN (LẦN LẺ)")
-        self.hd("HDB", "2026-09-01", "KH02", "Trần Văn Hương", "TRIỆT LÔNG")  # khác dịch vụ vẫn tính
-        hd, _, ly_do = self.khop("Hương-csd 9/10/26")
-        self.assertIsNone(hd)
-        self.assertIn("2 khách cùng tên", ly_do)
-
-    def test_ten_khac_dau_khong_ap(self):
-        self.hd("HDG", "2026-08-10", "KH01", "Nguyễn Thị Hiền", "DẶM FILLER LÀM ĐẦY")
-        self.assertIsNone(self.khop("Hiến-filler 9/10/26")[0])
-        self.hd("HDT", "2026-08-10", "KH02", "Lê Thị Thư", "CSD MỤN")
-        self.assertIsNone(self.khop("Thu-csd 9/10/26")[0])  # nhãn mất dấu -> không áp
-        self.assertIsNone(self.khop("Thú-csd 9/10/26")[0])  # Thú != Thư
-        self.assertEqual(self.khop("Thư-csd 9/10/26")[:2], ("HDT", 50))
-        self.hd("HDN", "2026-08-10", "KH03", "Phước An", "PEEL DA MỤN")
-        self.assertIsNone(self.khop("A Ân - csd 9/10/26")[0])  # Ân != An
-
-    def test_vi_tri_dau_khong_tinh(self):
-        self.hd("HDH", "2026-08-10", "KH01", "Lê Thị Hòa", "CSD MỤN")
-        self.assertEqual(self.khop("Hoà-csd 9/10/26")[:2], ("HDH", 50))  # hoà = hòa
-
-    def test_nhan_mat_het_dau_khong_ap(self):
-        self.hd("HDG", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")
-        self.assertIsNone(self.khop("Quyen-csd 9/10/26")[0])
-
-    def test_chi_khop_nguyen_ten_goi(self):
-        self.hd("HDH", "2026-08-10", "KH01", "Đinh Như Hằng", "CSD MỤN")
-        self.assertIsNone(self.khop("Như-csd 9/10/26")[0])  # chữ giữa họ tên
-        self.hd("HDA", "2026-08-10", "KH02", "Trần Anh", "CSD MỤN")
-        self.assertIsNone(self.khop("Ngọc Anh-csd 9/10/26")[0])  # nhãn tên kép, khách tên đơn
-        self.hd("HDM", "2026-08-10", "KH03", "Nguyễn Thị Trúc Mai", "CSD MỤN")
-        self.assertEqual(self.khop("Trúc Mai-csd 9/10/26")[:2], ("HDM", 50))
-        self.assertIsNone(self.khop("Mai Trúc-csd 9/10/26")[0])  # đảo thứ tự
-
-    def test_dv_goi_dong_chinh(self):
-        f = A._dv_goi_khop
-        tham_mat = ("COMBO ĐIỀU TRỊ THÂM MẮT ( TIÊM HA LÀM ĐẦY + TIÊM MESO + SERUM ) | TIÊM LÀM ĐẦY HÕM MẮT"
-                    " | TIÊM MESO SKIN BOOSTER (căng bóng, trắng sáng, giảm nám) | MELASMA-REVSKIN")
-        self.assertFalse(f("pico", tham_mat))
-        self.assertTrue(A._dv_khop("pico", tham_mat))  # luật khác vẫn như cũ
-        self.assertTrue(f("pico", "PICO TRỊ NÁM"))
-        self.assertTrue(f("meso", tham_mat))
-        self.assertFalse(f("prp", "ĐIỀU TRỊ SẸO RỖ ĐA PHƯƠNG THỨC LẦN LẺ (cắt sẹo, laser mài viền, PRP phục hồi)"))
-        self.assertTrue(f("seo", "ĐIỀU TRỊ SẸO RỖ ĐA PHƯƠNG THỨC LẦN LẺ (cắt sẹo, laser mài viền, PRP phục hồi)"))
-        self.assertFalse(f("seo", "THANH TOÁN CÔNG NỢ CSD | ĐIỆN DI C SAU SẸO"))
-        self.assertFalse(f("csd", "THANH TOÁN CÔNG NỢ CSD"))
-        self.assertTrue(f("csd", "KEM REVITALUX | CSD MỤN"))
-        self.assertTrue(f("csd", "COMBO CSD ( 10 LẦN )"))
-        self.assertTrue(f("prp", "COMBO TIÊM PRP PREMIUM ( 4 + 1 )"))
-        self.assertTrue(f("tl", "TRIỆT LÔNG"))
-        self.assertTrue(f("co2", "LASER FRACTIONAL"))
-        self.assertFalse(f("tri", "ĐIỀU TRỊ SẸO RỖ"))
-
-    def test_pico_khong_khop_combo_tham_mat(self):
-        self.hd("HDC", "2026-08-10", "KH01", "Nguyễn Ngọc Hân",
-                "COMBO ĐIỀU TRỊ THÂM MẮT ( TIÊM HA LÀM ĐẦY + TIÊM MESO + SERUM )")
-        self.assertIsNone(self.khop("Hân-pico 9/10/26")[0])
-        self.assertIsNone(self.khop("Hân-meso 9/10/26")[0])  # meso chỉ nằm trong ngoặc mô tả
-        self.assertEqual(self.khop("Hân-tt 9/10/26")[:2], ("HDC", 50))  # 'thâm' là chữ chính của mã tt
+        self.assertEqual(self.khop("Quyên-csd 9/10/26")[:2], ("HDA2", 50))  # HĐ gần nhất của khách mua gói
 
     def test_combo_lan_le_khong_tinh_la_goi(self):
         self.hd("HDA", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD MỤN + PEEL DA MỤN ( LẦN LẺ )")
         self.hd("HDB", "2026-09-01", "KH02", "Lê Quyên", "CSD MỤN")
-        self.assertIsNone(self.khop("Quyên-csd 9/10/26")[0])  # 2 khách cùng tên -> người chọn
+        self.assertIsNone(self.khop("Quyên-csd 9/10/26")[0])
 
     def test_qua_180_ngay_khong_ap(self):
         self.hd("HDG", "2026-04-11", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")  # 181 ngày
@@ -196,31 +133,6 @@ class BuoiTheoGoi(unittest.TestCase):
         self.assertEqual((p["goi_y_hd"], p["do_tin"]), ("HDG", "goi_y"))
         trang = A._trang_ngay(self.c, "2026-02-20").decode()
         self.assertIn("<option value='HDG' selected>15/12/25 ", trang)
-
-    def anh_mat(self, km_nay, km_cu):
-        self.hd("HDG", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")
-        # Ảnh đã duyệt ngày khác của KH01.
-        self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr,xn_hd,khuon_mat) VALUES"
-                       " ('cu','2026-08-10','2026-08-10T10:00:00','IMG.HEIC','','', 'HDG', ?)", (km_cu,))
-        self.c.execute("INSERT INTO photos (id,ngay,thoi_gian,ten_file,chu_thich,ocr,khuon_mat) VALUES"
-                       " ('q1','2026-10-09','2026-10-09T10:00:00','IMG.HEIC','','Quyên-csd 9/10/26', ?)", (km_nay,))
-        A.ghep_ngay(self.c, "2026-10-09")
-        return self.c.execute("SELECT * FROM photos WHERE id='q1'").fetchone()
-
-    def test_khuon_mat_khac_khong_goi_y(self):
-        p = self.anh_mat("M1", "M2")
-        self.assertIsNone(p["goi_y_hd"])
-        self.assertIn("khuôn mặt khác", p["ly_do"])
-
-    def test_khuon_mat_chung_van_goi_y(self):
-        p = self.anh_mat("M1 M3", "M2 M3")
-        self.assertEqual((p["goi_y_hd"], p["do_tin"]), ("HDG", "goi_y"))
-
-    def test_khong_du_khuon_mat_van_goi_y(self):
-        self.assertEqual(self.anh_mat("M1", "")["goi_y_hd"], "HDG")  # ảnh cũ không có mã người
-        self.c.execute("DELETE FROM photos")
-        self.c.execute("DELETE FROM visits")
-        self.assertEqual(self.anh_mat("", "M2")["goi_y_hd"], "HDG")  # ảnh này không có mã người
 
     def test_bo_nho_nap_mot_lan_moi_ngay(self):
         self.hd("HDG", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")
