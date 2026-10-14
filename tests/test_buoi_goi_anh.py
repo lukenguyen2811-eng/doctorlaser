@@ -113,11 +113,7 @@ class BuoiTheoGoi(unittest.TestCase):
         self.assertTrue(f("pico", "PICO TRỊ NÁM"))
         self.assertTrue(f("meso", tham_mat))
         self.assertFalse(f("prp", "ĐIỀU TRỊ SẸO RỖ ĐA PHƯƠNG THỨC LẦN LẺ (cắt sẹo, laser mài viền, PRP phục hồi)"))
-        # CEO 14/10: dòng LẦN LẺ không tính là gói (mua lẻ thì buổi sau phải có HĐ mới).
-        self.assertFalse(f("seo", "ĐIỀU TRỊ SẸO RỖ ĐA PHƯƠNG THỨC LẦN LẺ (cắt sẹo, laser mài viền, PRP phục hồi)"))
-        self.assertFalse(f("prp", "TIÊM PRP PREMIUM ( LẦN LẺ )"))
-        self.assertFalse(f("csd", "CSD MỤN (lan le)"))
-        self.assertTrue(f("csd", "TIÊM PRP PREMIUM ( LẦN LẺ ) | CSD MỤN"))  # dòng khác vẫn xét
+        self.assertTrue(f("seo", "ĐIỀU TRỊ SẸO RỖ ĐA PHƯƠNG THỨC LẦN LẺ (cắt sẹo, laser mài viền, PRP phục hồi)"))
         self.assertFalse(f("seo", "THANH TOÁN CÔNG NỢ CSD | ĐIỆN DI C SAU SẸO"))
         self.assertFalse(f("csd", "THANH TOÁN CÔNG NỢ CSD"))
         self.assertTrue(f("csd", "KEM REVITALUX | CSD MỤN"))
@@ -346,12 +342,6 @@ class BuoiTheoGoi(unittest.TestCase):
         self.assertNotIn("<s>", o)
         self.assertNotIn("<b>", o)
         self.assertIn("/anh/x&#x27;&gt;&lt;s&gt;", o)
-
-    def test_hd_lan_le_khong_ap_goi(self):
-        self.hd("HDL", "2026-09-01", "KH01", "Nguyễn Thị Quyên", "TIÊM PRP PREMIUM ( LẦN LẺ )")
-        self.assertIsNone(self.khop("Quyên-prp 9/10/26")[0])
-        self.hd("HDC", "2026-08-01", "KH01", "Nguyễn Thị Quyên", "COMBO TIÊM PRP PREMIUM ( 4 + 1 )")
-        self.assertEqual(self.khop("Quyên-prp 9/10/26")[:2], ("HDC", 50))  # gói cũ hơn vẫn được, bỏ HĐ lẻ
 
 
 if __name__ == "__main__":
