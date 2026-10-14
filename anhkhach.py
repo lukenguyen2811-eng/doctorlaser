@@ -262,12 +262,40 @@ def _co_xem(p, thang_dir: str | None = None) -> bool:
     return any(os.path.exists(x) for x in (p.path_derivatives or []))
 
 
+_DONG_MAY = re.compile(r"^\s*(CU-)?KH\w*\s+·\s")  # dòng chú thích do máy ghi: "KH000123 · Tên · SĐT · ..."
+
+
+def _bo_chu_may_ghi(mo_ta: str | None) -> str:
+    """Bỏ các dòng chú thích do chính máy ghi lên app Ảnh (gan_chac / xuat --gan-tu-khoa).
+    Không bỏ thì lượt quét sau đọc lại SĐT/mã KH máy vừa ghi -> tự chấm 'chắc' 100 điểm, khoá mãi
+    cả ảnh ghép sai (đo 14/10: 2.175 ảnh chắc chỉ nhờ chữ máy tự ghi)."""
+    return "\n".join(x for x in (mo_ta or "").split("\n")
+                     if x.strip() and not _DONG_MAY.match(x) and "(chưa duyệt)" not in x and x.count(" · ") < 3)
+
+
+def _la_album_may(ten: str) -> bool:
+    """Album máy tạo (xuat --album): 'KH000123 · Tên', 'DV · ...' — không phải chữ của người."""
+    return bool(_DONG_MAY.match(ten or "")) or (ten or "").startswith("DV · ")
+
+
+def _tu_khoa_may_ghi() -> dict[str, set]:
+    """Từ khoá máy đã ghi cho từng ảnh (bảng da_gan_chac của gan_chac.py)."""
+    try:
+        conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
+        ra = {i: set(json.loads(t)) for i, t in conn.execute("SELECT id, tu_khoa FROM da_gan_chac")}
+        conn.close()
+        return ra
+    except Exception:  # noqa: BLE001  (chưa có bảng / DB mới)
+        return {}
+
+
 def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: bool = False) -> list[tuple]:
     try:
         import osxphotos
     except ImportError:
         sys.exit("Chưa cài osxphotos. Chạy:  .venv/bin/pip install -r requirements_anh.txt")
 
+    da_ghi = _tu_khoa_may_ghi()
     print("Đang mở thư viện Photos (lần đầu có thể mất vài phút)...")
     db = osxphotos.PhotosDB()
     d0 = dt.datetime.fromisoformat(tu)
@@ -284,8 +312,11 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: b
     rows, thieu = [], 0
     for i, p in enumerate(ds, 1):
         t = p.date.astimezone().replace(tzinfo=None) if p.date.tzinfo else p.date
-        cac_chu = [p.title or "", p.description or "", " ".join(p.keywords or []),
-                   " ".join(p.albums or []), " ".join(x for x in (p.persons or []) if x != "_UNKNOWN_")]
+        tu_cua_may = da_ghi.get(p.uuid, set())
+        cac_chu = [p.title or "", _bo_chu_may_ghi(p.description),
+                   " ".join(k for k in (p.keywords or []) if k not in tu_cua_may and k != "chưa duyệt"),
+                   " ".join(a for a in (p.albums or []) if not _la_album_may(a)),
+                   " ".join(x for x in (p.persons or []) if x != "_UNKNOWN_")]
         goc = (p.path_edited if p.hasadjustments else None) or p.path
         if goc and not os.path.exists(goc):
             goc = None
