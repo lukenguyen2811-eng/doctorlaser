@@ -105,8 +105,14 @@ def ket_noi() -> sqlite3.Connection:
         """
     )
     # Cột thêm sau: DB cũ chưa có -> thêm, giữ nguyên dữ liệu.
-    if "khuon_mat" not in {r[1] for r in conn.execute("PRAGMA table_info(photos)")}:
+    cot = {r[1] for r in conn.execute("PRAGMA table_info(photos)")}
+    if "khuon_mat" not in cot:
         conn.execute("ALTER TABLE photos ADD COLUMN khuon_mat TEXT")  # mã người (uuid) app Ảnh nhận ra
+    if "ngay_goc" not in cot:
+        # 1 = ảnh có EXIF máy chụp (hãng/đời máy) hoặc DateTimeOriginal -> ngày chụp tin được; 0 = không
+        # (gửi qua Zalo/Messenger, chụp màn hình...: ngày trên ảnh có thể là NGÀY NHẬN, trễ 1–2 ngày);
+        # NULL = chưa quét lại từ khi có cột -> ghép như cũ.
+        conn.execute("ALTER TABLE photos ADD COLUMN ngay_goc INTEGER")
     return conn
 
 
@@ -344,7 +350,8 @@ def _quet_photos(tu: str, den: str, ocr: bool, tai_goc: bool = False, tai_het: b
         xem = goc or xem_nho or p.path
         rows.append((p.uuid, "photos", t.date().isoformat(), t.isoformat(timespec="seconds"),
                      p.original_filename, goc or p.path or "", xem or "",
-                     " / ".join(x for x in cac_chu if x.strip()), chu_ocr, _ma_nguoi(p)))
+                     " / ".join(x for x in cac_chu if x.strip()), chu_ocr, _ma_nguoi(p),
+                     _ngay_goc_photos(p, goc)))
         if i % 25 == 0 or i == len(ds):
             print(f"  {i}/{len(ds)} ảnh...", flush=True)
     if thieu:
@@ -362,7 +369,22 @@ def _ma_nguoi(p) -> str:
         return ""
 
 
-def _ngay_chup_file(path: str) -> dt.datetime:
+def _ngay_goc_photos(p, goc: str | None) -> int | None:
+    """Ảnh trong Photos có ngày chụp gốc không: hãng/đời máy trong EXIF (app Ảnh đã đọc sẵn) -> 1; không có
+    thì đọc DateTimeOriginal ở bản gốc trên máy (nếu có) -> 1/0. Không đọc được thông tin EXIF -> None."""
+    try:
+        ex = p.exif_info
+    except Exception:  # noqa: BLE001
+        ex = None
+    if ex is not None and (getattr(ex, "camera_make", None) or getattr(ex, "camera_model", None)):
+        return 1
+    if goc and _ngay_exif(goc):
+        return 1
+    return 0 if ex is not None else None
+
+
+def _ngay_exif(path: str) -> dt.datetime | None:
+    """DateTimeOriginal (không có thì DateTime) trong EXIF file ảnh; None = không có."""
     try:
         from PIL import Image
 
@@ -379,7 +401,15 @@ def _ngay_chup_file(path: str) -> dt.datetime:
                 return dt.datetime.strptime(str(raw).strip()[:19], "%Y:%m:%d %H:%M:%S")
     except Exception:  # noqa: BLE001
         pass
-    return dt.datetime.fromtimestamp(os.path.getmtime(path))
+    return None
+
+
+def _ngay_chup_file(path: str) -> tuple[dt.datetime, int]:
+    """(giờ chụp, ngay_goc): EXIF có ngày -> (ngày đó, 1); không -> (giờ sửa file, 0)."""
+    t = _ngay_exif(path)
+    if t:
+        return t, 1
+    return dt.datetime.fromtimestamp(os.path.getmtime(path)), 0
 
 
 def _quet_thu_muc(goc: str, tu: str, den: str) -> list[tuple]:
@@ -390,7 +420,7 @@ def _quet_thu_muc(goc: str, tu: str, den: str) -> list[tuple]:
             if os.path.splitext(f)[1].lower() not in ANH_DUOI:
                 continue
             path = os.path.join(root, f)
-            t = _ngay_chup_file(path)
+            t, goc_ngay = _ngay_chup_file(path)
             ngay = t.date().isoformat()
             if not (tu <= ngay <= den):
                 continue
@@ -398,7 +428,7 @@ def _quet_thu_muc(goc: str, tu: str, den: str) -> list[tuple]:
             # Tên thư mục con + tên file cũng là "chú thích" (hay chứa tên khách).
             rel = os.path.relpath(path, goc)
             rows.append((pid, "thu_muc", ngay, t.isoformat(timespec="seconds"), f,
-                         path, path, os.path.splitext(rel)[0].replace(os.sep, " / "), "", ""))
+                         path, path, os.path.splitext(rel)[0].replace(os.sep, " / "), "", "", goc_ngay))
     return rows
 
 
@@ -411,13 +441,14 @@ def cmd_quet(a) -> None:
         # Giữ nguyên phần đã duyệt nếu quét lại.
         conn.execute(
             "INSERT INTO photos (id, nguon, ngay, thoi_gian, ten_file, duong_dan, anh_xem,"
-            " chu_thich, ocr, khuon_mat) VALUES (?,?,?,?,?,?,?,?,?,?)"
+            " chu_thich, ocr, khuon_mat, ngay_goc) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET ngay=excluded.ngay, thoi_gian=excluded.thoi_gian,"
             " duong_dan=excluded.duong_dan, anh_xem=excluded.anh_xem,"
             " chu_thich=excluded.chu_thich,"
             " ocr=CASE WHEN excluded.ocr != '' THEN excluded.ocr ELSE photos.ocr END,"
-            " khuon_mat=CASE WHEN excluded.khuon_mat != '' THEN excluded.khuon_mat ELSE photos.khuon_mat END",
-            r,
+            " khuon_mat=CASE WHEN excluded.khuon_mat != '' THEN excluded.khuon_mat ELSE photos.khuon_mat END,"
+            " ngay_goc=COALESCE(excluded.ngay_goc, photos.ngay_goc)",
+            tuple(r) + (None,) * (11 - len(r)),  # dòng 10 cột (mã cũ/test) -> ngay_goc NULL
         )
     conn.commit()
     print(f"Đã quét {len(rows)} ảnh trong tháng {m:02d}/{y}.")
@@ -779,9 +810,45 @@ def _buoi_theo_goi(conn, nhan: dict, w: list[str], wg: list[str], ngay_anh: str,
     return v["code"], f"buổi theo gói — HĐ {gon} ngày {v['ngay'][8:10]}/{v['ngay'][5:7]}/{v['ngay'][2:4]}"
 
 
-def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None) -> tuple[str | None, int, str]:
+LUI_NGAY = (1, 2)  # ảnh không có ngày chụp gốc: ngày trên ảnh có thể là ngày nhận, trễ 1–2 ngày sau ngày chụp
+
+
+def _hd_ngay_truoc(conn, nhan: dict, w: list[str], wg: list[str], ngay_anh: str,
+                   da_thu: str) -> tuple[str | None, str]:
+    """Ảnh KHÔNG có ngày chụp gốc (gửi qua Zalo/Messenger...): ngày trên ảnh có thể là ngày NHẬN -> thử HĐ
+    ngày D-1, D-2 (D = ngày trên ảnh; KHÔNG thử ngày sau; bỏ ngày đã thử = da_thu). Đúng 1 khách khớp tên
+    + dịch vụ (mã dịch vụ trên nhãn phải rõ) -> (mã HĐ, lý do); người gọi cho điểm 50 — không bao giờ 'chac'."""
+    ma = nhan["ma_dv"]
+    if _dv_chung(ma) or not w:
+        return None, ""
+    d0 = dt.date.fromisoformat(ngay_anh)
+    ung: dict[str, tuple] = {}  # mã KH -> (ngày, HĐ) gần D nhất
+    trung = 0
+    for lui in LUI_NGAY:
+        n = (d0 - dt.timedelta(days=lui)).isoformat()
+        if n == da_thu:
+            continue
+        vs = conn.execute("SELECT * FROM visits WHERE ngay=?", (n,)).fetchall()
+        T2 = {x["code"]: _tu_ten_kh(x["ten_kh"]) for x in vs}
+        v2, d2, _ = _khop_ten(vs, lambda x: [k for _, k in T2[x["code"]]], T2, nhan, w, wg)
+        if v2 is None:
+            trung += d2  # d2 = số khách trùng tên trong ngày đó (0 = không thấy)
+        elif d2 >= 50 and _dv_khop(ma, v2["dich_vu"]):
+            ung.setdefault(v2["ma_kh"] or v2["code"], (n, v2))
+    if trung or len(ung) > 1:  # 2+ khách cùng tên (trong 1 ngày hoặc khác ngày) -> không đoán
+        return None, "; ảnh không có ngày chụp gốc — nhiều khách khớp ở HĐ 1–2 ngày trước — người chọn"
+    if len(ung) != 1:
+        return None, ""
+    n, v = next(iter(ung.values()))
+    return v["code"], (f"khớp tên + dịch vụ {v['ten_kh']} — ảnh không có ngày chụp gốc (có thể gửi qua Zalo)"
+                       f" — HĐ ngày {n[8:10]}/{n[5:7]}")
+
+
+def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None,
+               ngay_goc: int | None = None) -> tuple[str | None, int, str]:
     """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp). Không thấy khách tên
-    này trong ngày -> thử luật BUỔI THEO GÓI (HĐ cũ cùng dịch vụ, chỉ gợi ý 50)."""
+    này trong ngày -> ảnh không có ngày chụp gốc (ngay_goc=0) thử HĐ 1–2 ngày trước (_hd_ngay_truoc);
+    rồi luật BUỔI THEO GÓI (HĐ cũ cùng dịch vụ). Cả hai chỉ gợi ý 50."""
     ngay, sai = nhan["ngay"] or ngay_anh, ""
     if abs((dt.date.fromisoformat(ngay) - dt.date.fromisoformat(ngay_anh)).days) > 7:
         # OCR đọc sai số ('8/10/16', '3/11 0/26') -> nhãn viết cùng ngày chụp.
@@ -819,10 +886,15 @@ def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None) -> t
         if d:
             return None, 0, f"nhãn '{nhan['goc']}' trùng {d} khách{lech_ngay} — người chọn"
         khong = f"nhãn '{nhan['goc']}' không thấy khách tên này trong hóa đơn ngày {ngay}"
+        ly_lui = ""
+        if ngay_goc == 0:
+            hd_lui, ly_lui = _hd_ngay_truoc(conn, nhan, w, wg, ngay_anh, ngay)
+            if hd_lui:
+                return hd_lui, 50, f"nhãn '{nhan['goc']}' {ly_lui}"
         hd_goi, ly_goi = _buoi_theo_goi(conn, nhan, w, wg, ngay_anh, bo_nho)
         if hd_goi:  # không bao giờ 'chac': điểm 50 = gợi ý, vẫn làm neo gợi ý cho bộ chụp
             return hd_goi, 50, f"nhãn '{nhan['goc']}' {ly_goi}"
-        return None, 0, khong + ly_goi
+        return None, 0, khong + ly_lui + ly_goi
     ly_do = f"nhãn '{nhan['goc']}' {ly_do} {v['ten_kh']}{lech_ngay}"
     if d > 50 and not nhan.get("gach", True) and not (len(w) >= 2 and t(v) == w):
         d, ly_do = 50, ly_do + " — nhãn không có gạch, chưa khớp đủ họ tên: chỉ gợi ý"
@@ -915,7 +987,13 @@ def _hd_neo(r: dict) -> str | None:
     return r["hd"] if r["diem"] >= 50 and not r.get("khong_neo") else None
 
 
-def _bo_chup(ds: list[dict]) -> None:
+def _lan_duoc(r: dict, hd: str, hd_lui: set) -> bool:
+    """HĐ lấy theo ảnh không có ngày chụp gốc (HĐ 1–2 ngày trước) chỉ lan sang ảnh cũng không có ngày chụp gốc:
+    ảnh có EXIF máy chụp thì ngày trên ảnh đúng, không thể là HĐ ngày khác."""
+    return hd not in hd_lui or r.get("ngay_goc") == 0
+
+
+def _bo_chup(ds: list[dict], hd_lui: set = frozenset()) -> None:
     """Luật BỘ CHỤP: phòng khám chụp mỗi khách 5 kiểu liên tục (chính diện, nghiêng 45°/90° hai bên),
     nhãn viết tay thường chỉ ở tấm chính diện. Bộ = chuỗi ảnh liền nhau, 2 ảnh kề cách <= BO_GIAY
     (bỏ ảnh trùng giây >= TRUNG_GIAY). Neo = ảnh có nhãn hoặc đã khớp HĐ điểm >= 50.
@@ -951,7 +1029,7 @@ def _bo_chup(ds: list[dict]) -> None:
             hd = hd_neo[0]
             if mot_hd and not any((r["hd"] and r["hd"] != hd) or (r["xn"] and r["xn"] != hd) for r in b):
                 for r in b:
-                    if not r["hd"] and r["do_tin"] != "khong_hd":
+                    if not r["hd"] and r["do_tin"] != "khong_hd" and _lan_duoc(r, hd, hd_lui):
                         r.update(hd=hd, do_tin="goi_y", diem=40,
                                  ly_do=f"cùng bộ chụp liền {len(b)} ảnh với ảnh gợi ý")
             continue
@@ -1014,10 +1092,34 @@ def _bo_chup(ds: list[dict]) -> None:
                 continue
             hd = hds.pop()
             for r in phan:
-                if not r["hd"] and not r["nhan"] and r["do_tin"] != "khong_hd" and r["xn"] in (None, hd):
+                if not r["hd"] and not r["nhan"] and r["do_tin"] != "khong_hd" and r["xn"] in (None, hd) \
+                        and _lan_duoc(r, hd, hd_lui):
                     r.update(hd=hd, do_tin="goi_y", diem=40,
                              ly_do=f"tách bộ dài theo quãng nghỉ ({len(b)} ảnh liền, {len(phan)} ảnh phần này)"
                              " — cùng phần với ảnh đã khớp")
+
+
+def _ngay_goc(p) -> int | None:
+    """photos.ngay_goc của dòng ảnh (DB/ dòng cũ chưa có cột -> None = coi như có ngày gốc, ghép như cũ)."""
+    try:
+        return p["ngay_goc"]
+    except (IndexError, KeyError):
+        return None
+
+
+def _ngay_khong_tin(photos) -> set:
+    """id ảnh mà NGÀY trên ảnh không tin được: ngay_goc=0 VÀ không có ảnh có ngày chụp gốc (ngay_goc=1) cùng ngày
+    cách <= BO_GIAY giây. Đo 14/10 (09/2025–10/2026): 3.435/3.869 ảnh ngay_goc=0 nằm sát (<= 60s, đa số < 10s)
+    ảnh có EXIF — chụp cùng buổi (bản lưu thêm), ngày đúng; chỉ ảnh đứng riêng mới có thể là ảnh gửi qua Zalo."""
+    co = sorted(dt.datetime.fromisoformat(p["thoi_gian"]) for p in photos if _ngay_goc(p) == 1 and p["thoi_gian"])
+    ra = set()
+    for p in photos:
+        if _ngay_goc(p) != 0:
+            continue
+        t = dt.datetime.fromisoformat(p["thoi_gian"])
+        if not any(abs((x - t).total_seconds()) <= BO_GIAY for x in co):
+            ra.add(p["id"])
+    return ra
 
 
 def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
@@ -1029,6 +1131,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         return
     bo_nho: dict = {}  # HĐ 180 ngày trước (luật buổi theo gói), nạp 1 lần cho ngày này
 
+    khong_tin = _ngay_khong_tin(photos)  # ảnh không có ngày chụp gốc, đứng riêng (có thể gửi qua Zalo)
     # Chia đợt chụp: ảnh cách ảnh trước > DOT_PHUT phút thì sang đợt mới.
     dot, truoc, ket_qua = 0, None, {}
     for p in photos:
@@ -1037,7 +1140,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         truoc = p["thoi_gian"]
         ket_qua[p["id"]] = {"dot": dot, "hd": None, "do_tin": "chua_ro", "ly_do": "", "diem": 0,
                             "nhan": False, "gio": dt.datetime.fromisoformat(p["thoi_gian"]),
-                            "xn": p["xn_hd"]}
+                            "xn": p["xn_hd"], "ngay_goc": 0 if p["id"] in khong_tin else 1}
     # Giờ trùng đến từng giây ở >= TRUNG_GIAY ảnh: giờ nhập/lưu -> không lan đợt, không dùng luật giờ.
     dem_giay = {}
     for p in photos:
@@ -1076,7 +1179,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         # Nhãn nhân viên ghi trên ảnh (chỉ có tên + dịch vụ viết tắt + ngày). Khớp một phần tên ở trên
         # (50) không chặn nhãn: nhãn cho điểm cao hơn thì lấy nhãn.
         for nhan in nhan_ds[p["id"]]:
-            hd, d, ly_do = _khop_nhan(conn, nhan, ngay, bo_nho)
+            hd, d, ly_do = _khop_nhan(conn, nhan, ngay, bo_nho, r["ngay_goc"])
             if hd and "buổi theo gói" in ly_do and _mat_khac_khach(conn, ngay, hd, p["khuon_mat"], mat_nho):
                 hd, d, ly_do = None, 0, ly_do + " — nhưng khuôn mặt khác ảnh đã xác nhận của khách: bỏ, người chọn"
             r["ly_do"] = ly_do
@@ -1091,18 +1194,23 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
         if tho and not r["hd"]:
             r.update(hd=tho[0], diem=tho[1], ly_do=tho[2], do_tin="goi_y")
         r["goi"] = bool(r["hd"]) and "buổi theo gói" in (r["ly_do"] or "")
+        r["lui"] = bool(r["hd"]) and r["diem"] == 50 and "ảnh không có ngày chụp gốc (có thể gửi" in (r["ly_do"] or "")
 
     _chan_neo_goi(photos, ket_qua, nhan_that)
 
     if not visits:
         # Ngày không HĐ nào (Tết...) mà nhãn khớp HĐ cũ (buổi theo gói): ảnh cùng đợt không còn là
         # 'không HĐ' -> để bộ chụp/đợt lan gợi ý; còn sót thì 'chưa rõ', người chọn.
-        dot_co = {r["dot"] for r in ket_qua.values() if r["hd"]}
+        dot_co = {r["dot"] for r in ket_qua.values() if r["hd"] and not r.get("lui")}
+        dot_lui = {r["dot"] for r in ket_qua.values() if r["hd"] and r.get("lui")}  # chỉ kéo ảnh không ngày gốc
         for r in ket_qua.values():
-            if r["do_tin"] == "khong_hd" and r["dot"] in dot_co:
+            if r["do_tin"] == "khong_hd" and (r["dot"] in dot_co or (r["dot"] in dot_lui and r["ngay_goc"] == 0)):
                 r["do_tin"] = "chua_ro"
 
-    _bo_chup([ket_qua[p["id"]] for p in photos])
+    # HĐ chỉ đến từ ảnh không có ngày chụp gốc khớp HĐ 1–2 ngày trước (không neo nào khác cùng HĐ).
+    hd_lui = {r["hd"] for r in ket_qua.values() if r.get("lui")} - {
+        r["hd"] for r in ket_qua.values() if r["hd"] and r["diem"] >= 50 and not r.get("lui")}
+    _bo_chup([ket_qua[p["id"]] for p in photos], hd_lui)
 
     # Ảnh chưa khớp lấy theo ảnh "neo" trong cùng đợt. Neo = ảnh có nhãn (khớp được hay không) hoặc
     # đã khớp hóa đơn điểm >= 50. Một đợt 15' có thể chứa nhiều khách: chỉ lan cả đợt khi mọi neo cùng
@@ -1137,7 +1245,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
                                     cung[j]["diem"]))
                         break
             tim.sort(key=lambda x: x[0])
-            if tim and tim[0][1] and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > tim[0][0]):
+            if tim and tim[0][1] and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > tim[0][0]) \
+                    and _lan_duoc(r, tim[0][1], hd_lui):
                 cach = f"cách {tim[0][0] / 60:.0f}'"
                 r.update(hd=tim[0][1], do_tin="goi_y",
                          ly_do=f"lan từ ảnh khớp một phần tên — cùng loạt chụp liền ({cach})" if tim[0][2] < 80
@@ -1163,7 +1272,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
                <= cuoi + dt.timedelta(minutes=GIO_SAU)]
         if len(gan) == 1:
             for r in cung:
-                if r["do_tin"] != "khong_hd":
+                # Ảnh không có ngày chụp gốc: giờ trên ảnh là giờ nhận, không so với giờ HĐ được.
+                if r["do_tin"] != "khong_hd" and r["ngay_goc"] != 0:
                     r.update(hd=gan[0]["code"], do_tin="goi_y",
                              ly_do=f"chỉ 1 hóa đơn gần giờ chụp ({gan[0]['gio'][:5]})")
 
@@ -1728,6 +1838,16 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     khac = sorted({p[k] for p in photos for k in ("goi_y_hd", "xn_hd") if p[k] and p[k] not in co})
     visits_khac = [conn.execute("SELECT * FROM visits WHERE code=?", (c,)).fetchone() for c in khac]
     visits_khac = [v for v in visits_khac if v]
+    khong_tin = _ngay_khong_tin(photos)
+    if khong_tin:
+        # Ảnh không có ngày chụp gốc (gửi qua Zalo...): ngày chụp thật có thể 1–2 ngày TRƯỚC -> cho chọn cả
+        # HĐ các ngày đó (không lấy ngày sau).
+        d0 = dt.date.fromisoformat(ngay)
+        da = co | {v["code"] for v in visits_khac}
+        for lui in LUI_NGAY:
+            n = (d0 - dt.timedelta(days=lui)).isoformat()
+            visits_khac += [v for v in conn.execute("SELECT * FROM visits WHERE ngay=? ORDER BY gio", (n,))
+                            if v["code"] not in da]
     ngays = [r[0] for r in conn.execute("SELECT DISTINCT ngay FROM photos ORDER BY ngay")]
     i = ngays.index(ngay) if ngay in ngays else -1
     nav = "<a href='/'>← Tất cả ngày</a>"
@@ -1772,7 +1892,9 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     o.append("<div class=visits><b>Hóa đơn trong ngày:</b><br>" + (
         "<br>".join(dong(v) for v in visits)
         or "<span class=small>Không có hóa đơn ngày này.</span>") + (
-        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh):</b><br>" + "<br>".join(dong(v) for v in visits_khac)
+        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh"
+        + (f"; có ảnh không có ngày chụp gốc -> thêm HĐ {len(LUI_NGAY)} ngày trước"
+           if khong_tin else "") + "):</b><br>" + "<br>".join(dong(v) for v in visits_khac)
         if visits_khac else "") + "</div>")
     dots: dict[int, list] = {}
     mau_nho: dict = {}  # ảnh mẫu theo mã KH (ảnh gợi ý theo gói)
@@ -1801,6 +1923,8 @@ def _trang_ngay(conn, ngay: str) -> bytes:
                    "background:#eee;text-align:center'>Ảnh còn trên iCloud,<br>chưa tải về máy</div>") +
                 f"<div class=small>{p['thoi_gian'][11:16]} · {html.escape(p['ten_file'])} "
                 f"<span class='tag {p['do_tin']}'>{NHAN_NGAN.get(p['do_tin'], '')}</span></div>"
+                + ("<div class=small style='color:#b45309'>⚠ không có ngày chụp gốc</div>"
+                   if p["id"] in khong_tin else "") +
                 f"<div class=small>{html.escape(p['ly_do'] or '')}{' · ' + chu if chu else ''}</div>{den_kh}"
                 f"{chon_hd(hd, 'hd')}{chon(LOAI_ANH, p['loai_anh'], 'loai', '— trước/sau —')}{chon(VUNG, p['vung'], 'vung', '— vùng —')}"
                 f"<input class=ghi placeholder='ghi chú (tình trạng, kết quả...)' value='{html.escape(p['ghi_chu'] or '')}'>"
