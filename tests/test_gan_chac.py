@@ -51,14 +51,39 @@ class GanChac(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"photoscript": GIA}), mock.patch.object(sys, "argv", ["x", *thamso]):
             G.main()
 
-    def test_chi_ghi_anh_chac_chua_duyet_chua_loai(self):
+    def test_ghi_anh_chac_chua_duyet_va_anh_da_duyet(self):
         self.chay("2026-09", "--ghi")
-        self.assertEqual(sorted(KHO), ["a"])  # b gợi ý, c bị loại, d đã duyệt (đi đường xuat)
+        self.assertEqual(sorted(KHO), ["a", "d"])  # b gợi ý chưa duyệt -> chờ; c bị loại
         kw = KHO["a"]["keywords"]
         for k in ["cu", "KH000001", "0901234567", "Khách A", "Laser Pico", "chưa duyệt"]:
             self.assertIn(k, kw)
         self.assertTrue(KHO["a"]["description"].startswith("chú thích cũ\n"))
         self.assertIn("(chưa duyệt)", KHO["a"]["description"])
+        self.assertIn("KH000001", KHO["d"]["keywords"])          # đã duyệt
+        self.assertNotIn("chưa duyệt", KHO["d"]["keywords"])
+        self.assertNotIn("chưa duyệt", KHO["d"]["description"])
+
+    def test_duyet_xong_thi_bo_chu_chua_duyet(self):
+        self.chay("2026-09", "--ghi")
+        c = A.ket_noi()
+        c.execute("UPDATE photos SET xn_hd='H1', loai_anh='sau' WHERE id='a'")
+        c.commit()
+        self.chay("2026-09", "--ghi")
+        kw = KHO["a"]["keywords"]
+        self.assertNotIn("chưa duyệt", kw)
+        self.assertIn("sau", kw)
+        self.assertEqual(kw.count("KH000001"), 1)
+        self.assertNotIn("(chưa duyệt)", KHO["a"]["description"])
+        self.assertEqual(KHO["a"]["description"].count("KH000001"), 1)
+        c.close()
+
+    def test_gợi_ý_duyet_xong_thi_ghi(self):
+        c = A.ket_noi()
+        c.execute("UPDATE photos SET xn_hd='H1' WHERE id='b'")
+        c.commit()
+        self.chay("2026-09", "--ghi")
+        self.assertIn("KH000001", KHO["b"]["keywords"])
+        c.close()
 
     def test_chay_khan_va_chay_lai_khong_ghi_trung(self):
         self.chay("2026-09")
@@ -67,16 +92,30 @@ class GanChac(unittest.TestCase):
         self.chay("2026-09", "--ghi")
         self.assertEqual(KHO["a"]["keywords"].count("KH000001"), 1)
 
-    def test_sua_go_dung_phan_minh_ghi(self):
+    def test_nguoi_duyet_doi_khach_thi_ghi_lai_dung_khach(self):
         self.chay("2026-09", "--ghi")
         c = A.ket_noi()
         c.execute("INSERT INTO visits (code,ngay,ma_kh,ten_kh) VALUES ('H2','2026-09-01','KH000002','Khách B')")
         c.execute("UPDATE photos SET xn_hd='H2' WHERE id='a'")  # người duyệt đổi sang khách khác
         c.commit()
+        self.chay("2026-09", "--ghi")
+        kw = KHO["a"]["keywords"]
+        self.assertIn("cu", kw)
+        self.assertIn("KH000002", kw)
+        self.assertNotIn("KH000001", kw)
+        self.assertNotIn("0901234567", kw)
+        self.assertNotIn("KH000001", KHO["a"]["description"])
+        self.assertTrue(KHO["a"]["description"].startswith("chú thích cũ"))
+        c.close()
+
+    def test_loai_anh_thi_go(self):
+        self.chay("2026-09", "--ghi")
+        c = A.ket_noi()
+        c.execute("UPDATE photos SET bo_qua=1 WHERE id='a'")
+        c.commit()
         self.chay("--sua", "--ghi")
         self.assertEqual(KHO["a"]["keywords"], ["cu"])
         self.assertEqual(KHO["a"]["description"], "chú thích cũ")
-        self.assertEqual(c.execute("SELECT count(*) FROM da_gan_chac").fetchone()[0], 0)
         c.close()
 
     def test_duyet_dung_khach_thi_khong_go(self):

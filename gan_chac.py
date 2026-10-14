@@ -28,18 +28,32 @@ def _bang(conn) -> None:
 
 
 def can_gan(conn, tu: str, den: str) -> list[dict]:
+    """Ảnh cần ghi: (1) máy ghép CHẮC CHẮN, chưa duyệt -> kèm 'chưa duyệt';
+    (2) người ĐÃ DUYỆT (bất kể mức máy ghép) -> nhãn theo khách người chọn, không 'chưa duyệt'.
+    Ảnh đã ghi mà nhãn mong muốn đổi (vừa duyệt, đổi trước/sau, vùng, ghi chú) -> gỡ nhãn cũ, ghi lại."""
+    cu = {r["id"]: r for r in conn.execute("SELECT * FROM da_gan_chac")}
     rows = conn.execute(
-        "SELECT p.*, v.ma_kh, v.ten_kh, v.sdt, v.dich_vu FROM photos p JOIN visits v ON v.code=p.goi_y_hd"
-        " WHERE p.do_tin='chac' AND p.bo_qua=0 AND p.xn_hd IS NULL AND p.nguon='photos'"
-        " AND p.ngay BETWEEN ? AND ? AND p.id NOT IN (SELECT id FROM da_gan_chac)"
+        "SELECT p.*, v.ma_kh, v.ten_kh, v.sdt, v.dich_vu FROM photos p"
+        " JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
+        " WHERE p.bo_qua=0 AND p.nguon='photos' AND p.ngay BETWEEN ? AND ?"
+        " AND (p.xn_hd IS NOT NULL OR p.do_tin='chac')"
         " ORDER BY p.ngay, p.thoi_gian", (tu, den)).fetchall()
     ra = []
     for r in rows:
         d = dict(r)
-        d["xn_hd"] = r["goi_y_hd"]  # _nhan đọc mã HĐ ở xn_hd
+        duyet = r["xn_hd"] is not None
+        d["xn_hd"] = r["xn_hd"] or r["goi_y_hd"]  # _nhan đọc mã HĐ ở xn_hd
         tu_khoa, chu_thich = _nhan(d)
-        ra.append({"id": r["id"], "hd": r["goi_y_hd"], "ten_file": r["ten_file"],
-                   "tu_khoa": tu_khoa + [CHUA_DUYET], "chu_thich": f"{chu_thich} · ({CHUA_DUYET})"})
+        if not duyet:
+            tu_khoa, chu_thich = tu_khoa + [CHUA_DUYET], f"{chu_thich} · ({CHUA_DUYET})"
+        g = {"id": r["id"], "hd": d["xn_hd"], "ten_file": r["ten_file"], "tu_khoa": tu_khoa,
+             "chu_thich": chu_thich, "cu": None}
+        c = cu.get(r["id"])
+        if c is not None:
+            if c["hd"] == g["hd"] and c["chu_thich"] == chu_thich and json.loads(c["tu_khoa"]) == tu_khoa:
+                continue  # đã đúng
+            g["cu"] = c
+        ra.append(g)
     return ra
 
 
@@ -88,11 +102,47 @@ def ghi_mot(photoscript, g: dict) -> None:
         raise RuntimeError(kq.stderr.strip()[:100])
 
 
+_GO = """
+on run argv
+    tell application "Photos"
+        set m to media item id (item 1 of argv)
+        set bo to items 3 thru -1 of argv
+        set kw to keywords of m
+        if kw is missing value then set kw to {}
+        set moi to {}
+        repeat with k in kw
+            if bo does not contain (k as text) then set end of moi to (k as text)
+        end repeat
+        set keywords of m to moi
+        set d to description of m
+        if d is not missing value then
+            set AppleScript's text item delimiters to linefeed
+            set cac to text items of d
+            set giu to {}
+            repeat with x in cac
+                if (x as text) is not (item 2 of argv) then set end of giu to (x as text)
+            end repeat
+            set description of m to (giu as text)
+            set AppleScript's text item delimiters to ""
+        end if
+    end tell
+end run
+"""
+
+
 def go_mot(photoscript, id_: str, tu_khoa: list[str], chu_thich: str) -> None:
     """Gỡ đúng phần gan_chac đã ghi (từ khóa + dòng chú thích), giữ phần người khác ghi."""
-    p = photoscript.Photo(id_)
-    p.keywords = [k for k in (p.keywords or []) if k not in set(tu_khoa)]
-    p.description = "\n".join(x for x in (p.description or "").split("\n") if x.strip() != chu_thich).strip()
+    if getattr(photoscript, "GIA", False):  # test
+        p = photoscript.Photo(id_)
+        p.keywords = [k for k in (p.keywords or []) if k not in set(tu_khoa)]
+        p.description = "\n".join(x for x in (p.description or "").split("\n") if x.strip() != chu_thich).strip()
+        return
+    import subprocess
+
+    kq = subprocess.run(["osascript", "-e", _GO, f"{id_}/L0/001", chu_thich, *tu_khoa],
+                        capture_output=True, text=True, timeout=HAN_GIAY)
+    if kq.returncode != 0:
+        raise RuntimeError(kq.stderr.strip()[:100])
 
 
 def main() -> None:
@@ -107,7 +157,7 @@ def main() -> None:
     if a.sua:
         sai = conn.execute(
             "SELECT g.* FROM da_gan_chac g JOIN photos p ON p.id=g.id"
-            " WHERE p.bo_qua=1 OR (p.xn_hd IS NOT NULL AND p.xn_hd != g.hd)"
+            " WHERE p.bo_qua=1"
             " OR (p.xn_hd IS NULL AND (p.do_tin != 'chac' OR p.goi_y_hd IS NOT g.hd))").fetchall()
         print(f"{len(sai)} ảnh đã ghi nhãn nhưng người duyệt đổi khách / loại, hoặc máy ghép lại không còn"
               " 'chắc chắn' khách đó -> gỡ")
@@ -127,7 +177,8 @@ def main() -> None:
     tu = khoang_thang(*thang(a.tu_thang))[0]
     den = khoang_thang(*thang(a.den_thang or a.tu_thang))[1]
     ds = can_gan(conn, tu, den)
-    print(f"{len(ds)} ảnh 'chắc chắn' chưa ghi nhãn vào app Ảnh ({tu} → {den})")
+    print(f"{len(ds)} ảnh cần ghi nhãn vào app Ảnh ({tu} → {den}): {sum(1 for g in ds if g['cu'] is None)} mới,"
+          f" {sum(1 for g in ds if g['cu'] is not None)} ghi lại (vừa duyệt / đổi thông tin)")
     if not a.ghi:
         print("CHẠY KHAN — thêm --ghi để ghi (chạy trong Terminal của Mac Ảnh).")
         return
@@ -136,6 +187,8 @@ def main() -> None:
     xong = loi = lien = 0
     for i, g in enumerate(ds, 1):
         try:
+            if g["cu"] is not None:  # nhãn đổi -> gỡ đúng phần đã ghi trước rồi ghi lại
+                go_mot(photoscript, g["id"], json.loads(g["cu"]["tu_khoa"]), g["cu"]["chu_thich"])
             ghi_mot(photoscript, g)
             conn.execute("INSERT OR REPLACE INTO da_gan_chac VALUES (?,?,?,?,?)",
                          (g["id"], g["hd"], json.dumps(g["tu_khoa"], ensure_ascii=False), g["chu_thich"],
