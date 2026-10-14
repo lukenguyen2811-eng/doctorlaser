@@ -709,7 +709,7 @@ def _dv_goi_khop(ma: str, dich_vu: str) -> bool:
     ma = MA_DV_OCR.get(ma, ma)
     cua_ma = set(MA_DV.get(ma, []))
     for x in _ds_dv(dich_vu):
-        if "cong no" in khong_dau(x):
+        if "cong no" in khong_dau(x) or "lan le" in khong_dau(x):  # CEO 14/10: mua LẺ thì buổi sau phải có HĐ mới
             continue
         gon = re.sub(r"\([^)]*\)?", " ", x)
         tu = re.sub(r"\b(?:bh|bao hanh)(?:\s*\d+\s*(?:nam|thang))?\b", " ", khong_dau(gon)).split()
