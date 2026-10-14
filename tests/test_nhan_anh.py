@@ -675,7 +675,40 @@ class TenCoGhiChu(unittest.TestCase):
     def test_trung_ten_khong_dau_chon_theo_dau_chi_goi_y(self):
         self.them(("H1", "ĐINH ĐỨC DŨNG", "Peel da"), ("H2", "LÊ THỊ DUNG (BS LƯƠNG)", "CSD mụn"))
         self.assertEqual(self.khop("C Dung-csd 15/6/26")[:2], ("H2", 50))
-        self.assertEqual(self.khop("C Dũng-csd 15/6/26")[:2], ("H1", 50))
+        # CEO 14/10 (dấu một chiều): nhãn CÓ dấu thanh 'Dũng' loại hẳn khách 'Dung' -> còn 1 khách, khớp như thường.
+        self.assertEqual(self.khop("C Dũng-csd 15/6/26")[:2], ("H1", 85))
+
+    # ---- CEO 14/10: dấu MỘT CHIỀU trong luật khớp nhãn
+    def test_nhan_co_dau_thanh_khac_khong_khop(self):
+        for kh, nhan in (("Lê Thị Cẩm Quyên", "Quyền-csd 15/6/26"), ("Võ Phạm Thanh Nhàn", "Nhân-csd 15/6/26"),
+                         ("Trần Thị Hằng", "Hàng-csd 15/6/26"), ("Nguyễn Minh Kiều", "Kiếu-csd 15/6/26")):
+            self.c.execute("DELETE FROM visits")
+            self.them(("H1", kh, "CSD mụn"))
+            hd, d, ly = self.khop(nhan)
+            self.assertIsNone(hd, (kh, nhan))
+            self.assertIn("không thấy khách tên này", ly)
+
+    def test_nhan_mat_dau_thanh_van_khop_chac(self):  # âm: OCR mất dấu thanh/mất hết dấu -> vẫn chắc
+        for kh, nhan in (("Nguyễn Minh Kiều", "Kiêu-csd 15/6/26"), ("Lê Võ Lệ Hằng", "Hăng-csd 15/6/26"),
+                         ("Nguyễn Kim Truyền (KH TỰ ĐẾN)", "Truyên-csd 15/6/26"), ("Lê Thị Cẩm Quyên", "Quyen-csd 15/6/26"),
+                         ("Nguyễn Thị Ngọc Huyền", "Huyên-csd 15/6/26"), ("Lê Thị Hòa", "Hoà-csd 15/6/26"),
+                         ("NGUYEN THI LAN", "Lán-csd 15/6/26")):  # tên khách gõ không dấu: không so dấu
+            self.c.execute("DELETE FROM visits")
+            self.them(("H1", kh, "CSD mụn"))
+            self.assertEqual(self.khop(nhan)[:2], ("H1", 85), (kh, nhan))
+
+    def test_nhan_co_dau_chon_khach_dung_dau(self):
+        # 'Nhân' có 2 ứng viên không dấu ('Nhàn', 'Nhân') -> chỉ 'Nhân' hợp dấu -> chắc khách đó.
+        self.them(("H1", "Võ Thanh Nhàn", "CSD mụn"), ("H2", "Lê Văn Nhân", "CSD mụn"))
+        self.assertEqual(self.khop("Nhân-csd 15/6/26")[:2], ("H2", 85))
+
+    def test_ten_dau_hop(self):
+        tg = A._tu_ten_kh("Lê Thị Cẩm Quyên")
+        self.assertTrue(A._ten_dau_hop(["cẩm", "quyên"], tg, 2))
+        self.assertFalse(A._ten_dau_hop(["cẩm", "quyền"], tg, 2))
+        self.assertTrue(A._ten_dau_hop(["cam", "quyen"], tg))
+        self.assertTrue(A._ten_dau_hop(["hùng"], tg))  # chữ không có trong tên: không xét ở đây
+
 
     def test_trung_ten_cung_dau_nguoi_chon(self):  # âm: cùng dấu, cùng dịch vụ -> không đoán
         self.them(("H1", "Lê Dung", "CSD"), ("H2", "Võ Dung (KH TỰ ĐẾN)", "CSD mụn"))

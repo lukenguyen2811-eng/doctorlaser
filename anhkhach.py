@@ -701,7 +701,7 @@ def _vi_tri_dv(ma: str, tu: list[str], yeu: set = frozenset(), du: bool = True) 
 
 
 def _dv_goi_khop(ma: str, dich_vu: str) -> bool:
-    """Luật gói: mã dịch vụ trên nhãn khớp dòng dịch vụ CHÍNH của HĐ — bỏ dòng thanh toán công nợ, bỏ chữ
+    """Luật gói: mã dịch vụ trên nhãn khớp dòng dịch vụ CHÍNH của HĐ — bỏ dòng thanh toán công nợ và dòng LẦN LẺ, bỏ chữ
     mô tả trong ngoặc ('... LẦN LẺ (cắt sẹo, laser mài viền, PRP phục hồi)'), không khớp qua chữ chung
     (_TU_DV_YEU), và không có dịch vụ khác đứng trước trong dòng ('ĐIỆN DI C SAU SẸO' là điện di, không phải sẹo)."""
     if _dv_chung(ma):
@@ -709,7 +709,7 @@ def _dv_goi_khop(ma: str, dich_vu: str) -> bool:
     ma = MA_DV_OCR.get(ma, ma)
     cua_ma = set(MA_DV.get(ma, []))
     for x in _ds_dv(dich_vu):
-        if "cong no" in khong_dau(x):
+        if "cong no" in khong_dau(x) or "lan le" in khong_dau(x):  # CEO 14/10: mua LẺ thì buổi sau phải có HĐ mới
             continue
         gon = re.sub(r"\([^)]*\)?", " ", x)
         tu = re.sub(r"\b(?:bh|bao hanh)(?:\s*\d+\s*(?:nam|thang))?\b", " ", khong_dau(gon)).split()
@@ -829,12 +829,30 @@ def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None) -> t
     return v["code"], d, ly_do
 
 
+def _dau_hop(a: str, g: str) -> bool:
+    """Luật khớp nhãn (CEO 14/10), dấu MỘT CHIỀU (_chu_mot_chieu): nhãn có dấu thanh khác/thừa hoặc khác chữ cái
+    có dấu ('Quyền'≠'Quyên', 'Nhân'≠'Nhàn' vì â≠a, 'Hàng'≠'Hằng') -> không khớp. Nhãn chỉ THIẾU dấu thanh (OCR mất
+    dấu: 'Kiêu' ~ 'Kiều', 'Hăng' ~ 'Hằng') hoặc mất hết dấu ('Quyen') -> khớp như cũ."""
+    return _chu_mot_chieu(a, g)
+
+
+def _ten_dau_hop(wg: list[str], tg: list[tuple[str, str]], k: int | None = None) -> bool:
+    """k: so k chữ cuối nhãn với k chữ cuối tên theo vị trí; None: mỗi chữ nhãn so với chữ cùng mặt chữ (không
+    dấu) bất kỳ trong tên. Tên khách không có dấu nào (KiotViet gõ không dấu) -> không so được, coi là hợp."""
+    if not _co_dau([g for g, _ in tg]):
+        return True
+    if k is not None:
+        return all(_dau_hop(a, g) for a, (g, _) in zip(wg[-k:], tg[-k:]))
+    return all(any(_dau_hop(a, g) for g, kk in tg if kk == khong_dau(a)) or
+               not any(kk == khong_dau(a) for _, kk in tg) for a in wg)
+
+
 def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
     """(hóa đơn, điểm, lý do) — hóa đơn None: d = số khách trùng (0 = không thấy)."""
     dv = nhan["ma_dv"]
 
     def cung_ten(v, k):
-        return len(t(v)) >= k and t(v)[-k:] == w[-k:]
+        return len(t(v)) >= k and t(v)[-k:] == w[-k:] and _ten_dau_hop(wg, T[v["code"]], k)
 
     # Chữ thừa phía trước tên ('Laser Trang') -> thử bớt dần từ trái: 3 chữ, 2 chữ, 1 chữ.
     ung, k = [], len(w)
@@ -856,7 +874,7 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
         # Tên nước ngoài đảo thứ tự ('Cheng Wei' ~ 'Wu Cheng Wei') -> tên nằm trong họ tên; OCR sai
         # 1 chữ ('Thann' ~ 'Thanh'). Chỉ "chắc" khi tên nằm trong họ tên VÀ dịch vụ trên nhãn khớp.
         def trong(v):
-            return set(w) <= set(t(v))
+            return set(w) <= set(t(v)) and _ten_dau_hop(wg, T[v["code"]])
 
         def lech(v):
             return bool(t(v)) and len(w[-1]) >= 4 and _lech_1(w[-1], t(v)[-1])
@@ -882,7 +900,7 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
         # Khớp đuôi tên nhưng dịch vụ lệch ('Thu' ~ '... Thư' mài sẹo, trong khi khách 'THU (KH TỰ ĐẾN)'
         # làm pico) -> xét khách có tên nằm trong họ tên + dịch vụ khớp; không có thì chỉ gợi ý.
         khac = [v for v in visits if v["code"] != ung[0]["code"]
-                and set(w[-k:]) <= set(t(v)) and _dv_khop(dv, v["dich_vu"])]
+                and set(w[-k:]) <= set(t(v)) and _ten_dau_hop(wg[-k:], T[v["code"]]) and _dv_khop(dv, v["dich_vu"])]
         if len(khac) == 1:
             if k == len(w):
                 return khac[0], 85, "khớp tên + dịch vụ"
