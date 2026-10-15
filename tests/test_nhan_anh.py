@@ -136,6 +136,9 @@ class KhopNhan(unittest.TestCase):
         self.assertIn("<option value='HD2' selected>08/10", trang)
         self.assertIn("Hóa đơn ngày khác", trang)
         self.assertIn("chưa tải về máy", trang)  # ảnh chưa có file -> chữ, không khung vỡ
+        self.assertNotIn("id=dot", trang)  # 15/10: không còn ô chọn 1 khách đè cả đợt
+        self.assertIn("Đồng ý gợi ý cả đợt", trang)
+        self.assertIn("boQua(", trang)
         self.assertNotIn("src='/anh/p9'", trang)
 
 

@@ -2079,10 +2079,12 @@ async function luu(id, extra){
   const st=(await r.json()).st; el.className='ph '+st;
 }
 async function caDot(dot){
-  const ps=[...document.querySelectorAll('[data-dot="'+dot+'"]')];
-  const hd=document.getElementById('dot'+dot).value;
-  for(const el of ps){ el.querySelector('.hd').value=hd; await luu(el.dataset.id,{}); }
+  const ps=[...document.querySelectorAll('[data-dot="'+dot+'"]')].filter(el=>el.querySelector('.hd').value);
+  const kh=new Set(ps.map(el=>el.querySelector('.hd').value));
+  if(!confirm('Lưu '+ps.length+' ảnh theo khách đang chọn ở từng ảnh ('+kh.size+' khách)?')) return;
+  for(const el of ps){ await luu(el.dataset.id,{}); }
 }
+function boQua(id){ if(confirm('Ảnh này KHÔNG phải ảnh khách (ảnh cá nhân, giấy tờ, chụp màn hình)?')) luu(id,{bo_qua:1}); }
 function zoom(src){const z=document.getElementById('zoom');z.querySelector('img').src=src;z.style.display='flex'}
 """
 
@@ -2182,10 +2184,14 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     for p in photos:
         dots.setdefault(p["dot"] or 0, []).append(p)
     for so, ps in dots.items():
-        goi_y = next((p["goi_y_hd"] for p in ps if p["goi_y_hd"]), "")
+        # 15/10: bỏ ô "chọn 1 khách cho cả đợt" (từng gộp 5 khách vào 1 HĐ). Nút mới lưu MỖI ảnh theo
+        # khách đang chọn ở chính ảnh đó; ảnh chưa có khách thì bỏ qua.
+        so_khach = len({p["xn_hd"] or p["goi_y_hd"] for p in ps if p["xn_hd"] or p["goi_y_hd"]})
         o.append(f"<div class=dot><h3>Đợt chụp {ps[0]['thoi_gian'][11:16]}–{ps[-1]['thoi_gian'][11:16]}"
-                 f" ({len(ps)} ảnh) {chon_hd(goi_y, 'x', f'id=dot{so}')}"
-                 f"<button class=p onclick='caDot({so})'>Áp dụng cho cả đợt</button></h3><div class=grid>")
+                 f" ({len(ps)} ảnh · {so_khach} khách)"
+                 f"<button class=p onclick='caDot({so})'>✓ Đồng ý gợi ý cả đợt</button>"
+                 f"<span class=small>lưu mỗi ảnh theo khách đang chọn ở ảnh đó — ảnh sai thì sửa ảnh đó trước</span>"
+                 f"</h3><div class=grid>")
         for p in ps:
             st = "skip" if p["bo_qua"] else ("ok" if p["xn_hd"] else "")
             hd = p["xn_hd"] or p["goi_y_hd"] or ""
@@ -2219,7 +2225,7 @@ def _trang_ngay(conn, ngay: str) -> bytes:
                 f"<input class=ghi placeholder='ghi chú (tình trạng, kết quả...)' value='{html.escape(p['ghi_chu'] or '')}'>"
                 f"<div style='display:flex;gap:6px;margin-top:6px'>"
                 f"<button class=p onclick=\"luu('{p['id']}',{{}})\">✓ Lưu</button>"
-                f"<button onclick=\"luu('{p['id']}',{{bo_qua:1}})\">Không phải ảnh khách</button></div></div>")
+                f"<button onclick=\"boQua('{p['id']}')\">Không phải ảnh khách</button></div></div>")
         o.append("</div></div>")
     o.append("</main>")
     return _trang(f"Ảnh {ngay}", "".join(o))
