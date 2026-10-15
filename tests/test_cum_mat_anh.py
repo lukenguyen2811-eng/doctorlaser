@@ -275,3 +275,15 @@ class CumMat(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChonHdMatUuTien(unittest.TestCase):
+    def test_giu_hd_dang_gan_va_uu_tien_ngay_nhan(self):
+        import datetime as dt
+        vs = [{"code": "H14", "ngay": "2026-03-14", "gio": "10:00", "dich_vu": "PRP"},
+              {"code": "H19", "ngay": "2026-03-19", "gio": "10:05", "dich_vu": "PRP"}]
+        r = {"gio": dt.datetime(2026, 3, 19, 10, 0), "hd": "H14"}
+        self.assertEqual(A._chon_hd_mat(vs, ["2026-03-14", "2026-03-19"], r, ["prp"])["code"], "H14")
+        r["hd"] = None  # chưa gắn gì: ngày nhãn (đứng đầu danh sách) thắng ngày chụp
+        self.assertEqual(A._chon_hd_mat(vs, ["2026-03-14", "2026-03-19"], r, ["prp"])["code"], "H14")
+        self.assertEqual(A._chon_hd_mat(vs, ["2026-03-19"] + ["2026-03-14"], r, ["prp"])["code"], "H19")

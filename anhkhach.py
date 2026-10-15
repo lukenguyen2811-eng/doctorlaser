@@ -1633,7 +1633,7 @@ def _hd_cua_khach(conn, cum: dict, khach: str, ngays: list[str]) -> list:
 
 
 def _chon_hd_mat(vs: list, ngays: list[str], r: dict, ma_dvs: list[str]):
-    """Nhiều HĐ của khách: ngày ưu tiên (ngày chụp > ngày nhãn > ngày lùi), HĐ đang gợi ý, dịch vụ khớp nhãn,
+    """Nhiều HĐ của khách: HĐ đang gợi ý (nếu là của K), ngày ưu tiên (ngày nhãn > ngày chụp > ngày lùi), dịch vụ khớp nhãn,
     giờ gần giờ chụp nhất."""
     def gio(v):
         try:
@@ -1641,7 +1641,8 @@ def _chon_hd_mat(vs: list, ngays: list[str], r: dict, ma_dvs: list[str]):
             return abs((t - r["gio"]).total_seconds())
         except ValueError:
             return 1e9
-    return min(vs, key=lambda v: (ngays.index(v["ngay"]), v["code"] != r["hd"],
+    # HĐ đang gắn mà đúng của khách K thì giữ (soát 15/10: đổi sang HĐ ngày chụp làm sai buổi)
+    return min(vs, key=lambda v: (v["code"] != r["hd"], ngays.index(v["ngay"]),
                                   not any(_dv_khop(m, v["dich_vu"] or "") for m in ma_dvs if not _dv_chung(m)),
                                   gio(v)))
 
@@ -1666,7 +1667,7 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
         for n in nhans:
             if n["ngay"] and n["ngay"] not in ngays and abs(
                     (dt.date.fromisoformat(n["ngay"]) - dt.date.fromisoformat(ngay)).days) <= 7:
-                ngays.append(n["ngay"])
+                ngays.insert(0, n["ngay"])  # ngày GHI TRÊN NHÃN đứng trước ngày chụp (ảnh lưu lại sau buổi làm)
         if r["ngay_goc"] == 0:
             d0 = dt.date.fromisoformat(ngay)
             ngays += [(d0 - dt.timedelta(days=x)).isoformat() for x in LUI_NGAY]
