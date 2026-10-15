@@ -6,7 +6,15 @@
 cd "$(dirname "$0")" || exit 1
 MOC="${MOC:-$HOME/anh_thu/moc}"; CHU_KY="${CHU_KY:-600}"
 mkdir -p "$MOC"
+VONG=0
 while true; do
+  # Mỗi giờ (6 vòng x 10'): kéo hóa đơn KiotViet tháng này (+ tháng trước trong 3 ngày đầu tháng) để ảnh mới có HĐ mà ghép
+  if [ $((VONG % 6)) -eq 0 ]; then
+    for m in $(date +%Y-%m) $( [ "$(date +%d)" -le 3 ] && date -v-1m +%Y-%m ); do
+      if .venv/bin/python anhkhach.py hoadon "$m" > /dev/null 2>&1; then rm -f "$MOC/$m"; else echo "  ! lỗi kéo hóa đơn $m"; fi
+    done
+  fi
+  VONG=$((VONG + 1))
   for d in anh_goc/[0-9][0-9][0-9][0-9]-[0-9][0-9]; do
     [ -d "$d" ] || continue
     m=$(basename "$d"); moc="$MOC/$m"
