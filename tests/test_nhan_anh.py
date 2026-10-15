@@ -837,5 +837,18 @@ class NeoManhMoiLanCaDot(unittest.TestCase):
         self.assertEqual(r["a"][:2], ("K2", "goi_y"))
 
 
+class MaKhNgan(unittest.TestCase):
+    def v(self, ma):
+        return {"sdt": "", "ma_kh": ma, "ten_kh": "Khách X"}
+
+    def test_ma_toan_so_ngan_khong_khop_ngay(self):  # âm: KH mã '08' vs nhãn '19/08/26'
+        self.assertEqual(A._diem(self.v("08"), A.khong_dau("Lan-pico 19/08/26"), "")[0], 0)
+        self.assertEqual(A._diem(self.v("3"), A.khong_dau("Lan-pico 3/10/26"), "")[0], 0)
+
+    def test_ma_chuan_van_khop(self):
+        self.assertEqual(A._diem(self.v("KH000123"), A.khong_dau("ghi chú KH000123"), "")[0], 100)
+        self.assertEqual(A._diem(self.v("CU-KH000777"), A.khong_dau("CU-KH000777 pico"), "")[0], 100)
+
+
 if __name__ == "__main__":
     unittest.main()

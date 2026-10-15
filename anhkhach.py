@@ -515,7 +515,9 @@ def _diem(v: sqlite3.Row, chu: str, so: str) -> tuple[int, str]:
     if len(sdt) >= 9 and sdt[-9:] in so:
         return 100, f"khớp SĐT {sdt}"
     ma = khong_dau(v["ma_kh"])
-    if ma and re.search(rf"\b{re.escape(ma)}\b", chu):
+    # Mã KH ngắn/toàn số ('08', '3') trùng ngày trên nhãn ('19/08/26') -> chỉ tin mã có chữ và đủ dài (KH000123)
+    ma_tin = len(ma.replace(" ", "")) >= 4 and re.search(r"[a-z]", ma) and re.search(r"\d", ma)
+    if ma_tin and re.search(rf"\b{re.escape(ma)}\b", chu):
         return 100, f"khớp mã KH {v['ma_kh']}"
     ten = ten_sach(v["ten_kh"])
     if len(ten.split()) >= 2 and re.search(rf"\b{re.escape(ten)}\b", chu):
