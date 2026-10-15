@@ -1122,7 +1122,8 @@ def _ngay_khong_tin(photos) -> set:
     return ra
 
 
-def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
+def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> None:
+    """cum: bảng cụm mặt -> khách (cum_khach), cmd_ghep tính 1 lần cho cả lượt; None -> tự tính."""
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     photos = conn.execute(
         "SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)
@@ -1284,6 +1285,11 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str) -> None:
                 r.update(hd=visits[0]["code"], do_tin="goi_y", ly_do="cả ngày chỉ có 1 hóa đơn")
 
     _goi_y_khuon_mat(conn, ngay, photos, ket_qua)
+    # Luật CỤM MẶT -> KHÁCH: nhận lại ảnh theo cụm mặt đã gắn khách, lan bộ chụp, cảnh báo ảnh chắc lệch mặt.
+    if cum is None:
+        cum = cum_khach(conn)
+    _lan_bo_theo_mat(ket_qua, _nhan_lai_theo_mat(conn, ngay, photos, ket_qua, nhan_that, cum))
+    _canh_bao_mat(conn, photos, ket_qua, cum)
 
     for r in ket_qua.values():
         if r["trung_giay"] and not r["hd"] and r["do_tin"] != "khong_hd":
@@ -1481,14 +1487,286 @@ def _goi_y_khuon_mat(conn, ngay: str, photos, ket_qua) -> None:
                      ly_do="cùng khuôn mặt với ảnh đã xác nhận của khách")
 
 
+# ---------------- CỤM MẶT -> KHÁCH (luật 15/10) ----------------
+# App Ảnh gom khuôn mặt thành cụm người (person uuid). Cụm được gắn cho 1 khách khi đủ ảnh "neo mạnh" của
+# khách đó (người duyệt, hoặc máy chấm 'chac' theo nhãn/tên/SĐT/mã KH — KHÔNG tính 'chac' do lan bộ/đợt hay do
+# chính luật mặt, tránh tự khuếch đại). Cụm có phiếu nhiều khách = nhân viên/bác sĩ/người nhà -> không dùng.
+CUM_W_XN, CUM_W_CHAC = 3, 1  # trọng số phiếu: ảnh người duyệt / ảnh máy chấm chắc theo nhãn-tên
+CUM_NEO_TOI_THIEU = 3  # >= 3 ảnh neo (hoặc >= 1 ảnh đã duyệt + >= 1 ảnh neo khác)
+CUM_TY_LE = 0.9  # khách chính >= 90% phiếu
+CUM_LAN_TY_LE, CUM_LAN_ANH = 0.1, 2  # khách thứ 2 >= 10% phiếu hoặc >= 2 ảnh -> cụm lẫn
+CUM_NGAY = 2  # ảnh neo của khách chính nằm ở >= 2 ngày khác nhau (1 ngày = 1 buổi, có thể chỉ 1 nhãn lan ra)
+CUM_MANH = 5  # cụm >= 5 ảnh neo mới được dùng để CẢNH BÁO hạ ảnh 'chac' đang gắn khách khác
+MAT_DIEM = 82  # ảnh nhận theo cụm mặt + HĐ cùng ngày (>= 80: làm neo chắc cho bộ chụp)
+MAT_TOI_DA = 2  # chỉ ảnh 1–2 mặt (ảnh nhiều mặt có thể lẫn nhân viên/người nhà)
+_NEO_TEN = ("khớp SĐT", "khớp mã KH", "khớp tên '", "nhãn '")
+_NEO_BO = re.compile(r"^cùng bộ chụp (?:liền (\d+) ảnh|(\d+) tư thế) với ảnh có nhãn '")
+
+
+def _doc_mat(km) -> list[str]:
+    """photos.khuon_mat -> danh sách mã người. Lưu dạng cách nhau dấu cách (_ma_nguoi); nhận cả JSON list."""
+    s = (km or "").strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            return sorted({str(x) for x in json.loads(s) if x})
+        except ValueError:
+            return []
+    return sorted(set(s.split()))
+
+
+def _la_neo_mat(do_tin: str | None, ly_do: str | None) -> bool:
+    """Ảnh máy chấm 'chac' được làm phiếu cho cụm mặt: khớp SĐT/mã KH/tên/nhãn trên chính ảnh, hoặc cùng bộ
+    chụp <= BO_TOI_DA với ảnh có nhãn. Không tính chắc do lan bộ từ ảnh 'đã khớp chắc', do đợt, do luật mặt."""
+    if do_tin != "chac" or not ly_do or "khuôn mặt" in ly_do:
+        return False
+    if ly_do.startswith(_NEO_TEN):
+        return True
+    m = _NEO_BO.match(ly_do)
+    return bool(m) and int(m.group(1) or m.group(2)) <= BO_TOI_DA
+
+
+def _khoa_khach(conn) -> dict[str, str]:
+    """mã KH -> khoá người. Hai mã KHÁC HỆ ('CU-KH…' mã cũ vs 'KH…' mã mới, 'CU-…') mà CÙNG SĐT = 1 người.
+    Hai mã cùng hệ cùng SĐT (người nhà dùng chung số) vẫn là 2 người."""
+    cha: dict[str, str] = {}
+
+    def goc(x):
+        while cha.get(x, x) != x:
+            x = cha[x]
+        return x
+
+    theo_sdt: dict[str, set] = {}
+    for ma, sdt in conn.execute("SELECT DISTINCT ma_kh, sdt FROM visits WHERE COALESCE(ma_kh,'') != ''"):
+        cha.setdefault(ma, ma)
+        s = chuan_sdt(sdt)
+        if len(s) >= 9:
+            theo_sdt.setdefault(s[-9:], set()).add(ma)
+    for mas in theo_sdt.values():
+        ds = sorted(mas)
+        for i, a in enumerate(ds):
+            for b in ds[i + 1:]:
+                if re.sub(r"\d+", "", a) != re.sub(r"\d+", "", b):
+                    ra, rb = goc(a), goc(b)
+                    if ra != rb:
+                        cha[max(ra, rb)] = min(ra, rb)
+    return {ma: goc(ma) for ma in cha}
+
+
+def cum_khach(conn) -> dict:
+    """Bảng CỤM MẶT -> KHÁCH cho cả DB (tính 1 lần mỗi lượt ghép).
+    Trả {'cum': uuid -> {khach, ma, neo, xn, ngay}, 'lan': {uuid lẫn}, 'khoa': mã KH -> khoá người,
+    'nhom': khoá -> {mã KH}}. ma = mã KH (trong nhóm) có nhiều ảnh neo nhất, để hiện ảnh mẫu."""
+    khoa = _khoa_khach(conn)
+    nhom: dict[str, set] = {}
+    for ma, k in khoa.items():
+        nhom.setdefault(k, set()).add(ma)
+    phieu: dict[str, dict] = {}  # uuid -> khoá -> [điểm, số ảnh, số ảnh duyệt, {ngày}, {mã KH: số ảnh}]
+    for r in conn.execute(
+            "SELECT p.khuon_mat, p.ngay, p.xn_hd, p.do_tin, p.ly_do, v.ma_kh, v.code FROM photos p JOIN visits v"
+            " ON v.code = COALESCE(p.xn_hd, CASE WHEN p.do_tin='chac' THEN p.goi_y_hd END)"
+            " WHERE p.bo_qua=0 AND COALESCE(p.khuon_mat,'') != ''"):
+        mat = _doc_mat(r["khuon_mat"])
+        if not 1 <= len(mat) <= MAT_TOI_DA:
+            continue
+        if r["xn_hd"]:
+            w = CUM_W_XN
+        elif _la_neo_mat(r["do_tin"], r["ly_do"]):
+            w = CUM_W_CHAC
+        else:
+            continue
+        ma = r["ma_kh"] or r["code"]
+        k = khoa.get(ma, ma)
+        for u in mat:
+            x = phieu.setdefault(u, {}).setdefault(k, [0, 0, 0, set(), {}])
+            x[0] += w
+            x[1] += 1
+            x[2] += bool(r["xn_hd"])
+            x[3].add(r["ngay"])
+            x[4][ma] = x[4].get(ma, 0) + 1
+    cum, lan = {}, set()
+    for u, ks in phieu.items():
+        xep = sorted(ks.items(), key=lambda kv: (-kv[1][0], kv[0]))
+        tong = sum(x[0] for _, x in xep)
+        k, (diem, so, xn, ngays, mas) = xep[0]
+        if len(xep) > 1 and (xep[1][1][0] >= CUM_LAN_TY_LE * tong or xep[1][1][1] >= CUM_LAN_ANH):
+            lan.add(u)
+            continue
+        du_neo = so >= CUM_NEO_TOI_THIEU or (xn >= 1 and so >= 2)
+        if du_neo and diem >= CUM_TY_LE * tong and len(ngays) >= CUM_NGAY:
+            cum[u] = {"khach": k, "ma": max(mas, key=lambda m: (mas[m], m)), "neo": so, "xn": xn,
+                      "ngay": len(ngays)}
+    return {"cum": cum, "lan": lan, "khoa": khoa, "nhom": nhom}
+
+
+def _khach_cua_mat(cum: dict, km) -> dict | None:
+    """Ảnh 1–2 mặt có mặt thuộc cụm đã gắn của ĐÚNG 1 khách -> thông tin cụm (cụm nhiều ảnh neo nhất);
+    ảnh nhiều mặt, không cụm nào gắn, hoặc mặt thuộc cụm của 2 khách khác nhau -> None."""
+    mat = _doc_mat(km)
+    if not 1 <= len(mat) <= MAT_TOI_DA:
+        return None
+    ds = [cum["cum"][u] for u in mat if u in cum["cum"]]
+    if not ds or len({x["khach"] for x in ds}) != 1:
+        return None
+    return max(ds, key=lambda x: x["neo"])
+
+
+def _khoa_hd(conn, cum: dict, hd: str | None, nho: dict) -> str | None:
+    """Khoá người của 1 mã HĐ."""
+    if not hd:
+        return None
+    if hd not in nho:
+        v = conn.execute("SELECT ma_kh FROM visits WHERE code=?", (hd,)).fetchone()
+        ma = (v["ma_kh"] if v else None) or hd
+        nho[hd] = cum["khoa"].get(ma, ma)
+    return nho[hd]
+
+
+def _hd_cua_khach(conn, cum: dict, khach: str, ngays: list[str]) -> list:
+    mas = sorted(cum["nhom"].get(khach, set())) or [khach]
+    dau, dn = ",".join("?" * len(mas)), ",".join("?" * len(ngays))
+    return conn.execute(f"SELECT * FROM visits WHERE (ma_kh IN ({dau}) OR code IN ({dau})) AND ngay IN ({dn})",
+                        (*mas, *mas, *ngays)).fetchall()
+
+
+def _chon_hd_mat(vs: list, ngays: list[str], r: dict, ma_dvs: list[str]):
+    """Nhiều HĐ của khách: ngày ưu tiên (ngày chụp > ngày nhãn > ngày lùi), HĐ đang gợi ý, dịch vụ khớp nhãn,
+    giờ gần giờ chụp nhất."""
+    def gio(v):
+        try:
+            t = dt.datetime.fromisoformat(f"{v['ngay']}T{(v['gio'] or '00:00')[:5]}")
+            return abs((t - r["gio"]).total_seconds())
+        except ValueError:
+            return 1e9
+    return min(vs, key=lambda v: (ngays.index(v["ngay"]), v["code"] != r["hd"],
+                                  not any(_dv_khop(m, v["dich_vu"] or "") for m in ma_dvs if not _dv_chung(m)),
+                                  gio(v)))
+
+
+def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> list[str]:
+    """Luật CỤM MẶT bước 2: ảnh chưa duyệt, chưa 'chac', mặt thuộc cụm của khách K:
+    (a) K có HĐ ngày chụp/ngày nhãn (ảnh không ngày gốc: cả D-1, D-2) và nhãn trên ảnh (nếu có) không ghi tên
+        khác -> 'chac' MAT_DIEM; (b) không HĐ ngày đó nhưng có HĐ (cùng dịch vụ nhãn, nếu nhãn ghi) trong
+        GOI_NGAY ngày trước -> gợi ý 50 (ảnh chưa có HĐ); (c) không HĐ nào -> chỉ ghi chú.
+    Trả id ảnh vừa lên 'chac' (để lan bộ chụp)."""
+    len_chac = []
+    for p in photos:
+        r = ket_qua[p["id"]]
+        if p["xn_hd"] or p["bo_qua"] or r["do_tin"] == "chac":
+            continue
+        c = _khach_cua_mat(cum, p["khuon_mat"])
+        if not c:
+            continue
+        k, ma = c["khach"], c["ma"]
+        nhans = [] if _la_giay_to(p) else nhan_ds[p["id"]]
+        ngays = [ngay]
+        for n in nhans:
+            if n["ngay"] and n["ngay"] not in ngays and abs(
+                    (dt.date.fromisoformat(n["ngay"]) - dt.date.fromisoformat(ngay)).days) <= 7:
+                ngays.append(n["ngay"])
+        if r["ngay_goc"] == 0:
+            d0 = dt.date.fromisoformat(ngay)
+            ngays += [(d0 - dt.timedelta(days=x)).isoformat() for x in LUI_NGAY]
+        ma_dvs = [n["ma_dv"] for n in nhans if n["ma_dv"]]
+        mo = f"khách {ma} (cụm {c['neo']} ảnh đã xác nhận)"
+        vs = _hd_cua_khach(conn, cum, k, ngays)
+        if vs:
+            v = _chon_hd_mat(vs, ngays, r, ma_dvs)
+            if nhans and not any(_ten_nhan_hop(n, v["ten_kh"]) for n in nhans):
+                if not r["hd"]:
+                    r.update(hd=v["code"], do_tin="goi_y", diem=40,
+                             ly_do=f"mặt giống {mo} nhưng nhãn trên ảnh ghi tên khác — người chọn")
+                else:
+                    r["ly_do"] = (r["ly_do"] or "") + f" — mặt giống {mo}, nhãn ghi tên khác"
+                continue
+            lech = "" if v["ngay"] == ngay else f" (HĐ ngày {v['ngay'][8:10]}/{v['ngay'][5:7]})"
+            r.update(hd=v["code"], do_tin="chac", diem=MAT_DIEM, mat=ma,
+                     ly_do=f"khuôn mặt thuộc {mo} + HĐ cùng ngày{lech}")
+            len_chac.append(p["id"])
+            continue
+        d0 = dt.date.fromisoformat(ngay)
+        tu = (d0 - dt.timedelta(days=GOI_NGAY)).isoformat()
+        mas = sorted(cum["nhom"].get(k, set())) or [k]
+        dau = ",".join("?" * len(mas))
+        cu = [v for v in conn.execute(
+            f"SELECT * FROM visits WHERE (ma_kh IN ({dau}) OR code IN ({dau})) AND ngay BETWEEN ? AND ?"
+            " ORDER BY ngay DESC, gio DESC", (*mas, *mas, tu, (d0 - dt.timedelta(days=1)).isoformat()))]
+        dvs = [m for m in ma_dvs if not _dv_chung(m)]
+        if dvs:
+            cu = [v for v in cu if any(_dv_goi_khop(m, v["dich_vu"] or "") for m in dvs)]
+        if cu and not r["hd"]:
+            v = cu[0]
+            r.update(hd=v["code"], do_tin="goi_y", diem=50,
+                     ly_do=f"mặt thuộc {mo}, không HĐ ngày này — HĐ gần nhất "
+                     f"{v['ngay'][8:10]}/{v['ngay'][5:7]}/{v['ngay'][2:4]} (có thể buổi theo gói) — người chọn")
+        else:
+            r["ly_do"] = ((r["ly_do"] + " — ") if r["ly_do"] else "") + f"mặt giống {mo} (không có HĐ ngày này)"
+    return len_chac
+
+
+def _lan_bo_theo_mat(ket_qua: dict, ids: list[str]) -> None:
+    """Bộ chụp (<= BO_TOI_DA tư thế) có ảnh vừa lên 'chac' theo mặt: các ảnh còn lại cùng bộ lên 'chac' 80 —
+    trừ khi bộ có ảnh khớp HĐ khác (điểm >= 50 / 'chac'), người duyệt chọn HĐ khác, hoặc nhãn chưa khớp."""
+    for bo in {ket_qua[i]["bo"] for i in ids if ket_qua[i]["bo"] is not None}:
+        b = [r for r in ket_qua.values() if r["bo"] == bo]
+        hds = {r["hd"] for r in b if r.get("mat")}
+        if len(hds) != 1 or len({r["gio"] for r in b}) > BO_TOI_DA:
+            continue
+        hd = hds.pop()
+        if any((r["hd"] and r["hd"] != hd and (r["diem"] >= 50 or r["do_tin"] == "chac"))
+               or (r["xn"] and r["xn"] != hd) or (r["nhan"] and r["hd"] != hd) for r in b):
+            continue
+        ma = next(r["mat"] for r in b if r.get("mat"))
+        for r in b:
+            if r["do_tin"] != "chac" and not r["xn"]:
+                r.update(hd=hd, do_tin="chac", diem=80,
+                         ly_do=f"cùng bộ chụp liền {len(b)} ảnh với ảnh nhận theo khuôn mặt khách {ma}")
+
+
+def _canh_bao_mat(conn, photos, ket_qua, cum: dict) -> None:
+    """Luật CỤM MẶT bước 3: ảnh máy chấm 'chac' (chưa duyệt), đúng 1 mặt, mặt thuộc cụm MẠNH (>= CUM_MANH ảnh
+    neo) của khách KHÁC khách đang gắn -> hạ gợi ý, người xem lại. Không đụng ảnh đã duyệt."""
+    nho: dict = {}
+    for p in photos:
+        r = ket_qua[p["id"]]
+        if p["xn_hd"] or p["bo_qua"] or r["do_tin"] != "chac" or r.get("mat"):
+            continue
+        mat = _doc_mat(p["khuon_mat"])
+        if len(mat) != 1 or mat[0] not in cum["cum"]:
+            continue
+        c = cum["cum"][mat[0]]
+        if c["neo"] < CUM_MANH or _khoa_hd(conn, cum, r["hd"], nho) == c["khach"]:
+            continue
+        r.update(do_tin="goi_y", diem=min(r["diem"], 50),
+                 ly_do=f"cảnh báo: khuôn mặt thuộc khách khác ({c['ma']}, cụm {c['neo']} ảnh) — người xem lại"
+                 f" · máy chấm trước: {r['ly_do']}")
+
+
+def mau_thuan_da_duyet(conn, cum: dict) -> list[tuple]:
+    """Ảnh ĐÃ DUYỆT, 1 mặt, mặt thuộc cụm mạnh của khách khác khách người duyệt chọn -> [(id, xn_hd, mã cụm)].
+    Chỉ để báo, không sửa."""
+    ra, nho = [], {}
+    for r in conn.execute("SELECT id, xn_hd, khuon_mat FROM photos WHERE xn_hd IS NOT NULL AND bo_qua=0"
+                          " AND COALESCE(khuon_mat,'') != ''"):
+        mat = _doc_mat(r["khuon_mat"])
+        if len(mat) != 1 or mat[0] not in cum["cum"]:
+            continue
+        c = cum["cum"][mat[0]]
+        if c["neo"] >= CUM_MANH and _khoa_hd(conn, cum, r["xn_hd"], nho) != c["khach"]:
+            ra.append((r["id"], r["xn_hd"], c["ma"]))
+    return ra
+
+
 def cmd_ghep(a) -> None:
     y, m = thang(a.thang)
     tu, den = khoang_thang(y, m)
     conn = ket_noi()
     ngays = [r[0] for r in conn.execute(
         "SELECT DISTINCT ngay FROM photos WHERE ngay BETWEEN ? AND ?", (tu, den))]
+    cum = cum_khach(conn) if ngays else None  # bảng cụm mặt tính 1 lần cho cả tháng
     for n in ngays:
-        ghep_ngay(conn, n)
+        ghep_ngay(conn, n, cum)
     conn.commit()
     in_thong_ke(conn, tu, den)
 
@@ -1915,6 +2193,14 @@ def _trang_ngay(conn, ngay: str) -> bytes:
             if (v_hd and v_hd["ma_kh"] and not p["xn_hd"] and p["goi_y_hd"] == hd
                     and "buổi theo gói" in (p["ly_do"] or "")):
                 den_kh += _o_anh_mau(conn, v_hd["ma_kh"], ngay, mau_nho)
+            elif not p["xn_hd"]:
+                # Luật cụm mặt: ảnh nhận theo mặt / cảnh báo mặt lệch -> ảnh mẫu của khách theo mặt (và khách đang gắn).
+                ma_mat = _ma_tu_ly_do_mat(p["ly_do"])
+                if ma_mat:
+                    den_kh += _o_anh_mau(conn, ma_mat, ngay, mau_nho, "theo khuôn mặt")
+                    if "cảnh báo: khuôn mặt" in (p["ly_do"] or "") and v_hd and v_hd["ma_kh"] \
+                            and v_hd["ma_kh"] != ma_mat:
+                        den_kh += _o_anh_mau(conn, v_hd["ma_kh"], ngay, mau_nho, "khách đang gắn")
             o.append(
                 f"<div class='ph {st}' id='p{p['id']}' data-id='{p['id']}' data-dot='{so}'>"
                 + (f"<img loading=lazy src='/anh/{p['id']}' onclick=\"zoom(this.src)\">"
@@ -1936,7 +2222,17 @@ def _trang_ngay(conn, ngay: str) -> bytes:
     return _trang(f"Ảnh {ngay}", "".join(o))
 
 
-def _o_anh_mau(conn, ma_kh: str, ngay: str, bo_nho: dict) -> str:
+_MA_MAT = re.compile(r"(?:khuôn mặt thuộc|mặt giống|mặt thuộc|theo khuôn mặt) khách (?:khác \()?([^\s,()]+)")
+
+
+def _ma_tu_ly_do_mat(ly_do: str | None) -> str | None:
+    """Mã KH ghi trong lý do của luật cụm mặt ('khuôn mặt thuộc khách KH1 (cụm…', 'cảnh báo: khuôn mặt thuộc
+    khách khác (KH2, cụm…'), không có -> None."""
+    m = _MA_MAT.search(ly_do or "")
+    return m.group(1) if m else None
+
+
+def _o_anh_mau(conn, ma_kh: str, ngay: str, bo_nho: dict, nhan: str = "") -> str:
     """Ảnh gợi ý theo gói: 1–2 ảnh đã duyệt/chắc của mã KH đó (ngày khác) để nhân viên so mặt nhanh.
     Chỉ ảnh đã có bản xem trên máy, qua route /anh/<id> sẵn có."""
     ids = _anh_mau(conn, ma_kh, ngay, bo_nho, gioi_han=6)
@@ -1952,7 +2248,8 @@ def _o_anh_mau(conn, ma_kh: str, ngay: str, bo_nho: dict) -> str:
             break
     if not o:
         return f"<div class=small>Mẫu {html.escape(ma_kh)}: chưa có ảnh đã xác nhận trên máy để so mặt</div>"
-    return f"<div class=small>So mặt — ảnh đã xác nhận của {html.escape(ma_kh)}:<br>{''.join(o)}</div>"
+    them = f" ({html.escape(nhan)})" if nhan else ""
+    return f"<div class=small>So mặt — ảnh đã xác nhận của {html.escape(ma_kh)}{them}:<br>{''.join(o)}</div>"
 
 
 # ---------------- Diễn tiến điều trị của 1 khách (trang /khach, /tim) ----------------
