@@ -574,9 +574,15 @@ def _dao_ten(ten: str) -> bool:
 
 
 def _mot_chu_khop(x: str, t: list[str], tay: bool, gan=None) -> bool:
-    """Nhãn 1 chữ x khớp tên khách t (không dấu, thứ tự tên gọi): = tên gọi (chữ cuối); tên Tây: cả tên cuối gốc."""
+    """Nhãn 1 chữ x khớp tên khách t (không dấu, thứ tự tên gọi): = tên gọi (chữ cuối); tên Tây: cả tên cuối gốc
+    (bỏ chữ 1 ký tự cuối tên: 'JMITH DAVID A' -> tên cuối 'david')."""
     f = gan or (lambda a, b: a == b)
-    return bool(t) and (f(x, t[-1]) or (tay and len(t) >= 2 and f(x, t[-2])))
+    if not t:
+        return False
+    if f(x, t[-1]):
+        return True
+    dai = [y for y in t[:-1] if len(y) > 1]
+    return tay and bool(dai) and f(x, dai[-1])
 
 
 def _duoi_tay(w: list[str], t: list[str]) -> bool:
@@ -1754,8 +1760,8 @@ def _goi_y_khuon_mat(conn, ngay: str, photos, ket_qua) -> None:
         for ma in khach:
             vs = conn.execute(f"SELECT * FROM visits WHERE ma_kh=? AND ngay IN ({','.join('?' * len(ngays))})"
                               " ORDER BY ngay != ?, gio", (ma, *sorted(ngays), ngay)).fetchall()
-            if vs:
-                ung[ma] = vs[0]
+            if vs:  # cùng cách chọn với luật cụm mặt (_chon_hd_mat): ngày chụp, không phải HĐ thu tiền, gần giờ chụp
+                ung[ma] = min(vs, key=lambda v: (v["ngay"] != ngay, _chi_thu_tien(v["dich_vu"]), _cach_gio(v, r["gio"])))
         if len(ung) == 1:
             v = next(iter(ung.values()))
             r.update(hd=v["code"], do_tin="goi_y", diem=40,
@@ -1905,17 +1911,30 @@ def _hd_cua_khach(conn, cum: dict, khach: str, ngays: list[str]) -> list:
                         (*mas, *mas, *ngays)).fetchall()
 
 
+_THU_TIEN = re.compile(r"^(dat coc|coc|thanh toan|tra no|cong no|thu no)\b")
+
+
+def _chi_thu_tien(dich_vu: str | None) -> bool:
+    """HĐ chỉ là thu tiền (đặt cọc, thanh toán công nợ/combo...) — không phải buổi làm dịch vụ."""
+    ds = [khong_dau(x) for x in (dich_vu or "").split("|") if x.strip()]
+    return bool(ds) and all(_THU_TIEN.match(x) for x in ds)
+
+
+def _cach_gio(v, luc: dt.datetime) -> float:
+    """Số giây giữa giờ HĐ và giờ chụp (HĐ không giờ -> rất xa)."""
+    try:
+        return abs((dt.datetime.fromisoformat(f"{v['ngay']}T{(v['gio'] or '00:00')[:5]}") - luc).total_seconds())
+    except ValueError:
+        return 1e9
+
+
 def _chon_hd_mat(vs: list, ngays: list[str], r: dict, ma_dvs: list[str]):
     """Nhiều HĐ của khách: giữ NGÀY của HĐ đang gợi ý (nếu là của K); rồi theo ngày ưu tiên
     (thứ tự `ngays`: ảnh có ngày gốc -> ngày chụp > ngày nhãn; không -> ngày nhãn > ngày chụp; rồi ngày lùi), dịch vụ
     khớp nhãn (ma_dvs: nhãn của ảnh, không có thì nhãn cùng bộ/đợt), giờ gần giờ chụp nhất, rồi mới tới HĐ đang gắn
     (CEO 16/10: ca 87EEA18F — 3 HĐ cùng ngày, HĐ đang gắn 14:39 thắng HĐ 17:31 khớp dịch vụ nhãn bộ + gần giờ chụp)."""
     def gio(v):
-        try:
-            t = dt.datetime.fromisoformat(f"{v['ngay']}T{(v['gio'] or '00:00')[:5]}")
-            return abs((t - r["gio"]).total_seconds())
-        except ValueError:
-            return 1e9
+        return _cach_gio(v, r["gio"])
 
     def dv_hop(v):
         dvs = [m for m in ma_dvs if not _dv_chung(m)]
@@ -1931,7 +1950,8 @@ def _chon_hd_mat(vs: list, ngays: list[str], r: dict, ma_dvs: list[str]):
     giu_ngay = next((v["ngay"] for v in vs if v["code"] == giu), None)
     # Có ngày gốc: HĐ khớp dịch vụ nhãn đứng trước (ngày chụp không có HĐ khớp dịch vụ mà ngày nhãn có -> ngày nhãn).
     return min(vs, key=lambda v: (giu_ngay is not None and v["ngay"] != giu_ngay, r.get("goc") == 1 and not dv_hop(v),
-                                  ngays.index(v["ngay"]), not dv_hop(v), gio(v), v["code"] != giu))
+                                  ngays.index(v["ngay"]), not dv_hop(v), _chi_thu_tien(v["dich_vu"]), gio(v),
+                                  v["code"] != giu))
 
 
 def _dv_nhan_quanh(p, photos, ket_qua, nhan_ds) -> list[str]:

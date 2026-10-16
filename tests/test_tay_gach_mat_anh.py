@@ -37,8 +37,12 @@ class TenTay(Nen):
         self.assertTrue(A._khop_ten_goi([k for _, k in A._tu_ten_goi("TANYA SHERMAN")], [], [["tanya"]]))
 
     def test_chu_giua_ten_tay_khong_chac(self):  # âm: chữ giữa không phải chữ đầu/cuối -> chỉ gợi ý
+        self.hd("H1", D, "K1", "CEDRICK PAUL DAGDAGAN", "PRP")
+        self.assertEqual(self.khop("Paul-prp 10/10/26")[:2], ("H1", 50))
+
+    def test_ten_tay_bo_chu_mot_ky_tu_cuoi(self):  # ca thật D7AFEA48: 'David' ~ 'JMITH DAVID A'
         self.hd("H1", D, "K1", "JMITH DAVID A", "PRP")
-        self.assertEqual(self.khop("David-prp 10/10/26")[:2], ("H1", 50))
+        self.assertEqual(self.khop("David-prp 10/10/26")[:2], ("H1", 85))
 
     def test_ten_viet_khong_doi(self):  # âm: tên Việt có dấu giữ luật tên cuối (chữ đầu là họ)
         self.hd("H1", D, "K1", "Phạm Đỗ Thảo Vy", "CSD")
@@ -169,6 +173,23 @@ class ChonHdMat(MatNen):
     def test_khong_nhan_chon_gio_gan_nhat(self):  # đối chứng: không nhãn -> HĐ gần giờ chụp nhất
         a = self.ca(False)
         self.assertEqual(self.ghep()[a][:2], ("K1-a", "chac"))
+
+    def test_tranh_hd_thu_tien(self):  # HĐ đặt cọc gần giờ hơn nhưng chỉ thu tiền -> lấy HĐ dịch vụ
+        self.cum("K1", "Phan Thị Lan")
+        self.hd("K1-c", D, "K1", "Phan Thị Lan", "ĐẶT CỌC", "17:16")
+        self.hd("K1-b", D, "K1", "Phan Thị Lan", "CSD", "17:40")
+        a = self.anh(D, "17:15:00", km="P-K")
+        self.assertEqual(self.ghep()[a][:2], ("K1-b", "chac"))
+        self.assertTrue(A._chi_thu_tien("THANH TOÁN CÔNG NỢ CSD"))
+        self.assertFalse(A._chi_thu_tien("THANH TOÁN CÔNG NỢ VEIN | TRẺ HOÁ DA PICOLIGHT"))
+
+    def test_bo_nhan_rac_cung_hd_voi_mat(self):  # ca thật CU-HD026768: tấm có chữ OCR rác + 4 tấm mặt, 2 HĐ cùng KH
+        self.cum("K1", "Phan Thị Lan")
+        self.hd("K1-a", D, "K1", "Phan Thị Lan", "Tiêm HA", "10:00")
+        self.hd("K1-b", D, "K1", "Phan Thị Lan", "CSD", "10:24")
+        ids = [self.anh(D, f"10:21:{i * 8:02d}", km="P-K") for i in range(4)]
+        kq = self.ghep()
+        self.assertEqual({kq[i][:2] for i in ids}, {("K1-b", "chac")})
 
     def test_ham_chon_hd(self):
         import datetime as dt
