@@ -1870,6 +1870,7 @@ _MAY = [r"\benergy\b", r"\bfrequency\b", r"\bhz\b", r"\bmj\b", r"\bready\b", r"\
         r"\bpulse\s*count\b|\bpulsecou", r"\bpulse\s*width\b", r"\baiming\s*beam\b", r"\bproposals\b",
         r"\bsimmer\b", r"\bj\s*/?\s*cm2?\b", r"\b1470\s*nm\b", r"\bq?1064\b", r"\bq?532\b", r"\bpower\s*density\b",
         r"\bpaused\b", r"\bduration\b", r"\bpower\b"]
+_MAY_SO = {r"\b1470\s*nm\b", r"\bq?1064\b", r"\bq?532\b"}  # số bước sóng: không đủ một mình
 _MAY_KHONG = ("phieu", "cam ket", "toa thuoc", "don thuoc", "ho ten")  # phiếu điều trị của khách (soát BACC2728): giữ
 
 
@@ -1885,7 +1886,10 @@ def loai_khong_luu(ocr: str | None) -> tuple[str | None, str]:
     if len(bl) >= 2 and any(re.search(k, t) for k in (_BL_TIEN, _BL_MA, _BL_NH)):
         return "bien_lai", f"biên lai chuyển khoản ({len(bl)} dấu hiệu)"
     may = [k for k in _MAY if re.search(k, t)]
-    if len(may) >= 2 and not any(k in t for k in _MAY_KHONG):
+    # Soát 17/10 (ca FA1F90D3 'Tên - laser 532-1064 26/10/2022'): số bước sóng hay nằm trong NHÃN khách -> phải có
+    # ít nhất 1 từ CHỮ thông số (energy, Hz, mJ, ready…), số bước sóng chỉ là từ thứ 2.
+    chu = [k for k in may if k not in _MAY_SO]
+    if len(may) >= 2 and chu and not any(k in t for k in _MAY_KHONG):
         return "man_hinh_may", f"màn hình máy ({len(may)} từ thông số)"
     return None, ""
 

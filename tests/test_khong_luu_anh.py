@@ -29,6 +29,11 @@ class NhanDien(unittest.TestCase):
                   "Mai - laser lift toning 3/4/25", "Vy - pico 5 lần 20/9/26", ""):
             self.assertIsNone(A.loai_khong_luu(t)[0], t)
 
+    def test_nhan_buoc_song_khong_nham(self):  # âm, soát FA1F90D3: nhãn 'Tên - laser 532-1064 ngày' là ảnh khách
+        for t in ("Phan Thị Lan - laser 532-1064 26/10/2022", "Lan - pico 1064nm 755 3/4/25", "Hà 1470nm lifting 2/2/26"):
+            self.assertIsNone(A.loai_khong_luu(t)[0], t)
+        self.assertEqual(A.loai_khong_luu("1064 532 Energy 0040 mJ")[0], "man_hinh_may")  # có từ chữ -> vẫn màn hình
+
     def test_phieu_dieu_tri_khong_nham(self):  # âm (soát BACC2728): phiếu điều trị ghi thông số -> giấy tờ khách
         self.assertIsNone(A.loai_khong_luu("PHIẾU ĐIỀU TRỊ Họ tên ... Energy 20 mJ 10 Hz")[0])
 
