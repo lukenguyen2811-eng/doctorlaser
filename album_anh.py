@@ -402,11 +402,14 @@ class AnhKit:
         for k in range(0, len(thieu), LO_PK):
             lo = thieu[k:k + LO_PK]
             kq = P.PHAsset.fetchAssetsWithLocalIdentifiers_options_([f"{u}/L0/001" for u in lo], None)
-            khong_thay += len(lo) - kq.count()  # ảnh đã xoá khỏi thư viện -> bỏ qua ảnh đó
-            if kq.count():
-                self._doi(lambda kq=kq: P.PHAssetCollectionChangeRequest.changeRequestForAssetCollection_(a)
-                          .addAssets_(kq))
-                them += kq.count()
+            # Ảnh thuộc album CHIA SẺ iCloud (sourceType 2) không thêm được vào album thường -> PhotoKit báo
+            # lỗi 3300 cho CẢ lô (16/10: 8 album hỏng vì vài ảnh như vậy). Chỉ thêm ảnh của thư viện (1).
+            duoc = [x for x in _ds(kq) if getattr(x, "sourceType", lambda: 1)() == 1]
+            khong_thay += len(lo) - len(duoc)  # ảnh đã xoá khỏi thư viện / ảnh chia sẻ -> bỏ qua
+            if duoc:
+                self._doi(lambda duoc=duoc: P.PHAssetCollectionChangeRequest.changeRequestForAssetCollection_(a)
+                          .addAssets_(duoc))
+                them += len(duoc)
         if not ids and xoa_rong:  # xoá album rỗng (KHÔNG xoá ảnh) — app Ảnh có thể hỏi xác nhận
             self._doi(lambda: P.PHAssetCollectionChangeRequest.deleteAssetCollections_([a]))
             self._al[tm][ten].remove(a)

@@ -201,7 +201,7 @@ def photos_gia(thu_vien=(), hong=0, hong_trong_khoi=False):
                      PHAssetCollectionChangeRequest=PHAssetCollectionChangeRequest,
                      PHPhotoLibrary=PHPhotoLibrary).items():
         setattr(P, k, v)
-    P.st, P.GOC = st, GOC
+    P.st, P.GOC, P.KHO = st, GOC, KHO
     return P
 
 
@@ -248,6 +248,14 @@ class PhotoKit(unittest.TestCase):
         goi = P.st["goi"]
         self.chay(P, "--ghi")
         self.assertEqual(P.st["goi"], goi)  # không đổi -> không performChanges nào
+
+    def test_bo_qua_anh_album_chia_se(self):  # 16/10: ảnh Shared Album (sourceType 2) làm hỏng cả lô (lỗi 3300)
+        P = photos_gia(THU_VIEN)
+        P.KHO["a6"].sourceType = lambda: 2
+        self.chay(P, "--ghi")
+        al = next(a for f in P.GOC[0].con for a in f.con if a.ten == "DV · PRP")
+        self.assertNotIn("a6", al.anh)
+        self.assertIn("a2", al.anh)
 
     def test_them_thieu_go_thua_khong_xoa_album(self):
         P = photos_gia(THU_VIEN + ["zz"])
