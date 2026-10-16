@@ -487,6 +487,8 @@ def _tu_ten_kh(ten: str) -> list[tuple[str, str]]:
                     j -= 1
             tu = tu[:j]
             break
+    if len(tu) > 2 and [k for _, k in tu[-2:]] == ["gan", "spa"]:  # 'CÔ THẢO GẦN SPA' -> 'cô thảo' (cụm cuối)
+        tu = tu[:-2]
     return tu or _tu_goc(ten)
 
 
@@ -678,6 +680,24 @@ def _lech_1(a: str, b: str) -> bool:
     return any(dai[:i] + dai[i + 1:] == ngan for i in range(len(dai)))
 
 
+# Luật tên (Lượng 16/10): nhãn ghi TÊN GỌI. Nhãn >= 2 chữ ('Ngọc Anh') phải khớp ĐÚNG các chữ cuối họ tên
+# ('Trần Ngọc Anh'), không khớp 'Nguyễn Thị Anh', không rơi xuống khớp 1 chữ 'Anh'. Chỉ được bớt chữ thừa
+# bên trái khi chữ đó không phải tên: chữ chung ('laser', 'doctor'), xưng hô, mã dịch vụ, chữ ghi chú.
+_CHU_THUA_TEN = ((_KHONG_PHAI_TEN | XUNG_HO | set(LOAI_NHAN) | DV_CHUNG | DONG_TU_DV | _TU_DV_THEM
+                  | _GHI_CHU_TEN | set(MA_DV) | set(MA_DV_OCR) | {"ro"}) - _KHONG_GACH_BO)  # 'rỗ' (sẹo rỗ)
+
+
+def _bot_duoc(w: list[str], k: int) -> bool:
+    """Nhãn w được bớt còn k chữ cuối: nhãn 1 chữ / không bớt -> được; bớt thì các chữ bỏ đi phải là chữ chung."""
+    return k == len(w) or len(w) < 2 or all(x in _CHU_THUA_TEN for x in w[:len(w) - k])
+
+
+def _ten_ngoai(wg: list[str], tg_kh: list[str]) -> bool:
+    """Tên kiểu nước ngoài/không dấu ('Cheng Wei' ~ 'Wu Cheng Wei'): cả nhãn lẫn tên khách không có chữ
+    tiếng Việt có dấu -> được khớp 'tên nằm trong họ tên' (đảo thứ tự). Tên Việt thì phải khớp đuôi."""
+    return not _co_dau(wg) and not _co_dau(tg_kh)
+
+
 GOI_NGAY = 180  # buổi theo gói: tìm HĐ cùng dịch vụ của khách cùng tên trong 180 ngày trước ngày chụp
 
 
@@ -848,15 +868,65 @@ def _hd_ngay_truoc(conn, nhan: dict, w: list[str], wg: list[str], ngay_anh: str,
                        f" — HĐ ngày {n[8:10]}/{n[5:7]}")
 
 
+def _dd_mm(ngay: str) -> str:
+    return f"{ngay[8:10]}/{ngay[5:7]}"
+
+
+def _hd_ro_ngay(conn, nhan: dict, kq: tuple, ngay: str) -> bool:
+    """Kết quả khớp kq ra HĐ của ĐÚNG ngày `ngay`, điểm >= 50, dịch vụ khớp mã trên nhãn (nếu nhãn ghi)."""
+    hd, d, _ = kq
+    if not hd or d < 50:
+        return False
+    v = conn.execute("SELECT ngay, dich_vu FROM visits WHERE code=?", (hd,)).fetchone()
+    if not v or v["ngay"] != ngay:
+        return False
+    ma = nhan["ma_dv"]
+    return _dv_chung(ma) or _dv_khop(ma, v["dich_vu"] or "") or _dv_gan_dung(ma, v["dich_vu"] or "")
+
+
+def _khach_hd(conn, hd: str) -> str:
+    v = conn.execute("SELECT ma_kh FROM visits WHERE code=?", (hd,)).fetchone()
+    return (v["ma_kh"] if v else None) or hd
+
+
 def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None,
-               ngay_goc: int | None = None) -> tuple[str | None, int, str]:
+               ngay_goc: int | None = None, goc: int | None = None) -> tuple[str | None, int, str]:
     """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp). Không thấy khách tên
     này trong ngày -> ảnh không có ngày chụp gốc (ngay_goc=0) thử HĐ 1–2 ngày trước (_hd_ngay_truoc);
-    rồi luật BUỔI THEO GÓI (HĐ cũ cùng dịch vụ). Cả hai chỉ gợi ý 50."""
+    rồi luật BUỔI THEO GÓI (HĐ cũ cùng dịch vụ). Cả hai chỉ gợi ý 50.
+    goc = photos.ngay_goc THẬT của ảnh (1 = có EXIF ngày chụp gốc). Luật ngày (Lượng 16/10): nhân viên có thể ghi
+    SAI ngày trên nhãn -> ảnh goc=1 ưu tiên NGÀY CHỤP; chỉ theo ngày nhãn khi ngày chụp không có HĐ khớp tên
+    (+ dịch vụ nếu nhãn ghi) mà ngày nhãn có. goc 0/None: ngày nhãn trước như cũ."""
     ngay, sai = nhan["ngay"] or ngay_anh, ""
     if abs((dt.date.fromisoformat(ngay) - dt.date.fromisoformat(ngay_anh)).days) > 7:
         # OCR đọc sai số ('8/10/16', '3/11 0/26') -> nhãn viết cùng ngày chụp.
         ngay, sai = ngay_anh, f" (ngày trên nhãn đọc ra {nhan['ngay']}, dùng ngày chụp)"
+    if goc != 1 or ngay == ngay_anh:
+        return _khop_nhan_ngay(conn, nhan, ngay, ngay_anh, bo_nho, ngay_goc, sai)
+    chup = _khop_nhan_ngay(conn, nhan, ngay_anh, ngay_anh, bo_nho, ngay_goc, "")
+    theo_nhan = _khop_nhan_ngay(conn, nhan, ngay, ngay_anh, bo_nho, ngay_goc, "")
+    nhan_ro = _hd_ro_ngay(conn, nhan, theo_nhan, ngay)
+    if _hd_ro_ngay(conn, nhan, chup, ngay_anh):
+        hd, d, ly_do = chup[0], chup[1], (chup[2] + f" — nhãn ghi ngày {_dd_mm(ngay)} nhưng ảnh chụp ngày"
+                                          f" {_dd_mm(ngay_anh)} (có ngày gốc) — theo ngày chụp")
+        if nhan_ro and _khach_hd(conn, theo_nhan[0]) != _khach_hd(conn, hd):
+            # Ngày nhãn cũng có KHÁCH KHÁC cùng tên + dịch vụ: theo ngày chụp nhưng không chắc -> chỉ gợi ý.
+            d, ly_do = min(d, 50), ly_do + f" (ngày {_dd_mm(ngay)} có khách khác cùng tên — chỉ gợi ý)"
+        return hd, d, ly_do
+    if nhan_ro:
+        hd, d, ly_do = theo_nhan
+        ly_do += (f" — ảnh chụp ngày {_dd_mm(ngay_anh)} (có ngày gốc) nhưng nhãn ghi ngày {_dd_mm(ngay)},"
+                  " ngày chụp không có HĐ khớp — theo ngày nhãn")
+        trung = re.search(r" trùng (\d+) khách", chup[2] or "") if chup[0] is None else None
+        if trung:  # ngày chụp trùng >= 2 khách cùng tên: không chắc, chỉ gợi ý
+            d, ly_do = min(d, 50), ly_do + f" (ngày chụp trùng {trung.group(1)} khách — chỉ gợi ý)"
+        return hd, d, ly_do
+    return chup
+
+
+def _khop_nhan_ngay(conn, nhan: dict, ngay: str, ngay_anh: str, bo_nho: dict | None,
+                    ngay_goc: int | None, sai: str) -> tuple[str | None, int, str]:
+    """_khop_nhan cho 1 ngày HĐ đã chọn (ngày nhãn hoặc ngày chụp)."""
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     lech_ngay = (f" (nhãn ghi ngày {ngay})" if ngay != ngay_anh else "") + sai
     T = {v["code"]: _tu_ten_kh(v["ten_kh"]) for v in visits}
@@ -912,9 +982,16 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
     def cung_ten(v, k):
         return len(t(v)) >= k and t(v)[-k:] == w[-k:]
 
-    # Chữ thừa phía trước tên ('Laser Trang') -> thử bớt dần từ trái: 3 chữ, 2 chữ, 1 chữ.
+    def ngoai(v):
+        return _ten_ngoai(wg, [g for g, _ in T[v["code"]]])
+
+    # Chữ thừa phía trước tên ('Laser Trang') -> thử bớt dần từ trái: 3 chữ, 2 chữ, 1 chữ. Nhãn >= 2 chữ chỉ
+    # bớt chữ chung (_bot_duoc): 'Ngọc Anh' không rơi xuống khớp 1 chữ 'Anh' (Lượng 16/10).
     ung, k = [], len(w)
     for k in range(len(w), 0, -1):
+        if not _bot_duoc(w, k):
+            k = len(w)
+            break
         ung = [v for v in visits if cung_ten(v, k)]
         if ung:
             break
@@ -928,14 +1005,31 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
     if not ung and w:  # tên gọi trong ngoặc: nhãn 'Lisa-dvm' ~ 'Nguyễn Thị X (LISA)'
         ung, k = [v for v in visits if any(set(w) <= set(b) for b in _bi_danh(v["ten_kh"]))], len(w)
     gan_dung = False
+    w2 = w[next((i for i, x in enumerate(w) if x not in _CHU_THUA_TEN), 0):]  # bỏ chữ chung bên trái
+    if not ung and len(w2) >= 2:
+        # CEO 16/10: tên Việt có ĐỦ mọi chữ nhãn trong họ tên nhưng không đúng đuôi ('Kim Mỹ' ~ '... Mỹ Kim',
+        # 'Cao Thanh' ~ 'Cao Thị Thanh', 'Ngọc Huyền' ~ '... Ngọc Huyền Trân') -> ứng viên, tối đa 50 (gợi ý).
+        du = [v for v in visits if not ngoai(v) and set(w2) <= set(t(v))]
+        if du:
+            hop = du if _dv_chung(dv) else [v for v in du if _dv_khop(dv, v["dich_vu"])]
+            chon = hop or du
+            if len({v["ma_kh"] or v["code"] for v in chon}) > 1:
+                return None, len(chon), ""
+            v = min(chon, key=lambda v: v["gio"] or "99")
+            if hop or _dv_gan_dung(dv, v["dich_vu"]):
+                return v, 50, "có đủ tên nhưng khác thứ tự/vị trí —"
+            return v, 40, "có đủ tên nhưng khác thứ tự/vị trí, lệch dịch vụ —"
     if not ung and w:
         # Tên nước ngoài đảo thứ tự ('Cheng Wei' ~ 'Wu Cheng Wei') -> tên nằm trong họ tên; OCR sai
         # 1 chữ ('Thann' ~ 'Thanh'). Chỉ "chắc" khi tên nằm trong họ tên VÀ dịch vụ trên nhãn khớp.
+        # Nhãn >= 2 chữ: 'tên nằm trong họ tên' chỉ cho tên nước ngoài/không dấu; lệch 1 chữ OCR chỉ ở chữ
+        # cuối, các chữ trước phải khớp đúng đuôi họ tên. Nhãn 1 chữ như cũ.
         def trong(v):
-            return set(w) <= set(t(v))
+            return set(w) <= set(t(v)) and (len(w) < 2 or ngoai(v))
 
         def lech(v):
-            return bool(t(v)) and len(w[-1]) >= 4 and _lech_1(w[-1], t(v)[-1])
+            return (bool(t(v)) and len(w[-1]) >= 4 and _lech_1(w[-1], t(v)[-1])
+                    and (len(w) < 2 or (len(t(v)) >= len(w) and t(v)[-len(w):-1] == w[:-1])))
 
         ung = [v for v in visits if trong(v)]
         if len(ung) == 1 and _dv_khop(dv, ung[0]["dich_vu"]):
@@ -960,6 +1054,8 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
         khac = [v for v in visits if v["code"] != ung[0]["code"]
                 and set(w[-k:]) <= set(t(v)) and _dv_khop(dv, v["dich_vu"])]
         if len(khac) == 1:
+            if k >= 2 and not ngoai(khac[0]):  # tên Việt đủ chữ nhưng không đúng đuôi: chỉ gợi ý (CEO 16/10)
+                return khac[0], 50, "có đủ tên nhưng khác thứ tự/vị trí + dịch vụ —"
             if k == len(w):
                 return khac[0], 85, "khớp tên + dịch vụ"
             return khac[0], 50, "khớp một phần tên + dịch vụ"
@@ -1145,7 +1241,9 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         truoc = p["thoi_gian"]
         ket_qua[p["id"]] = {"dot": dot, "hd": None, "do_tin": "chua_ro", "ly_do": "", "diem": 0,
                             "nhan": False, "gio": dt.datetime.fromisoformat(p["thoi_gian"]),
-                            "xn": p["xn_hd"], "ngay_goc": 0 if p["id"] in khong_tin else 1}
+                            "xn": p["xn_hd"], "ngay_goc": 0 if p["id"] in khong_tin else 1,
+                            # luật ngày 16/10: 1 = có EXIF, hoặc ngay_goc=0 sát ảnh EXIF cùng buổi (<= BO_GIAY s)
+                            "goc": 1 if _ngay_goc(p) == 0 and p["id"] not in khong_tin else _ngay_goc(p)}
     # Giờ trùng đến từng giây ở >= TRUNG_GIAY ảnh: giờ nhập/lưu -> không lan đợt, không dùng luật giờ.
     dem_giay = {}
     for p in photos:
@@ -1184,7 +1282,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         # Nhãn nhân viên ghi trên ảnh (chỉ có tên + dịch vụ viết tắt + ngày). Khớp một phần tên ở trên
         # (50) không chặn nhãn: nhãn cho điểm cao hơn thì lấy nhãn.
         for nhan in nhan_ds[p["id"]]:
-            hd, d, ly_do = _khop_nhan(conn, nhan, ngay, bo_nho, r["ngay_goc"])
+            hd, d, ly_do = _khop_nhan(conn, nhan, ngay, bo_nho, r["ngay_goc"], r["goc"])
             if hd and "buổi theo gói" in ly_do and _mat_khac_khach(conn, ngay, hd, p["khuon_mat"], mat_nho):
                 hd, d, ly_do = None, 0, ly_do + " — nhưng khuôn mặt khác ảnh đã xác nhận của khách: bỏ, người chọn"
             r["ly_do"] = ly_do
@@ -1351,7 +1449,7 @@ def _chia_bo(ds: list[dict]) -> None:
 
 
 def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
-    """Tên trên nhãn có thể là khách này: chữ nhãn (bớt dần chữ thừa bên trái, như _khop_ten) nằm trong họ tên
+    """Tên trên nhãn có thể là khách này: chữ nhãn (bớt chữ chung thừa bên trái, như _khop_ten) nằm trong họ tên
     đã làm sạch hoặc tên gọi trong ngoặc, hoặc chữ cuối lệch 1 chữ (OCR). Nhãn và tên khách đều còn dấu thì
     phải cùng dấu ('Quyền' != 'Quyên'). Dùng để biết nhãn ghi tên KHÁC hẳn."""
     tg = _tu_ten_kh(ten_kh)
@@ -1366,13 +1464,18 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
         return True
     dau_kh = _co_dau([g for g, _ in tg])
     for k in range(len(w), 0, -1):
+        if not _bot_duoc(w, k):  # luật tên 16/10: nhãn >= 2 chữ chỉ bớt chữ chung bên trái
+            break
+        # Đủ mọi chữ nhãn (không kể chữ chung bỏ bên trái) có trong họ tên -> có thể là khách này, kể cả khác thứ
+        # tự/vị trí (CEO 16/10); thiếu chữ nào ('Ngọc Anh' vs 'Nguyễn Thị Anh') -> tên khác.
         if set(w[-k:]) <= set(t):
             if not (dau_kh and _co_dau(wg[-k:])) or all(
                     any(khong_dau(a) == kk and _chu_mot_chieu(a, g) for g, kk in tg) for a in wg[-k:]):
                 return True
     if any(set(w) <= set(b) for b in _bi_danh(ten_kh)):
         return True
-    return bool(t) and len(w[-1]) >= 4 and _lech_1(w[-1], t[-1])
+    return (bool(t) and len(w[-1]) >= 4 and _lech_1(w[-1], t[-1])
+            and (len(w) < 2 or (len(t) >= len(w) and t[-len(w):-1] == w[:-1])))
 
 
 _THANH = {"\u0300", "\u0301", "\u0303", "\u0309", "\u0323"}  # dấu thanh: huyền, sắc, ngã, hỏi, nặng
@@ -1635,18 +1738,28 @@ def _hd_cua_khach(conn, cum: dict, khach: str, ngays: list[str]) -> list:
 
 
 def _chon_hd_mat(vs: list, ngays: list[str], r: dict, ma_dvs: list[str]):
-    """Nhiều HĐ của khách: HĐ đang gợi ý (nếu là của K), ngày ưu tiên (ngày nhãn > ngày chụp > ngày lùi), dịch vụ khớp nhãn,
-    giờ gần giờ chụp nhất."""
+    """Nhiều HĐ của khách: HĐ đang gợi ý (nếu là của K), ngày ưu tiên (thứ tự `ngays`: ảnh có ngày gốc -> ngày chụp
+    > ngày nhãn; không -> ngày nhãn > ngày chụp; rồi ngày lùi), dịch vụ khớp nhãn, giờ gần giờ chụp nhất."""
     def gio(v):
         try:
             t = dt.datetime.fromisoformat(f"{v['ngay']}T{(v['gio'] or '00:00')[:5]}")
             return abs((t - r["gio"]).total_seconds())
         except ValueError:
             return 1e9
-    # HĐ đang gắn mà đúng của khách K thì giữ (soát 15/10: đổi sang HĐ ngày chụp làm sai buổi)
-    return min(vs, key=lambda v: (v["code"] != r["hd"], ngays.index(v["ngay"]),
-                                  not any(_dv_khop(m, v["dich_vu"] or "") for m in ma_dvs if not _dv_chung(m)),
-                                  gio(v)))
+
+    def dv_hop(v):
+        dvs = [m for m in ma_dvs if not _dv_chung(m)]
+        return not dvs or any(_dv_khop(m, v["dich_vu"] or "") for m in dvs)
+    # HĐ đang gắn mà đúng của khách K thì giữ (soát 15/10: đổi sang HĐ ngày chụp làm sai buổi) — TRỪ khi (luật ngày
+    # 16/10) ảnh có ngày gốc, HĐ đang gắn thuộc ngày khác ngày chụp (ngày nhãn) và K có HĐ ngày chụp khớp dịch vụ.
+    giu = r["hd"]
+    chup = r["gio"].date().isoformat()
+    if giu and r.get("goc") == 1 and any(v["code"] == giu and v["ngay"] != chup for v in vs) \
+            and any(v["ngay"] == chup and dv_hop(v) for v in vs):
+        giu = None
+    # Có ngày gốc: HĐ khớp dịch vụ nhãn đứng trước (ngày chụp không có HĐ khớp dịch vụ mà ngày nhãn có -> ngày nhãn).
+    return min(vs, key=lambda v: (v["code"] != giu, r.get("goc") == 1 and not dv_hop(v), ngays.index(v["ngay"]),
+                                  not dv_hop(v), gio(v)))
 
 
 def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> list[str]:
@@ -1669,7 +1782,10 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
         for n in nhans:
             if n["ngay"] and n["ngay"] not in ngays and abs(
                     (dt.date.fromisoformat(n["ngay"]) - dt.date.fromisoformat(ngay)).days) <= 7:
-                ngays.insert(0, n["ngay"])  # ngày GHI TRÊN NHÃN đứng trước ngày chụp (ảnh lưu lại sau buổi làm)
+                if r.get("goc") == 1:  # luật ngày 16/10: có ngày chụp gốc -> ngày chụp trước, nhãn có thể ghi sai
+                    ngays.append(n["ngay"])
+                else:  # ngày GHI TRÊN NHÃN đứng trước ngày chụp (ảnh lưu lại sau buổi làm)
+                    ngays.insert(0, n["ngay"])
         if r["ngay_goc"] == 0:
             d0 = dt.date.fromisoformat(ngay)
             ngays += [(d0 - dt.timedelta(days=x)).isoformat() for x in LUI_NGAY]
@@ -1686,6 +1802,12 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
                     r["ly_do"] = (r["ly_do"] or "") + f" — mặt giống {mo}, nhãn ghi tên khác"
                 continue
             lech = "" if v["ngay"] == ngay else f" (HĐ ngày {v['ngay'][8:10]}/{v['ngay'][5:7]})"
+            nn = [n["ngay"] for n in nhans if n["ngay"] and n["ngay"] != ngay and n["ngay"] in ngays]
+            if nn and r.get("goc") == 1:
+                lech += (f" — nhãn ghi ngày {_dd_mm(nn[0])} nhưng ảnh chụp ngày {_dd_mm(ngay)} (có ngày gốc) — theo ngày chụp"
+                         if v["ngay"] == ngay else
+                         f" — ảnh chụp ngày {_dd_mm(ngay)} (có ngày gốc) nhưng nhãn ghi ngày {_dd_mm(v['ngay'])}"
+                         " — theo ngày nhãn")
             r.update(hd=v["code"], do_tin="chac", diem=MAT_DIEM, mat=ma,
                      ly_do=f"khuôn mặt thuộc {mo} + HĐ cùng ngày{lech}")
             len_chac.append(p["id"])

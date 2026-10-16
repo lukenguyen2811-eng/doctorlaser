@@ -693,9 +693,10 @@ class TenCoGhiChu(unittest.TestCase):
         self.them(("H1", "Nguyễn Anh Thư", "CSD"), ("H2", "Lê Minh Thư", "CSD"))
         self.assertEqual(self.khop("Anh Thư-csd 15/6/26")[:2], ("H1", 85))
 
-    def test_xung_ho_giu_khi_ho_ten_chua_du_chu(self):  # 'Cô Hạnh' ~ khách 'Lê Cô Hạnh Mỹ'
+    def test_xung_ho_giu_khi_ho_ten_chua_du_chu(self):  # 'Cô Hạnh' vs khách 'Lê Cô Hạnh Mỹ'
+        # Luật tên 16/10: tên Việt phải khớp ĐUÔI họ tên — 'Cô Hạnh' nằm giữa 'Lê Cô Hạnh Mỹ' không còn khớp.
         self.them(("H1", "Lê Cô Hạnh Mỹ", "Filler"), ("H2", "Trần Hạnh Như", "Filler"))
-        self.assertEqual(self.khop("Cô Hạnh-filler 15/6/26")[:2], ("H1", 85))
+        self.assertIsNone(self.khop("Cô Hạnh-filler 15/6/26")[0])
 
     def test_nhan_ghi_dung_chu_ghi_chu(self):  # nhân viên làm dịch vụ: tên KiotViet '... KTV'
         self.them(("H1", "Nguyễn Thị Hoa KTV", "Xóa vein mặt lần lẻ"), ("H2", "Lê Thị Hoa", "Peel"))
