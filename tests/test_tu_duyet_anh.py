@@ -92,9 +92,38 @@ class TuDuyet(Nen):
         kq = A.tu_duyet_on_dinh(self.c, [D])
         self.assertFalse(any(i in kq for i in ids))
 
+    def test_mat_hai_chu_khac_k_chan(self):  # ca B9F837F3: mặt có nhãn của 2 khách khác (không có K) -> phản bác K
+        d = A._td_diem([], "K", [{"ten_kh": "Trần Thị Minh", "dich_vu": "Sẹo", "gio": "10:00", "ngay": D, "code": "x"}],
+                       {"chu_mat": set(), "chu_nhan_mat": {"A", "B"}, "nhans": [], "gio": None, "co_goc": False,
+                        "goi_y": None})
+        self.assertEqual(d["mat"], A.TD_MAT_PHAN)
+        d = A._td_diem([], "A", [{"ten_kh": "Trần Thị Minh", "dich_vu": "Sẹo", "gio": "10:00", "ngay": D, "code": "x"}],
+                       {"chu_mat": set(), "chu_nhan_mat": {"A", "B"}, "nhans": [], "gio": None, "co_goc": False,
+                        "goi_y": None})
+        self.assertEqual(d["mat"], 0.0)  # âm: K nằm trong số chủ -> không phản bác
+
+    def test_mat_lan_nhieu_khach_khong_chan(self):  # âm (đo moi8): mặt có ảnh nhãn của nhiều khách -> không tính chủ
+        self.assertEqual(A._td_chu_mat({"cum": {}}, {}, "u", {"u": {"A": 3, "B": 2}}), set())
+        self.assertEqual(A._td_chu_mat({"cum": {}}, {}, "u", {"u": {"A": 7}}), {"A"})
+        self.assertEqual(A._td_chu_mat({"cum": {}}, {}, "u", {"u": {"A": 1}}), set())
+
+    def test_ro_buoi(self):  # khách 2 buổi dịch vụ trong ngày: chỉ nhận khi nhãn dịch vụ hoặc giờ phân định rõ
+        import datetime as dt_
+        vs = [{"code": "a", "ngay": D, "gio": "10:00", "dich_vu": "CSD MỤN"},
+              {"code": "b", "ngay": D, "gio": "11:00", "dich_vu": "LASER PICOLIGHT"}]
+        ctx = {"gio": dt_.datetime.fromisoformat(f"{D}T10:10:00"), "co_goc": True}
+        self.assertFalse(A._td_ro_buoi(vs, vs[0], [], ctx))  # cách HĐ kia 50' (< 90'): không rõ buổi
+        self.assertTrue(A._td_ro_buoi(vs, vs[0], ["csd"], ctx))  # nhãn csd chỉ khớp a
+        vs[1]["gio"] = "15:00"
+        self.assertTrue(A._td_ro_buoi(vs, vs[0], [], ctx))  # giờ sát a, xa b
+        vs[1]["dich_vu"] = "KEM REVITALUX"
+        vs[1]["gio"] = "10:15"
+        self.assertTrue(A._td_ro_buoi(vs, vs[0], [], ctx))  # HĐ kia chỉ sản phẩm
+
     def test_ham_quyet(self):
         d = lambda m, n, g, y: {"mat": m, "nhan": n, "gio": g, "goi_y": y}  # noqa: E731
         self.assertEqual(A._td_quyet({"K": d(3, 0, 1.5, 0), "L": d(-5, 0, 1.5, 0)})[0], "K")
+        self.assertIsNone(A._td_quyet({"K": d(3, 0, 0.5, 0.5), "L": d(-5, 0, 0, 0)})[0])  # mặt + giờ xa: không nhận
         self.assertIsNone(A._td_quyet({"K": d(0, 0, 1.5, 0.5), "L": d(0, 0, 0, 0)})[0])  # điểm thấp
         self.assertIsNone(A._td_quyet({"K": d(3, 0, 1.5, 0), "L": d(3, 0, 0.5, 0)})[0])  # biên nhỏ
         self.assertIsNone(A._td_quyet({"K": d(0, 3.5, 0, 0), "L": d(0, 0, 0, 0)})[0])  # 1 nguồn

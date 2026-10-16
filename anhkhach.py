@@ -2632,8 +2632,8 @@ def _td_nhan_that(p) -> list[dict]:
 
 def _td_chu_mat(cum: dict, hoc: dict, u: str, nhan_mat: dict | None = None) -> set:
     """Các chủ (khoá khách) của mã mặt u: cụm mặt đã gắn; mặt học được (>= 2 đơn vị, 1 chủ); và (CEO 16/10 lần 8, ca
-    B9F837F3) mọi khách có >= 2 ảnh 1 mặt chắc THEO NHÃN đúng tên mang mặt này (ngày khác) — mặt có chủ khác K thì K bị
-    phản bác."""
+    B9F837F3) khách có >= 2 ảnh 1 mặt chắc THEO NHÃN đúng tên mang mặt này (ngày khác) và chiếm >= 90% ảnh nhãn của mặt
+    — mặt có chủ khác K thì K bị phản bác; mặt lẫn nhiều khách (nhân viên, app Ảnh gộp) không tính."""
     ra = set()
     if u in cum["cum"]:
         ra.add(cum["cum"][u]["khach"])
@@ -2642,20 +2642,23 @@ def _td_chu_mat(cum: dict, hoc: dict, u: str, nhan_mat: dict | None = None) -> s
         k, n = next(iter(h.items()))
         if n >= 2:
             ra.add(k)
-    for k, n in ((nhan_mat or {}).get(u) or {}).items():
-        if n >= 2:
+    dem = (nhan_mat or {}).get(u) or {}
+    if dem:  # chỉ khi mặt THUẦN 1 khách (>= 2 ảnh, >= 90% ảnh nhãn của mặt này): mặt nhân viên/gộp nhiều người -> bỏ
+        k, n = max(dem.items(), key=lambda kv: kv[1])
+        if n >= 2 and n >= CUM_TY_LE * sum(dem.values()):
             ra.add(k)
     return ra
 
 
 def _td_nhan_mat(conn, cum: dict) -> dict:
-    """Mã mặt -> {khoá khách: số ảnh 1 mặt chắc theo NHÃN (ly_do 'nhãn …') hoặc người đã duyệt}."""
+    """Mã mặt -> {khoá khách: số ảnh 1 mặt chắc THEO NHÃN (neo như cụm mặt, _la_neo_mat) hoặc người đã duyệt}."""
     nho: dict = {}
     ra: dict = {}
     for r in conn.execute("SELECT khuon_mat, goi_y_hd, xn_hd, do_tin, ly_do FROM photos WHERE bo_qua=0"
-                          " AND COALESCE(khuon_mat,'') != '' AND (xn_hd IS NOT NULL OR (do_tin='chac' AND ly_do LIKE 'nhãn%'))"):
+                          " AND COALESCE(khuon_mat,'') != '' AND (xn_hd IS NOT NULL OR do_tin='chac')"):
         mat = _doc_mat(r["khuon_mat"])
-        if len(mat) != 1:
+        # Neo theo nhãn như cụm mặt (_la_neo_mat: nhãn/tên/SĐT trên ảnh, hoặc cùng bộ ngắn với ảnh có nhãn) hoặc người duyệt
+        if len(mat) != 1 or not (r["xn_hd"] or _la_neo_mat(r["do_tin"], r["ly_do"])):
             continue
         k = _khoa_hd(conn, cum, r["xn_hd"] or r["goi_y_hd"], nho)
         if k:
@@ -2680,7 +2683,12 @@ def _td_diem(dv: list, K: str, vs: list, ctx: dict) -> dict:
     """Điểm từng nguồn cho cặp (đơn vị dv, khách K có các HĐ vs trong ngày)."""
     d = {"mat": 0.0, "nhan": 0.0, "gio": 0.0, "goi_y": 0.0}
     chu = ctx["chu_mat"]
-    if chu:
+    ngoai = ctx.get("chu_nhan_mat") or set()
+    if ngoai and K not in ngoai:
+        # CEO 16/10 lần 8 (ca B9F837F3): mặt có ảnh nhãn đúng tên của 1–2 khách KHÁC (>= 2 ảnh mỗi khách) ở ngày khác,
+        # K không nằm trong số đó -> mặt không phải của K.
+        d["mat"] = TD_MAT_PHAN
+    if chu and d["mat"] == 0.0:
         if K in chu and len(chu) == 1:
             d["mat"] = TD_MAT_CO
         elif K not in chu:
@@ -2703,6 +2711,24 @@ def _td_diem(dv: list, K: str, vs: list, ctx: dict) -> dict:
     return d
 
 
+def _td_ro_buoi(vs: list, v, ma: list, ctx: dict) -> bool:
+    """HĐ v được chọn có chắc là đúng BUỔI không (backtest moi8: đúng khách 100% nhưng đúng HĐ 94%): khách chỉ 1 HĐ có
+    dịch vụ thật trong ngày; hoặc dịch vụ trên nhãn chỉ khớp v; hoặc giờ chụp sát v (<= 30') và xa HĐ khác (> 90')."""
+    def that(x):
+        return _hd_that(x["dich_vu"]) or "COMBO" in (x["dich_vu"] or "").upper()
+    khac = [x for x in vs if x["code"] != v["code"] and that(x)]
+    if not khac:
+        return True
+    mas = [m for m in ma if _ma_ro(m)]
+    if mas:
+        hv = _dv_hang(mas, v["dich_vu"])
+        if hv < 99 and all(_dv_hang(mas, x["dich_vu"]) > hv for x in khac):
+            return True
+    if not ctx["co_goc"]:
+        return False
+    return _cach_gio(v, ctx["gio"]) <= 30 * 60 and all(_cach_gio(x, ctx["gio"]) > 90 * 60 for x in khac)
+
+
 def _td_quyet(diem: dict) -> tuple[str | None, str]:
     """diem: K -> {nguồn: điểm}. (K nhận | None, lý do)."""
     hop_le = {K: x for K, x in diem.items() if x["mat"] > TD_MAT_PHAN and x["nhan"] > TD_NHAN_PHAN}
@@ -2720,6 +2746,9 @@ def _td_quyet(diem: dict) -> tuple[str | None, str]:
     duong = [c for c, x in hop_le[K].items() if x > 0 and c != "goi_y"]
     if len(duong) < 2:
         return None, "chưa đủ 2 nguồn độc lập (mặt / nhãn / giờ)"
+    if set(duong) == {"mat", "gio"} and hop_le[K]["gio"] < 1.5:
+        # Chỉ mặt + giờ: giờ phải sát (<= 30') — backtest moi8: 5 ca sai đều mặt + giờ xa (+0.5)
+        return None, "chỉ mặt + giờ mà giờ không sát"
     for c in duong:  # leave-one-out: bỏ từng nguồn, K vẫn phải hạng 1
         t2 = {k: sum(v for cc, v in x.items() if cc != c) for k, x in hop_le.items()}
         if any(t2[k] >= t2[K] for k in t2 if k != K):
@@ -2748,11 +2777,16 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
             continue
         mat = {u for p in dv for u in _doc_mat(p["khuon_mat"]) if 1 <= len(_doc_mat(p["khuon_mat"])) <= MAT_TOI_DA}
         chu = set().union(*(_td_chu_mat(cum, hoc, u, nhan_mat) for u in mat)) if mat else set()
+        chu_nm = set()
+        for u in mat:  # chủ theo ảnh nhãn của mặt: chỉ khi 1–2 khách (>= 3 khách = mặt nhân viên/bác sĩ, bỏ)
+            ds = {k for k, n in ((nhan_mat or {}).get(u) or {}).items() if n >= 2}
+            if 1 <= len(ds) <= 2:
+                chu_nm |= ds
         nhans = [n for p in dv for n in _td_nhan_that(p)]
         if len({n["ten"] for n in nhans if not n.get("quan_he")}) >= 2 or any(n.get("quan_he") for n in nhans):
             continue  # đơn vị có 2 tên / nhãn người nhà: để người duyệt
         gy = [p["goi_y_hd"] for p in cho if p["goi_y_hd"]]
-        ctx = {"chu_mat": chu, "nhans": nhans, "gio": dt.datetime.fromisoformat(dv[0]["thoi_gian"]),
+        ctx = {"chu_mat": chu, "chu_nhan_mat": chu_nm, "nhans": nhans, "gio": dt.datetime.fromisoformat(dv[0]["thoi_gian"]),
                "co_goc": all(p["ngay_goc"] != 0 for p in dv),
                "goi_y": max(set(gy), key=gy.count) if gy else None}
         diem = {K: _td_diem(dv, K, vs, ctx) for K, vs in theo_k.items()}
@@ -2763,6 +2797,8 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
         ma = [n["ma_dv"] for n in nhans if n["ma_dv"]]
         r = {"hd": ctx["goi_y"] if ctx["goi_y"] in {v["code"] for v in vs} else None, "gio": ctx["gio"], "goc": 1}
         v = _chon_hd_mat(vs, [ngay], r, ma)
+        if not _td_ro_buoi(vs, v, ma, ctx):
+            continue  # khách có >= 2 buổi dịch vụ trong ngày, không phân định được buổi nào -> để người duyệt
         mat1 = [u for p in dv for u in _doc_mat(p["khuon_mat"]) if len(_doc_mat(p["khuon_mat"])) == 1]
         ra.append(([p["id"] for p in cho], v["code"], K, ly, mat1))
     return ra
