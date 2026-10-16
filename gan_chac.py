@@ -36,7 +36,7 @@ def can_gan(conn, tu: str, den: str) -> list[dict]:
         "SELECT p.*, v.ma_kh, v.ten_kh, v.sdt, v.dich_vu FROM photos p"
         " JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
         " WHERE p.bo_qua=0 AND p.nguon='photos' AND p.ngay BETWEEN ? AND ?"
-        " AND (p.xn_hd IS NOT NULL OR p.do_tin='chac')"
+        " AND (p.xn_hd IS NOT NULL OR p.do_tin='chac') AND COALESCE(p.may_loai,'')=''"  # Lượng 17/10: biên lai/màn hình
         " ORDER BY p.ngay, p.thoi_gian", (tu, den)).fetchall()
     ra = []
     for r in rows:
@@ -157,7 +157,7 @@ def main() -> None:
     if a.sua:
         sai = conn.execute(
             "SELECT g.* FROM da_gan_chac g JOIN photos p ON p.id=g.id"
-            " WHERE p.bo_qua=1"
+            " WHERE p.bo_qua=1 OR COALESCE(p.may_loai,'') != ''"  # Lượng 17/10: biên lai / màn hình máy -> gỡ nhãn khách
             " OR (p.xn_hd IS NULL AND (p.do_tin != 'chac' OR p.goi_y_hd IS NOT g.hd))").fetchall()
         print(f"{len(sai)} ảnh đã ghi nhãn nhưng người duyệt đổi khách / loại, hoặc máy ghép lại không còn"
               " 'chắc chắn' khách đó -> gỡ")

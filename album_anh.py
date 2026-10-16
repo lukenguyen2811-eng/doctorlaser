@@ -108,11 +108,14 @@ def ten_khach(ten: str) -> str:
 
 
 def anh_dung(conn) -> list[sqlite3.Row]:
-    """Ảnh được vào album: đã duyệt (xn_hd) hoặc máy ghép chắc chắn; chưa loại; từ app Ảnh."""
+    """Ảnh được vào album: đã duyệt (xn_hd) hoặc máy ghép chắc chắn; chưa loại; từ app Ảnh.
+    Lượng 17/10: biên lai chuyển khoản / màn hình máy (may_loai) không vào album khách / dịch vụ / tháng."""
+    co = "may_loai" in {r[1] for r in conn.execute("PRAGMA table_info(photos)")}
     return conn.execute(
         "SELECT p.id, p.thoi_gian, v.code, v.ngay AS ngay_hd, v.ma_kh, v.ten_kh, v.dich_vu FROM photos p"
         " JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
         " WHERE p.bo_qua=0 AND p.nguon='photos' AND (p.xn_hd IS NOT NULL OR p.do_tin='chac')"
+        + (" AND COALESCE(p.may_loai,'')=''" if co else "") +
         " ORDER BY p.thoi_gian, p.id").fetchall()
 
 

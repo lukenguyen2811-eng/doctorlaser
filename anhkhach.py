@@ -122,7 +122,8 @@ def ket_noi() -> sqlite3.Connection:
         # (gửi qua Zalo/Messenger, chụp màn hình...: ngày trên ảnh có thể là NGÀY NHẬN, trễ 1–2 ngày);
         # NULL = chưa quét lại từ khi có cột -> ghép như cũ.
         conn.execute("ALTER TABLE photos ADD COLUMN ngay_goc INTEGER")
-    for c_ in ("may_hd", "may_ly_do", "may_luc"):  # TỰ DUYỆT (CEO 16/10 lần 7): tách riêng khỏi xn_hd của người
+    for c_ in ("may_hd", "may_ly_do", "may_luc",  # TỰ DUYỆT (CEO 16/10 lần 7): tách riêng khỏi xn_hd của người
+               "may_loai", "may_loai_ly_do"):  # Lượng 17/10: 'bien_lai' / 'man_hinh_may' — không lưu theo khách
         if c_ not in cot:
             conn.execute(f"ALTER TABLE photos ADD COLUMN {c_} TEXT")
     return conn
@@ -1856,12 +1857,62 @@ def _ngay_khong_tin(photos) -> set:
 _LY_DO_PHAN = ("khớp một phần tên", "có đủ tên nhưng khác thứ tự/vị trí")
 
 
+# ---------------- ẢNH KHÔNG LƯU THEO KHÁCH (Lượng chốt 17/10) ----------------
+# Biên lai chuyển khoản và màn hình máy laser (kể cả có nhãn tên khách / thông số điều trị): KHÔNG gắn khách.
+_BL_TIEN = r"\bvnd\b|\d{1,3}(?:[ .,]\d{3})+\s*(?:vnd|d)\b"
+_BL_MA = r"\bma\s*(?:giao\s*dich|gd)\b|\bma\s*dich\b"
+_BL_NH = (r"\b(?:vietcombank|vcb|techcombank|sacombank|vietinbank|bidv|mbbank|msb|ocb|eximbank|lienviet\w*|tpbank|acb|"
+          r"vpbank|agribank|digibank|momo|shb|hdbank|vib|seabank|scb)\b")
+_BIEN_LAI = [_BL_TIEN, _BL_MA, r"\bchuyen\s*(?:khoan|tien)\b", r"\bgiao\s*dich\s*thanh\s*cong\b", r"\bso\s*tien\b",
+             r"\bthu\s*huong\b", r"\bso\s*(?:tk|tai\s*khoan)\b", _BL_NH]
+# Từ THÔNG SỐ máy (không tính tên dịch vụ 'pico', 'fractional', 'lifting', 'toning' — nhãn khách hay ghi các chữ đó)
+_MAY = [r"\benergy\b", r"\bfrequency\b", r"\bhz\b", r"\bmj\b", r"\bready\b", r"\bstandby\b", r"\bpicosecond\b",
+        r"\bpulse\s*count\b|\bpulsecou", r"\bpulse\s*width\b", r"\baiming\s*beam\b", r"\bproposals\b",
+        r"\bsimmer\b", r"\bj\s*/?\s*cm2?\b", r"\b1470\s*nm\b", r"\bq?1064\b", r"\bq?532\b", r"\bpower\s*density\b",
+        r"\bpaused\b", r"\bduration\b", r"\bpower\b"]
+_MAY_KHONG = ("phieu", "cam ket", "toa thuoc", "don thuoc", "ho ten")  # phiếu điều trị của khách (soát BACC2728): giữ
+
+
+KHONG_LUU = "không lưu theo khách"
+
+
+def loai_khong_luu(ocr: str | None) -> tuple[str | None, str]:
+    """('bien_lai' | 'man_hinh_may' | None, lý do). Biên lai: >= 2 dấu hiệu, trong đó có số tiền/VND, mã giao dịch
+    hoặc tên ngân hàng. Màn hình máy: >= 2 từ thông số máy khác nhau, không phải phiếu điều trị.
+    Đo soát ma20 (soat_khong_khach): biên lai 12/12, màn hình máy 24/24, ảnh khách bắt nhầm 0/83."""
+    t = khong_dau(ocr or "").lower()
+    bl = [k for k in _BIEN_LAI if re.search(k, t)]
+    if len(bl) >= 2 and any(re.search(k, t) for k in (_BL_TIEN, _BL_MA, _BL_NH)):
+        return "bien_lai", f"biên lai chuyển khoản ({len(bl)} dấu hiệu)"
+    may = [k for k in _MAY if re.search(k, t)]
+    if len(may) >= 2 and not any(k in t for k in _MAY_KHONG):
+        return "man_hinh_may", f"màn hình máy ({len(may)} từ thông số)"
+    return None, ""
+
+
 def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> None:
     """cum: bảng cụm mặt -> khách (cum_khach), cmd_ghep tính 1 lần cho cả lượt; None -> tự tính."""
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     photos = conn.execute(
         "SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)
     ).fetchall()
+    if not photos:
+        return
+    # Lượng 17/10: biên lai / màn hình máy không lưu theo khách -> ra khỏi mọi luật (bộ, đợt, nhãn, mặt, tự duyệt).
+    khong_luu = {p["id"]: loai_khong_luu(p["ocr"]) for p in photos}
+    khong_luu = {k: v for k, v in khong_luu.items() if v[0]}
+    anh_may = [p for p in photos if khong_luu.get(p["id"], ("",))[0] == "man_hinh_may"]
+    co_cot = "may_loai" in photos[0].keys()
+    for pid, (loai, ly) in khong_luu.items():
+        conn.execute("UPDATE photos SET goi_y_hd=NULL, do_tin='chua_ro', ly_do=? WHERE id=?",
+                     (f"{KHONG_LUU} — {ly}", pid))
+        if co_cot:
+            conn.execute("UPDATE photos SET may_loai=?, may_loai_ly_do=? WHERE id=?", (loai, ly, pid))
+    if co_cot:  # ảnh hết là biên lai / màn hình (OCR đổi) -> gỡ dấu
+        for p in photos:
+            if p["id"] not in khong_luu and p["may_loai"]:
+                conn.execute("UPDATE photos SET may_loai=NULL, may_loai_ly_do=NULL WHERE id=?", (p["id"],))
+    photos = [p for p in photos if p["id"] not in khong_luu]
     if not photos:
         return
     if cum is None:
@@ -2066,6 +2117,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         may = p["may_hd"] if "may_hd" in p.keys() else None
         if may and not p["xn_hd"] and not p["bo_qua"] and r["do_tin"] != "chac":
             r.update(hd=may, do_tin="chac", diem=80, ly_do="tự duyệt: " + (p["may_ly_do"] or ""))
+    if anh_may and "NHAN_MAY" in _BAT:
+        _neo_yeu_man_hinh(conn, ngay, anh_may, photos, ket_qua)
     for pid, r in ket_qua.items():
         conn.execute(
             "UPDATE photos SET dot=?, goi_y_hd=?, do_tin=?, ly_do=? WHERE id=?",
@@ -2077,6 +2130,24 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         if loai:
             conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
+
+
+def _neo_yeu_man_hinh(conn, ngay: str, anh_may, photos, ket_qua) -> None:
+    """BAT_LUAT=NHAN_MAY (tắt mặc định — đo cả 2 cách): nhãn tên khách trên MÀN HÌNH MÁY khớp 1 HĐ -> ảnh CHƯA có HĐ
+    chụp cách <= CHUOI_GIAY chỉ được GỢI Ý HĐ đó (neo yếu, không bao giờ chắc)."""
+    for q in anh_may:
+        gq = dt.datetime.fromisoformat(q["thoi_gian"])
+        for n in doc_nhan(f"{q['chu_thich']} {q['ocr']}", int(ngay[:4])):
+            hd, d, _ = _khop_nhan(conn, n, ngay, {}, 1, 1)
+            if not hd or d < 50:
+                continue
+            for p in photos:
+                r = ket_qua[p["id"]]
+                if not r["hd"] and not r["xn"] and r["do_tin"] == "chua_ro" \
+                        and abs((r["gio"] - gq).total_seconds()) <= CHUOI_GIAY:
+                    r.update(hd=hd, do_tin="goi_y", diem=40,
+                             ly_do=f"nhãn tên trên màn hình máy (ảnh {q['id'][:8]}) — neo yếu, người chọn")
+            break
 
 
 def _nhan_khop_dv(conn, nhan: dict, hd: str) -> bool:
@@ -3295,7 +3366,8 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     if not visits:
         return []
-    photos = conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)).fetchall()
+    photos = [p for p in conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,))
+              if not loai_khong_luu(p["ocr"])[0]]  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
     nho: dict = {}
     theo_k: dict[str, list] = {}
     for v in visits:
@@ -3834,7 +3906,8 @@ def _trang(title: str, body: str) -> bytes:
             f"<div id=zoom onclick=\"this.style.display='none'\"><img></div></body></html>").encode()
 
 
-CAN_DUYET = "xn_hd IS NULL AND bo_qua=0 AND COALESCE(do_tin,'')!='chac'"  # Lượng 16/10: chỉ duyệt ảnh chưa chắc/nghi
+CAN_DUYET = ("xn_hd IS NULL AND bo_qua=0 AND COALESCE(do_tin,'')!='chac'"  # Lượng 16/10: chỉ duyệt ảnh chưa chắc/nghi
+             f" AND COALESCE(ly_do,'') NOT LIKE '{KHONG_LUU}%'")  # Lượng 17/10: biên lai / màn hình máy ẩn
 
 
 def _trang_chu(conn, tat_ca: bool = False) -> bytes:
@@ -4014,11 +4087,12 @@ def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
                       "d": _dv_ngan(v["dich_vu"]), "g": (v["gio"] or "")[:5], "n": ngay_cua(v)})
     idx_lui = {i for i, v in enumerate(tat_hd) if v["code"] in lui_ma}
 
-    def an(p):  # Lượng 16/10: ảnh chắc chắn chưa duyệt ẩn
-        return not tat_ca and p["do_tin"] == "chac" and not p["xn_hd"] and not p["bo_qua"]
+    def an(p):  # Lượng 16/10: ảnh chắc chắn chưa duyệt ẩn; 17/10: biên lai / màn hình máy ẩn (nút 'xem cả' hiện lại)
+        return not tat_ca and not p["xn_hd"] and not p["bo_qua"] and (
+            p["do_tin"] == "chac" or (p["ly_do"] or "").startswith(KHONG_LUU))
 
     def can(p):  # = CAN_DUYET
-        return not p["xn_hd"] and not p["bo_qua"] and p["do_tin"] != "chac"
+        return not p["xn_hd"] and not p["bo_qua"] and p["do_tin"] != "chac" and not (p["ly_do"] or "").startswith(KHONG_LUU)
 
     def ma_khach(hd):
         v = theo_ma.get(hd)
