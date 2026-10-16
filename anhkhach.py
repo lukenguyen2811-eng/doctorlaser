@@ -1690,7 +1690,7 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None, cum: dict | None 
         k = khoa_hd.get(hd)
         if r.get("mat_k") and k is not None and r["mat_k"] != k:
             continue
-        if conn is not None and _nhan_ten_khac_bo(conn, r["gio"].date().isoformat(), r, ds, t):
+        if conn is not None and _nhan_ten_khac_bo(conn, r["gio"].date().isoformat(), r, ds, t, cum, k):
             continue  # CEO 17/10 lần 13: bộ có nhãn ghi tên khách khác -> nhường
         x = min(gan, key=lambda x: abs((x["gio"] - r["gio"]).total_seconds()))
         r.update(hd=hd, do_tin="chac", diem=80,
@@ -2789,19 +2789,31 @@ _MOC_GOI = "HĐ gói duy nhất trong 180 ngày"
 _MOC_SAU = "HĐ của chính khách 1–2 ngày sau"
 
 
-def _nhan_ten_khac_bo(conn, ngay: str, r: dict, ds: list[dict], ten_k: str | None) -> bool:
-    """CEO 17/10 lần 13 (ca A37410F4): trong bộ (cùng bộ hoặc cách <= CHUOI_GIAY) có nhãn THẬT ghi tên KHÁC khách được
-    gắn/gợi ý: nhãn có mã dịch vụ nhận ra được, hoặc tên khớp HĐ của khách khác cùng ngày -> True (luật nhường)."""
+def _nhan_ten_khac_bo(conn, ngay: str, r: dict, ds: list[dict], ten_k: str | None, cum: dict | None = None,
+                      k: str | None = None) -> bool:
+    """CEO 17/10 lần 13 (ca A37410F4): ảnh nhãn CÙNG NGƯỜI với ảnh r (chính r, hoặc cùng mã mặt chụp liền: cùng bộ hoặc
+    cách <= CHUOI_GIAY) ghi tên KHÁC khách được gắn/gợi ý -> True (luật nhường). Nhãn tính khi là nhãn thật có mã dịch
+    vụ nhận ra được, hoặc tên khớp HĐ của khách khác cùng ngày.
+    Không tính (đo ma21, giữ ca soát đúng): nhãn trên ảnh mặt KHÁC / không mặt (người khác chụp liền — C5C25E52,
+    82DF9E30); 2 ảnh cùng lô giờ trùng từng giây (giờ nhập, không phải chụp liền — 36A68F8E)."""
     if not ten_k:
         return False
     khac = [v["ten_kh"] for v in conn.execute("SELECT ten_kh FROM visits WHERE ngay=?", (ngay,))
             if v["ten_kh"] and v["ten_kh"] != ten_k]
+    mr = r.get("mat_ds") or set()
     for x in ds:
-        if not ((r["bo"] is not None and x["bo"] == r["bo"]) or abs((x["gio"] - r["gio"]).total_seconds()) <= CHUOI_GIAY):
-            continue
+        if x is not r:
+            if not (mr & (x.get("mat_ds") or set())) or (r.get("trung_giay") and x.get("trung_giay")):
+                continue
+            if not ((r["bo"] is not None and x["bo"] == r["bo"]) or abs((x["gio"] - r["gio"]).total_seconds()) <= CHUOI_GIAY):
+                continue
+        manh = cum is not None and k is not None and any(
+            cum["cum"].get(u, {}).get("khach") == k and cum["cum"][u]["neo"] >= CUM_MANH for u in (x.get("mat_ds") or ()))
         for n in x.get("nhan_ds") or ():
-            if _ten_that_nhan(n) and not _ten_hop_mo(n, ten_k) and (
-                    _ma_ro(n["ma_dv"]) or any(_ten_hop_mo(n, t) for t in khac)):
+            # mặt thuộc cụm mạnh của K: so tên theo luật mặt nới (_ten_hop_mat — tên cuối / chữ đệm), như luật mặt
+            if not _ten_that_nhan(n) or _ten_hop_mo(n, ten_k) or (manh and _ten_hop_mat(n, ten_k)):
+                continue
+            if _ma_ro(n["ma_dv"]) or any(_ten_hop_mo(n, t) for t in khac):
                 return True
     return False
 
@@ -2820,7 +2832,7 @@ def _buoi_goi(conn, p, photos, ket_qua, cum, k, c, mas, ngay, cu_all, ma_dvs, mo
     r0 = ket_qua[p["id"]]
     ten_k = next((v["ten_kh"] for v in cu_all), None) or (conn.execute(
         f"SELECT ten_kh FROM visits WHERE ma_kh IN ({','.join('?' * len(mas))}) LIMIT 1", mas).fetchone() or [None])[0]
-    if _nhan_ten_khac_bo(conn, ngay, r0, list(ket_qua.values()), ten_k):
+    if _nhan_ten_khac_bo(conn, ngay, r0, list(ket_qua.values()), ten_k, cum, k):
         return None
     d0 = dt.date.fromisoformat(ngay)
     dau = ",".join("?" * len(mas))
@@ -3196,8 +3208,9 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
                 v_xa = conn.execute("SELECT * FROM visits WHERE code=?", (next(iter(hds_xa)),)).fetchone()
                 if v_xa and v_xa["ngay"] != ngay:
                     k_xa = _khoa_hd(conn, cum, v_xa["code"], nho)
-                    if k_xa and k_xa not in ung and not any(
-                            _ten_that_nhan(n) and not _ten_hop_mo(n, v_xa["ten_kh"]) for n in nhans):
+                    if k_xa and k_xa not in ung and not any(  # nhường: đơn vị có nhãn tên khách khác có HĐ hôm nay
+                            _ten_that_nhan(n) and not _ten_hop_mo(n, v_xa["ten_kh"])
+                            and any(_ten_hop_mo(n, v["ten_kh"]) for v in visits) for n in nhans):
                         ung[k_xa] = [v_xa]
                         xa = (k_xa, v_xa)
         ctx = {"chu_mat": chu, "chu_nhan_mat": chu_nm, "nhans": nhans, "gio": dt.datetime.fromisoformat(dv[0]["thoi_gian"]),

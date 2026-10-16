@@ -359,6 +359,16 @@ class Vong13(Vong12):  # CEO 17/10 lần 13: chỉ siết
         self.assertFalse(any(A._MOC_GOI in (kq[i][2] or "") for i in ids))  # luật gói nhường (gợi ý cũ 'HĐ gần nhất' giữ như base)
         self.assertFalse(any(td.get(i, ("",))[0] == "G1" for i in ids))
 
+    def test_lg_nhan_ten_khac_mat_khac_van_ap(self):  # âm: nhãn tên khác trên ảnh mặt KHÁC (người khác chụp liền)
+        self.nen()
+        ids, kq, _ = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"), ("14:00:20", "Hoa - pico 10/10/26", "P-H"))
+        self.assertIn(A._MOC_GOI, kq[ids[0]][2] or "")
+
+    def test_lg_nhan_ten_goi_cum_manh_van_ap(self):  # âm, ma21 DAD02C68: nhãn tên gọi khác ('Cẩm Lan') cùng mặt cụm mạnh K
+        self.nen()
+        ids, kq, _ = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "Cẩm Lan - pico 10/10/26", "P-K"))
+        self.assertIn(A._MOC_GOI, kq[ids[0]][2] or "")
+
     def test_lg_nhan_cung_ten_van_ap(self):  # âm: nhãn trong bộ là tên chính khách -> vẫn áp
         self.nen()
         ids, kq, _ = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "Lan - csd 10/10/26", "P-K"))
