@@ -492,6 +492,27 @@ def _tu_ten_kh(ten: str) -> list[tuple[str, str]]:
     return tu or _tu_goc(ten)
 
 
+# Họ phổ biến (CEO 16/10): tên ĐÚNG 2 chữ mà chữ cuối là họ ('Vy Nguyễn' = ghi kiểu Tên Họ) -> chữ đầu là tên gọi.
+# Không gồm chữ vừa là họ vừa là tên (mai, hà, lý, thái, tăng...).
+HO_PHO_BIEN = {"nguyen", "tran", "le", "pham", "huynh", "hoang", "phan", "vo", "vu", "dang", "bui", "do", "ngo",
+               "duong", "dinh", "truong", "doan", "lam", "luong", "trinh", "cao", "ta"}
+
+
+def _thu_tu_goi(tu: list) -> list:
+    """Đưa tên về thứ tự 'họ ... tên gọi' (tên gọi = chữ cuối): đúng 2 chữ, chữ cuối là họ phổ biến -> đảo
+    ('vy nguyen' -> 'nguyen vy'). Nhận list chữ (str) hoặc (chữ dấu, chữ không dấu). Dùng chung cho tên khách lẫn nhãn."""
+    if len(tu) == 2:
+        k = [x[1] if isinstance(x, tuple) else khong_dau(x) for x in tu]
+        if k[1] in HO_PHO_BIEN:
+            return [tu[1], tu[0]]
+    return list(tu)
+
+
+def _tu_ten_goi(ten: str) -> list[tuple[str, str]]:
+    """_tu_ten_kh theo thứ tự tên gọi (_thu_tu_goi): chữ cuối luôn là tên gọi."""
+    return _thu_tu_goi(_tu_ten_kh(ten))
+
+
 def _bi_danh(ten: str) -> list[list[str]]:
     """Tên gọi trong ngoặc ('X (LISA)') = ngoặc không có chữ ghi chú/số -> [['lisa']]."""
     ra = []
@@ -707,7 +728,7 @@ def _hd_truoc(conn, ngay_anh: str, bo_nho: dict | None) -> list[dict]:
     if bo_nho is not None and ngay_anh in bo_nho:
         return bo_nho[ngay_anh]
     d = dt.date.fromisoformat(ngay_anh)
-    ds = [dict(v, tg=_tu_ten_kh(v["ten_kh"])) for v in conn.execute(
+    ds = [dict(v, tg=_tu_ten_goi(v["ten_kh"])) for v in conn.execute(
         "SELECT * FROM visits WHERE ngay BETWEEN ? AND ?",
         ((d - dt.timedelta(days=GOI_NGAY)).isoformat(), (d - dt.timedelta(days=1)).isoformat()))]
     if bo_nho is not None:
@@ -853,7 +874,7 @@ def _hd_ngay_truoc(conn, nhan: dict, w: list[str], wg: list[str], ngay_anh: str,
         if n == da_thu:
             continue
         vs = conn.execute("SELECT * FROM visits WHERE ngay=?", (n,)).fetchall()
-        T2 = {x["code"]: _tu_ten_kh(x["ten_kh"]) for x in vs}
+        T2 = {x["code"]: _tu_ten_goi(x["ten_kh"]) for x in vs}
         v2, d2, _ = _khop_ten(vs, lambda x: [k for _, k in T2[x["code"]]], T2, nhan, w, wg)
         if v2 is None:
             trung += d2  # d2 = số khách trùng tên trong ngày đó (0 = không thấy)
@@ -929,7 +950,7 @@ def _khop_nhan_ngay(conn, nhan: dict, ngay: str, ngay_anh: str, bo_nho: dict | N
     """_khop_nhan cho 1 ngày HĐ đã chọn (ngày nhãn hoặc ngày chụp)."""
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     lech_ngay = (f" (nhãn ghi ngày {ngay})" if ngay != ngay_anh else "") + sai
-    T = {v["code"]: _tu_ten_kh(v["ten_kh"]) for v in visits}
+    T = {v["code"]: _tu_ten_goi(v["ten_kh"]) for v in visits}
 
     def t(v):
         return [k for _, k in T[v["code"]]]
@@ -941,6 +962,7 @@ def _khop_nhan_ngay(conn, nhan: dict, ngay: str, ngay_anh: str, bo_nho: dict | N
     # Xưng hô đầu nhãn ('A Vương', 'C Dung', 'Chị Lan') -> bỏ, trừ khi có khách mang đủ các chữ đó.
     if len(w) > 1 and w[0] in XUNG_HO and not any(set(w) <= set(t(v)) for v in visits):
         w, wg = w[1:], wg[1:]
+    w, wg = _thu_tu_goi(w), _thu_tu_goi(wg)  # nhãn 'Vy Nguyễn' -> 'nguyen vy' như tên khách
     v, d, ly_do = _khop_ten(visits, t, T, nhan, w, wg)
     if v is not None and d < 50 and nhan["ma_dv"]:
         # Lệch dịch vụ: HĐ có thể nhập hôm trước/hôm sau -> khách cùng tên, dịch vụ khớp ở ngày ±1
@@ -949,7 +971,7 @@ def _khop_nhan_ngay(conn, nhan: dict, ngay: str, ngay_anh: str, bo_nho: dict | N
         for lech in (-1, 1):
             n = (dt.date.fromisoformat(ngay) + dt.timedelta(days=lech)).isoformat()
             vs = conn.execute("SELECT * FROM visits WHERE ngay=?", (n,)).fetchall()
-            T2 = {x["code"]: _tu_ten_kh(x["ten_kh"]) for x in vs}
+            T2 = {x["code"]: _tu_ten_goi(x["ten_kh"]) for x in vs}
             v2, d2, _ = _khop_ten(vs, lambda x: [k for _, k in T2[x["code"]]], T2, nhan, w, wg)
             if v2 is not None and d2 >= 50 and _dv_khop(nhan["ma_dv"], v2["dich_vu"]):
                 ke.append((n, v2))
@@ -1456,7 +1478,7 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
     """Tên trên nhãn có thể là khách này: chữ nhãn (bớt chữ chung thừa bên trái, như _khop_ten) nằm trong họ tên
     đã làm sạch hoặc tên gọi trong ngoặc, hoặc chữ cuối lệch 1 chữ (OCR). Nhãn và tên khách đều còn dấu thì
     phải cùng dấu ('Quyền' != 'Quyên'). Dùng để biết nhãn ghi tên KHÁC hẳn."""
-    tg = _tu_ten_kh(ten_kh)
+    tg = _tu_ten_goi(ten_kh)
     t = [k for _, k in tg]
     w = nhan["ten"].split()
     wg = (nhan.get("ten_goc") or nhan["ten"]).split()
@@ -1464,6 +1486,7 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
         wg = w
     if len(w) > 1 and w[0] in XUNG_HO and not set(w) <= set(t):
         w, wg = w[1:], wg[1:]
+    w, wg = _thu_tu_goi(w), _thu_tu_goi(wg)
     if not w:
         return True
     dau_kh = _co_dau([g for g, _ in tg])
@@ -1490,7 +1513,7 @@ def _ten_nhan_gon(nhan: dict, t: list[str]) -> list[str]:
         w = w[1:]
     while len(w) > 1 and w[0] in _CHU_THUA_TEN:
         w = w[1:]
-    return w
+    return _thu_tu_goi(w)
 
 
 def _gan_chu(x: str, y: str) -> bool:
@@ -1503,7 +1526,7 @@ def _ten_hop_mat(nhan: dict, ten_kh: str) -> bool:
     nhãn 1 chữ = TÊN CUỐI của K (lệch 1 ký tự OCR được; chữ đệm thì KHÔNG); nhãn >= 2 chữ: (a) mọi chữ có trong
     họ tên K (bất kỳ thứ tự), (b) mỗi chữ khớp 1 chữ của K cho lệch 1 ký tự, (c) >= 2 chữ khớp chữ của K (chữ đệm +
     tên thiếu chữ cuối), hoặc (d) chữ cuối nhãn = tên cuối K (chữ đệm ghi sai: 'Ngọc Mai' ~ 'Trịnh Xuân Mai')."""
-    t = [k for _, k in _tu_ten_kh(ten_kh)]
+    t = [k for _, k in _tu_ten_goi(ten_kh)]
     w = _ten_nhan_gon(nhan, t)
     if not w:
         return True
@@ -1519,7 +1542,7 @@ def _ten_hop_mat(nhan: dict, ten_kh: str) -> bool:
 
 def _ten_dung_duoi(nhan: dict, ten_kh: str, ocr: bool = True) -> bool:
     """Nhãn khớp ĐÚNG đuôi họ tên (đủ số chữ, không dấu); ocr=True: chữ cuối được lệch 1 ký tự; hoặc tên trong ngoặc."""
-    t = [k for _, k in _tu_ten_kh(ten_kh)]
+    t = [k for _, k in _tu_ten_goi(ten_kh)]
     w = _ten_nhan_gon(nhan, t)
     if not w or len(t) < len(w):
         return False
@@ -2320,7 +2343,7 @@ def _trang_chu(conn, tat_ca: bool = False) -> bytes:
 def ten_goi(ten: str, so_chu: int = 1) -> str:
     """Tên gọi kiểu Việt = chữ cuối của họ tên đã bỏ ghi chú: 'NGUYỄN KINH LƯƠNG (KH TỰ ĐẾN)' -> 'Lương'
     (so_chu=2 -> 'Kinh Lương', dùng khi 2 khách trùng tên gọi)."""
-    tu = [g for g, _ in _tu_ten_kh(ten)]
+    tu = [g for g, _ in _tu_ten_goi(ten)]
     if not tu:
         return (ten or "").strip()
     return " ".join(w.capitalize() for w in tu[-so_chu:])
@@ -2461,7 +2484,7 @@ def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
         tg = ten_goi(v["ten_kh"])
         if len(goi1.get(khong_dau(tg), ())) > 1:  # 2 khách cùng tên gọi -> 2 chữ cuối
             tg = ten_goi(v["ten_kh"], 2)
-        hds.append({"c": v["code"], "w": ten_sach(v["ten_kh"]).split(), "bd": _bi_danh(v["ten_kh"]),
+        hds.append({"c": v["code"], "w": [k for _, k in _tu_ten_goi(v["ten_kh"])], "bd": _bi_danh(v["ten_kh"]),
                     "luc": _luc_hd(v)})
         js_hd.append({"c": v["code"], "t": tg, "f": v["ten_kh"] or "", "m": v["ma_kh"] or "",
                       "d": _dv_ngan(v["dich_vu"]), "g": (v["gio"] or "")[:5], "n": ngay_cua(v)})
@@ -2520,7 +2543,7 @@ def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
             muc = ("Chắc chắn", "chac")
         kt = [p for p in bo if p["id"] in khong_tin]
         luc = dt.datetime.fromisoformat(hien[0]["thoi_gian"])
-        thu_tu = _thu_tu_ung_vien(hds, goi_y, [n["ten"].split() for n in nhan_ds if n.get("ten")], luc)
+        thu_tu = _thu_tu_ung_vien(hds, goi_y, [_thu_tu_goi(n["ten"].split()) for n in nhan_ds if n.get("ten")], luc)
         if not kt:
             thu_tu = [x for x in thu_tu if x not in idx_lui]
         # Ô trước/sau, vùng, ghi chú: giá trị chung của các ảnh; trước/sau lấy từ nhãn nếu ảnh chưa có.

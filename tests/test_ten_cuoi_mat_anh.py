@@ -104,6 +104,56 @@ class TenCuoi(Nen):
                           and "khớp tên + dịch vụ" in k[i][2]])
 
 
+# ---------------- 1b. TÊN 'Tên Họ' 2 chữ (họ phổ biến cuối) ----------------
+class TenHoCuoi(Nen):
+    def test_thu_tu_goi(self):
+        f = A._thu_tu_goi
+        self.assertEqual(f(["vy", "nguyen"]), ["nguyen", "vy"])
+        self.assertEqual(f(["mai", "nguyen"]), ["nguyen", "mai"])
+        self.assertEqual(f(["nguyen", "mai"]), ["nguyen", "mai"])  # âm: 'mai' không trong danh sách họ
+        self.assertEqual(f(["lan", "ha"]), ["lan", "ha"])  # âm: 'hà' vừa là tên
+        self.assertEqual(f(["thi", "vy", "nguyen"]), ["thi", "vy", "nguyen"])  # âm: 3 chữ không áp
+        self.assertEqual(A.ten_goi("VY NGUYỄN (KH TỰ ĐẾN)"), "Vy")
+        self.assertEqual(A.ten_goi("Nguyễn Mai"), "Mai")
+
+    def test_nhan_mot_chu_bang_chu_dau(self):
+        self.hd("H1", D, "K1", "Vy Nguyễn", "CSD")
+        self.assertEqual(self.khop("Vy-csd 10/10/26")[:2], ("H1", 85))
+
+    def test_nhan_hai_chu_ten_ho(self):
+        self.hd("H1", D, "K1", "Vy Nguyễn", "CSD")
+        self.assertEqual(self.khop("Vy Nguyễn-csd 10/10/26")[:2], ("H1", 85))
+        self.assertEqual(self.khop("Nguyễn Vy-csd 10/10/26")[:2], ("H1", 85))
+
+    def test_mai_nguyen_ten_goi_mai(self):
+        self.hd("H1", D, "K1", "Mai Nguyễn", "CSD")
+        self.assertEqual(self.khop("Mai-csd 10/10/26")[:2], ("H1", 85))
+
+    def test_nguyen_mai_giu_ten_cuoi(self):  # âm: 'Nguyễn Mai' -> tên gọi Mai, nhãn 'Nguyễn' không khớp tên cuối
+        self.hd("H1", D, "K1", "Nguyễn Mai", "CSD")
+        self.assertEqual(self.khop("Mai-csd 10/10/26")[:2], ("H1", 85))
+        self.assertLessEqual(self.khop("Nguyễn-csd 10/10/26")[1], 50)
+
+    def test_ba_chu_khong_ap(self):  # âm: 'Vy Thị Nguyễn' 3 chữ -> tên cuối vẫn 'Nguyễn', 'Vy' không chắc
+        self.hd("H1", D, "K1", "Vy Thị Nguyễn", "CSD")
+        self.assertLessEqual(self.khop("Vy-csd 10/10/26")[1], 50)
+
+    def test_ho_cuoi_mot_chu_ho_khong_chac(self):  # âm: 'Vy Nguyễn' -> nhãn 'Nguyễn' là họ, không chắc
+        self.hd("H1", D, "K1", "Vy Nguyễn", "CSD")
+        self.assertLessEqual(self.khop("Nguyễn-csd 10/10/26")[1], 50)
+
+    def test_ten_nhan_hop_va_mat(self):
+        n = {"ten": "vy", "ten_goc": "vy"}
+        self.assertTrue(A._ten_nhan_hop(n, "Vy Nguyễn"))
+        self.assertTrue(A._ten_hop_mat(n, "Vy Nguyễn"))
+        self.assertFalse(A._ten_nhan_hop(n, "Vy Thị Nguyễn"))
+        self.assertTrue(A._ten_dung_duoi({"ten": "vy nguyen", "ten_goc": "vy nguyễn"}, "Vy Nguyễn"))
+
+    def test_trang_duyet_ten_goi_khop(self):
+        self.assertTrue(A._khop_ten_goi([k for _, k in A._tu_ten_goi("Vy Nguyễn")], [], [["vy"]]))
+        self.assertFalse(A._khop_ten_goi([k for _, k in A._tu_ten_goi("Vy Thị Nguyễn")], [], [["vy"]]))
+
+
 # ---------------- 2. LUẬT MẶT NỚI (cụm mạnh) ----------------
 class MatNoi(Nen):
     def cum(self, ma, ten, n=6, km="P-K"):  # cụm mạnh: n ảnh neo nhãn ở 2 ngày của khách ma

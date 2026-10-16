@@ -77,7 +77,8 @@ class LuatTen(Nen):
                                           ("Ngọc Huyền", "Nguyễn Ngọc Huyền Trân"), ("Trần Hà", "Hà Trần")]):
             self.c.execute("DELETE FROM visits")
             self.hd(f"H{i}", D, f"K{i}", ten, "CSD")
-            self.assertEqual(self.khop(f"{nhan}-csd")[:2], (f"H{i}", 50), nhan)
+            # CEO 16/10: 'Hà Trần' (2 chữ, cuối là họ phổ biến) = tên gọi Hà -> 'Trần Hà' khớp đúng như đuôi.
+            self.assertEqual(self.khop(f"{nhan}-csd")[:2], (f"H{i}", 85 if ten == "Hà Trần" else 50), nhan)
 
     def test_du_chu_hai_khach_nguoi_chon(self):  # âm (2): 2 khách đủ chữ -> không đoán
         self.hd("H1", D, "K1", "Trần Thị Mỹ Kim", "CSD")
