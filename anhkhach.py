@@ -1594,8 +1594,11 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None) -> None:
         t = ten_kh(hd)
         if not t:
             return False
-        return any(any(_ten_that_nhan(n) and not _ten_hop_mo(n, t) for n in x.get("nhan_ds") or ())
-                   for x in nhan_khac if m & x["mat_ds"] and (x is r or gan_nhau(x, r)))
+        # chỉ nhãn thật 'Tên - dịch vụ' (mã dịch vụ nhận ra được): chữ OCR lạ ('… - c', '… - limeor') không tính
+        # (đo ma19: 8C0380C7, 76012C7D bị chặn oan)
+        return any(any(_ten_that_nhan(n) and _ma_ro(n["ma_dv"]) and not _ten_hop_mo(n, t) for n in x.get("nhan_ds") or ())
+                   for x in nhan_khac if m & x["mat_ds"] and (x is r or gan_nhau(x, r))
+                   and not (truoc[id(x)] == hd and any(x is y for y in neo)))  # ảnh neo của chính hd: nhãn đã khớp
 
     for r in ds:
         m = r.get("mat_ds") or set()

@@ -754,6 +754,23 @@ class Vong10(Nen):  # CEO 17/10 lần 10: tách theo người
         self.assertNotIn(("H1", "chac"), {kq[i][:2] for i in ids[1:]})
         self.assertEqual(kq[ids[0]][:2], ("H1", "chac"))  # ảnh neo giữ
 
+    def test_nhan_tren_anh_neo_khong_chan(self):  # âm (1), ma19 2022-09-24: chính ảnh neo có thêm 1 nhãn tên lệch -> vẫn nâng
+        self.nen()
+        ids = [self.anh(D, "14:37:11", "Cao Ngọc Mai Hương\nMai Lệ Tâm- mụn 10/10/26", km="P-M"),
+               self.anh(D, "14:37:16", km="P-M"), self.anh(D, "14:37:23", km="P-M"),
+               self.anh(D, "14:37:51", km="P-X"), self.anh(D, "14:38:01", "Nguyễn Đình Huy - csd 10/10/26", km="P-X")]
+        kq = self.ghep()  # đợt 2 khách -> luật bộ không lan; tách theo người phải nâng ảnh 2, 3
+        self.assertEqual(kq[ids[0]][:2], ("H1", "chac"))
+        self.assertEqual(kq[ids[2]][:2], ("H1", "chac"))
+
+    def test_nhan_ocr_la_khong_chan(self):  # âm (1), ma19 8C0380C7: nhãn tên khác nhưng 'dịch vụ' là chữ OCR lạ -> vẫn nâng
+        self.nen()
+        ids = [self.anh(D, "14:37:11", "Ngọc Mai Hương- pico 10/10/26", km="P-M"),
+               self.anh(D, "14:37:14", "Fraxional Inkjecs ny- c 10/10/26", km="P-M"),
+               self.anh(D, "14:37:16", km="P-M"), self.anh(D, "14:37:23", km="P-M")]
+        kq = self.ghep()
+        self.assertEqual(kq[ids[3]][:2], ("H1", "chac"))
+
     def test_mat_nhan_cung_ten_van_nang(self):  # âm (1): nhãn thứ 2 cùng tên (bỏ dấu) với neo -> vẫn tách theo người
         self.hd("H2", D, "K2", "Nguyễn Đình Huy", "CSD MỤN", "14:31")
         self.hd("H1", D, "K1", "Cao Ngọc Mai Hương", "Trẻ hoá da picolight", "14:30")
