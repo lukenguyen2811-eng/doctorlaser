@@ -147,9 +147,34 @@ class TuDuyet(Nen):
         self.assertEqual((r[0], r[1], r[3]), ("K1-D", "chac", None))
         self.assertTrue(r[2].startswith("tự duyệt: "))
         with unittest.mock.patch.object(A, "ket_noi", lambda: self.c):
-            A.cmd_tu_duyet(SimpleNamespace(thang=["2026-10"], go=True, ghi=False))
+            A.cmd_tu_duyet(SimpleNamespace(thang=["2026-10"], go=True, ghi=False, lap=0))
         r = self.c.execute("SELECT may_hd, ly_do, do_tin FROM photos WHERE id=?", (ids[1],)).fetchone()
         self.assertIsNone(r[0])
+        self.assertNotEqual(r[2], "chac")
+
+    def test_lap_on_dinh(self):  # lặp: lượt 1 nhận, lượt 2 không thêm không bỏ -> dừng; ảnh đã nhận vẫn giữ HĐ
+        self.hd("K1-D", D, "K1", "Phan Thị Lan", "CSD", "10:05")
+        self.hd("L1-D", D, "L1", "Trần Văn Nam", "CSD", "10:20")
+        ids = self.don_vi("10:08", ocr0="Lan- pico 10/10/26")
+        A.ghep_ngay(self.c, D)
+        ra = A.tu_duyet_lap(self.c, [D], 5, in_ra=lambda *x: None)
+        self.assertEqual(ra[0]["nhan_moi"], 3)
+        self.assertEqual((ra[-1]["nhan_moi"], ra[-1]["bo"], len(ra)), (0, 0, 2))
+        self.assertEqual({r[0] for r in self.c.execute("SELECT may_hd FROM photos WHERE id IN (?,?,?)", ids)}, {"K1-D"})
+
+    def test_lap_doi_hd_thi_bo(self):  # âm: ảnh đã tự duyệt mà lượt sau ra HĐ khác -> bỏ, không xét lại
+        self.hd("K1-D", D, "K1", "Phan Thị Lan", "CSD", "10:05")
+        self.hd("L1-D", D, "L1", "Trần Văn Nam", "CSD", "10:20")
+        ids = self.don_vi("10:08", ocr0="Lan- pico 10/10/26")
+        A.ghep_ngay(self.c, D)
+        for i in ids:  # giả lập lượt trước đã nhận HĐ khác
+            self.c.execute("UPDATE photos SET may_hd='L1-D', may_ly_do='x', may_luc='t' WHERE id=?", (i,))
+        A.ghep_ngay(self.c, D)
+        ra = A.tu_duyet_lap(self.c, [D], 3, in_ra=lambda *x: None)
+        self.assertEqual(ra[0]["doi_hd"], 3)
+        r = self.c.execute("SELECT may_hd, may_ly_do, do_tin FROM photos WHERE id=?", (ids[1],)).fetchone()
+        self.assertIsNone(r[0])
+        self.assertTrue(r[1].startswith("BỎ"))
         self.assertNotEqual(r[2], "chac")
 
     def test_xn_khong_bi_de(self):  # âm: ảnh đã duyệt có may_hd (dữ liệu cũ) -> ghép không áp tự duyệt
