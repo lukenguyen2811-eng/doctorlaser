@@ -813,6 +813,8 @@ def _danh_dau_quan_he(chu: str, ds: list[dict]) -> list[dict]:
             truoc = re.findall(r"[^\W\d_]+", goc[:i]) if i > 0 else []
             if truoc and w and _la_quan_he(truoc[-1], w[0]):
                 rel = khong_dau(truoc[-1])
+            elif len(truoc) >= 2 and khong_dau(truoc[-1]) in XUNG_HO and _la_quan_he(truoc[-2], khong_dau(truoc[-1])):
+                rel = khong_dau(truoc[-2])  # 'Mẹ C.Trang - CSD': chữ 'C' dính tên (ca 072A55F3)
         if rel:
             n.update(quan_he=rel, ten=" ".join(w), ten_goc=" ".join(wg))
     return ds
@@ -1554,6 +1556,36 @@ def _qua_nghi_khac(b: list[dict], i: int, neo: list[int], tt: list[int]) -> bool
     return bool(mat_neo) and not (mat_neo & mat_ds)
 
 
+def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict) -> None:
+    """Bộ/loạt chụp nhiều khách (CEO 16/10 lần 7, ca 91E9E71A): ảnh chưa chắc có MÃ MẶT (app Ảnh) trùng ảnh neo chắc
+    theo chứng cứ riêng (nhãn/tên/SĐT/mã KH) chụp liền (cùng bộ hoặc cách <= CHUOI_GIAY), không trùng mặt ảnh nhãn
+    nào khác HĐ, mặt không thuộc cụm mạnh khách khác -> 'chac' theo neo đó (tách theo người, không hạ cả bộ)."""
+    neo = [x for x in ds if x["hd"] and x["diem"] >= 80 and x["do_tin"] == "chac" and x.get("mat_ds")
+           and (x["ly_do"] or "").startswith(_NEO_TEN)]
+    if not neo:
+        return
+    nhan_khac = [x for x in ds if x["nhan"] and x.get("mat_ds")]
+    for r in ds:
+        m = r.get("mat_ds") or set()
+        if r["do_tin"] in ("chac", "khong_hd") or r["xn"] or not m or not 1 <= len(m) <= MAT_TOI_DA:
+            continue
+        gan = [x for x in neo if x is not r and m & x["mat_ds"] and (
+            (r["bo"] is not None and x["bo"] == r["bo"]) or abs((x["gio"] - r["gio"]).total_seconds()) <= CHUOI_GIAY)]
+        hds = {x["hd"] for x in gan}
+        if len(hds) != 1:
+            continue
+        hd = hds.pop()
+        if any(x["hd"] != hd and m & x["mat_ds"] for x in nhan_khac if x is not r):
+            continue
+        k = khoa_hd.get(hd)
+        if r.get("mat_k") and k is not None and r["mat_k"] != k:
+            continue
+        x = min(gan, key=lambda x: abs((x["gio"] - r["gio"]).total_seconds()))
+        r.update(hd=hd, do_tin="chac", diem=80,
+                 ly_do=f"cùng người (mã mặt app Ảnh) với ảnh khớp chắc chụp cách"
+                 f" {abs((x['gio'] - r['gio']).total_seconds()):.0f}s — tách bộ theo người")
+
+
 def _xen_ke(phan: list[dict], hd: str, khoa_hd: dict | None) -> bool:
     """Trong phần bộ có ảnh của khách khác chụp xen kẽ: ảnh nhãn khớp HĐ khác (kể cả gợi ý), hoặc ảnh mang mặt cụm mạnh
     (r['mat_k'], ghep_ngay gắn trước luật bộ) của khách khác khách của hd."""
@@ -1654,6 +1686,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
             hd, d, ly_do = _khop_nhan(conn, nhan, ngay, bo_nho, r["ngay_goc"], r["goc"])
             if hd and "buổi theo gói" in ly_do and _mat_khac_khach(conn, ngay, hd, p["khuon_mat"], mat_nho):
                 hd, d, ly_do = None, 0, ly_do + " — nhưng khuôn mặt khác ảnh đã xác nhận của khách: bỏ, người chọn"
+            if hd and d >= 50 and "nhan_hd" not in r:
+                r["nhan_hd"] = hd  # nhãn trên ảnh đã khớp 1 HĐ (dùng cho _nhan_la_cung_mat)
             if hd and d == 50 and any(x in ly_do for x in _LY_DO_PHAN) and "lệch dịch vụ" not in ly_do \
                     and _nang_ten_phan(conn, nhan, hd, ngay, visits, p, r, cum, mat_nho,
                                        [n["ma_dv"] for q in photos if r["bo"] is not None and q["id"] != p["id"]
@@ -1775,6 +1809,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
     if cum is None:
         cum = cum_khach(conn)
     _lan_bo_theo_mat(ket_qua, _nhan_lai_theo_mat(conn, ngay, photos, ket_qua, nhan_that, cum), conn)
+    _tach_theo_nguoi([ket_qua[p["id"]] for p in photos], khoa_hd)
     _canh_bao_mat(conn, photos, ket_qua, cum)
 
     _khoa_nhan_tren_anh(ket_qua)
@@ -1863,7 +1898,21 @@ def _chia_bo(ds: list[dict]) -> None:
         r["bo"], truoc = so, r
 
 
+_IY = str.maketrans("yýỳỷỹỵYÝỲỶỸỴ", "iíìỉĩịIÍÌỈĨỊ")
+
+
+def _nhan_iy(nhan: dict) -> dict:
+    """Nhãn với y -> i (CEO 16/10 lần 7, ca 6CF643FC: 'Mai Thi' ~ 'Mai Thy')."""
+    return dict(nhan, ten=nhan["ten"].translate(_IY), ten_goc=(nhan.get("ten_goc") or nhan["ten"]).translate(_IY))
+
+
 def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
+    """_ten_nhan_hop0, thử thêm lệch i/y ('Thi' ~ 'Thy') khi không hợp."""
+    return _ten_nhan_hop0(nhan, ten_kh) or (
+        ("y" in (nhan["ten"] + khong_dau(ten_kh or ""))) and _ten_nhan_hop0(_nhan_iy(nhan), (ten_kh or "").translate(_IY)))
+
+
+def _ten_nhan_hop0(nhan: dict, ten_kh: str) -> bool:
     """Tên trên nhãn có thể là khách này: chữ nhãn (bớt chữ chung thừa bên trái, như _khop_ten) nằm trong họ tên
     đã làm sạch hoặc tên gọi trong ngoặc, hoặc chữ cuối lệch 1 chữ (OCR). Nhãn và tên khách đều còn dấu thì
     phải cùng dấu ('Quyền' != 'Quyên'). Dùng để biết nhãn ghi tên KHÁC hẳn."""
@@ -1915,6 +1964,12 @@ def _gan_chu(x: str, y: str) -> bool:
 
 
 def _ten_hop_mat(nhan: dict, ten_kh: str) -> bool:
+    """_ten_hop_mat0, thử thêm lệch i/y."""
+    return _ten_hop_mat0(nhan, ten_kh) or (
+        ("y" in (nhan["ten"] + khong_dau(ten_kh or ""))) and _ten_hop_mat0(_nhan_iy(nhan), (ten_kh or "").translate(_IY)))
+
+
+def _ten_hop_mat0(nhan: dict, ten_kh: str) -> bool:
     """Luật mặt (CEO 16/10): ảnh có mặt thuộc cụm MẠNH của khách K -> nhãn HỢP với K (so không dấu) khi:
     nhãn 1 chữ = TÊN CUỐI của K (lệch 1 ký tự OCR được) hoặc = CHỮ ĐỆM của K ('Phương' ~ 'Lê Thị Phương Thảo' —
     CEO 16/10 lần 2: mặt mạnh thì chữ đệm vẫn chắc; nhãn khớp đúng đuôi khách khác cùng ngày thì nơi gọi chặn);
@@ -2372,6 +2427,45 @@ def _chu_ma_nhan(n: dict, ten_kh: set) -> list[str]:
     return ds + [x for x in n["ten"].split() if x not in ten_kh and len(x) >= 2 and x not in XUNG_HO]
 
 
+def _ten_hop_mo(nhan: dict, ten_kh: str) -> bool:
+    """So tên MỜ cho luật 'nhãn ghi tên khác' (bài học a, CEO 16/10 lần 9): hợp khi _ten_nhan_hop (có lệch i/y, lệch 1
+    ký tự cuối) đúng với nhãn gốc, nhãn bỏ dấu, hoặc nhãn bỏ 1–2 chữ RÁC đầu (OCR: <= 2 ký tự / không nguyên âm)."""
+    if nhan.get("quan_he"):
+        return False
+    w, wg = nhan["ten"].split(), (nhan.get("ten_goc") or nhan["ten"]).split()
+    bien = [nhan, dict(nhan, ten_goc=nhan["ten"])]
+
+    def rac(x):  # chữ rác OCR: <= 2 ký tự (không phải xưng hô) hoặc không có nguyên âm
+        return (len(x) <= 2 and x not in XUNG_HO) or not re.search(r"[aeiouy]", x)
+    k = 0
+    while k < min(2, len(w) - 1) and rac(w[k]):
+        k += 1
+        bien.append(dict(nhan, ten=" ".join(w[k:]), ten_goc=" ".join(wg[k:]) if len(wg) == len(w) else " ".join(w[k:])))
+    return any(_ten_nhan_hop(b, ten_kh) for b in bien)
+
+
+def _nhan_la_cung_mat(p, photos, ket_qua, nhan_ds, v) -> str | None:
+    """Ảnh KHÁC cùng bộ chụp với p, CHUNG mã mặt với p (cùng người), có nhãn thật (có gạch, mã dịch vụ nhận ra được,
+    tên >= 2 chữ thường) không hợp mờ tên khách của HĐ v, và nhãn đó chưa khớp HĐ nào -> id ảnh nhãn; không thì None."""
+    r = ket_qua[p["id"]]
+    m = set(_doc_mat(p["khuon_mat"]))
+    if r["bo"] is None or not m:
+        return None
+    for q in photos:
+        x = ket_qua[q["id"]]
+        if q["id"] == p["id"] or x["bo"] != r["bo"] or _la_giay_to(q) or x["xn"] or not (m & set(_doc_mat(q["khuon_mat"]))):
+            continue
+        if x.get("nhan_hd"):
+            continue
+        for n in nhan_ds[q["id"]]:
+            ten = [w for w in n["ten"].split() if w not in XUNG_HO and w not in _chu_dv_nhan() and len(w) >= 2]
+            if n.get("quan_he") or not ten or not _ma_ro(n["ma_dv"]) or not n.get("gach"):
+                continue
+            if not _ten_hop_mo(n, v["ten_kh"]):
+                return q["id"]
+    return None
+
+
 def _nhan_bo_khach_khac(conn, cum: dict, p, photos, ket_qua, k: str, nho: dict) -> bool:
     """Ảnh nằm trong bộ chụp ngắn (<= BO_TOI_DA tư thế) mà bộ có ảnh KHÁC khớp chắc theo chứng cứ riêng (nhãn/tên/SĐT/
     mã KH trên chính ảnh đó) HĐ của khách khác K, VÀ ảnh nhãn đó có mặt người mà không mặt nào thuộc cụm của K (ảnh nhãn
@@ -2463,7 +2557,7 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
             ma_quanh = _dv_nhan_quanh(p, photos, ket_qua, nhan_ds, tk)  # nhãn cùng bộ, rồi cùng đợt
             v = _chon_hd_mat(vs, ngays, r, ma_dvs + them, ma_quanh, chu_nhan, p["goi_y_hd"])
             manh = c["neo"] >= CUM_MANH  # cụm mạnh: nhãn hợp K theo luật mặt nới (_ten_hop_mat) — CEO 16/10
-            hop = [n for n in nhans if _ten_nhan_hop(n, v["ten_kh"]) or (manh and _ten_hop_mat(n, v["ten_kh"]))]
+            hop = [n for n in nhans if _ten_hop_mo(n, v["ten_kh"]) or (manh and _ten_hop_mat(n, v["ten_kh"]))]
             if hop and not any(_ten_dung_duoi(n, v["ten_kh"]) for n in hop):
                 # Nhãn hợp K nhưng không đúng đuôi, mà khớp ĐÚNG đuôi (đủ tên) một khách KHÁC có HĐ cùng ngày ->
                 # ưu tiên khách đó / người chọn, không chắc.
@@ -2493,6 +2587,15 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
                              ly_do=f"mặt giống {mo} nhưng nhãn trên ảnh ghi tên khác — người chọn")
                 else:
                     r["ly_do"] = (r["ly_do"] or "") + f" — mặt giống {mo}, nhãn ghi tên khác"
+                continue
+            la = _nhan_la_cung_mat(p, photos, ket_qua, nhan_ds, v)
+            if la:
+                # CEO 16/10 lần 9 (bài học a): cùng bộ có ảnh nhãn ghi tên KHÁC mà ảnh nhãn đó CÙNG MÃ MẶT với ảnh này
+                # (cùng người) và nhãn chưa khớp HĐ nào -> mặt không đủ để chắc, chỉ gợi ý.
+                if not r["hd"] or r["diem"] <= 50 or r["hd"] == v["code"]:
+                    r.update(hd=v["code"], do_tin="goi_y", diem=40,
+                             ly_do=f"mặt giống {mo} + HĐ cùng ngày, nhưng ảnh nhãn cùng người (ảnh {la[:8]}) ghi tên khác"
+                             " — người chọn")
                 continue
             lech = "" if v["ngay"] == ngay else f" (HĐ ngày {v['ngay'][8:10]}/{v['ngay'][5:7]})"
             nn = [n["ngay"] for n in nhans if n["ngay"] and n["ngay"] != ngay and n["ngay"] in ngays]

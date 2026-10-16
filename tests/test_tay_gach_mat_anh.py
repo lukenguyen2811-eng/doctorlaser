@@ -624,7 +624,8 @@ class SietVong6(Nen):  # CEO 16/10 lần 6: chỉ siết
         ids += [self.anh(D, f"16:19:{15 + i * 5}", km="P-B") for i in range(4)]
         kq = self.ghep()
         self.assertNotEqual(kq[ids[3]][:2], ("H2", "chac"))
-        self.assertEqual(kq[ids[3]][:2], ("H1", "goi_y"))  # gợi ý HĐ của nhãn bên kia (cùng mặt) — ca 07308BE4
+        # tách theo người (vòng 9 phần 4): cùng mã mặt ảnh nhãn bên kia, chụp liền -> chắc HĐ bên kia (ca 07308BE4)
+        self.assertEqual(kq[ids[3]][:2], ("H1", "chac"))
 
     def test_combo_hon_san_pham(self):  # ca DA329CFE: combo CSD mụn hơn HĐ chỉ sữa rửa mặt
         self.assertLess(A._hang_hd("COMBO CSD MỤN ( 10 LẦN )"), A._hang_hd("REVSKIN - SỬA RỬA MẶT DEEP CLEASER"))
@@ -687,6 +688,50 @@ class ThuTuHdVong7(unittest.TestCase):  # CEO 16/10 lần 7: dịch vụ nhãn -
         # chênh > 20' -> giờ thắng dù HĐ gần là combo
         self.assertEqual(self.chon([("a", "15:00", "CSD MỤN"), ("b", "15:56", "COMBO CSD ( 10 LẦN )")], "15:58:38",
                                    ma=["csd"]), "b")
+
+
+class Vong9P1(Nen):  # CEO 16/10 lần 9 phần 4
+    def cum_k(self, ten="Đỗ Hồng Phúc"):
+        for i, ngay in enumerate(("2026-09-01", "2026-09-15")):
+            self.hd(f"K1-{i}", ngay, "K1", ten, "CSD")
+        for i in range(6):
+            self.anh("2026-09-01" if i % 2 == 0 else "2026-09-15", f"10:{i:02d}:00", km="P-K", do_tin="chac",
+                     goi_y=f"K1-{i % 2}", ly_do="nhãn 'x-csd' khớp")
+        self.hd("K1-D", D, "K1", ten, "CSD", "15:00")
+
+    def test_nhan_ten_khac_cung_mat_chan(self):  # (a): ảnh nhãn CÙNG MÃ MẶT ghi tên khác (chưa khớp HĐ) -> chỉ gợi ý
+        self.cum_k()
+        ids = [self.anh(D, "15:18:59", "Hoàng Huy - csd 10/10/26", km="P-K")]
+        ids += [self.anh(D, f"15:19:{5 + i * 6:02d}", km="P-K") for i in range(3)]
+        self.assertNotIn("chac", {self.ghep()[i][1] for i in ids})
+
+    def test_nhan_ten_khac_khac_mat_khong_chan(self):  # âm (a): ảnh nhãn là NGƯỜI KHÁC (khác mã mặt) -> mặt vẫn chắc
+        self.cum_k()
+        ids = [self.anh(D, "15:18:59", "Hoàng Huy - csd 10/10/26", km="P-H")]
+        ids += [self.anh(D, f"15:19:{5 + i * 6:02d}", km="P-K") for i in range(3)]
+        self.assertEqual(self.ghep()[ids[2]][:2], ("K1-D", "chac"))
+
+    def test_ten_mo_khong_chan(self):  # âm (a): tên nhãn lệch mờ (bỏ dấu / tiền tố rác / i-y) không tính tên khác
+        self.cum_k("Đỗ Hồng Phúc")
+        for i, ocr in enumerate(("Phuc - csd 10/10/26", "Xq Phúc - csd 10/10/26")):
+            self.c.execute("DELETE FROM photos WHERE ngay=?", (D,))
+            ids = [self.anh(D, "15:18:59", ocr, km="P-K")] + [self.anh(D, f"15:19:{5 + j * 6:02d}", km="P-K") for j in range(3)]
+            self.assertEqual(self.ghep()[ids[2]][:2], ("K1-D", "chac"), ocr)
+
+    def test_nhan_iy(self):  # (c)
+        self.assertTrue(A._ten_nhan_hop(A.doc_nhan("Mai Thi- căng chỉ 6/12/24", 2024)[0], "Phan Lâm Mai Thy"))
+
+    def test_nhan_me(self):  # (f)
+        self.assertEqual(A.doc_nhan("Mẹ C.Trang - CSD 7/6/2025", 2025)[0].get("quan_he"), "me")
+
+    def test_tach_theo_nguoi(self):  # (b)
+        self.hd("H1", D, "K1", "Cao Ngọc Mai Hương", "Trẻ hoá da picolight", "14:30")
+        ids = [self.anh(D, "14:37:11", "Nguyên Đình Húy- csd 10/10/26", km="P-H"), self.anh(D, "14:37:16", km="P-M"),
+               self.anh(D, "14:37:23", km="P-M"), self.anh(D, "14:37:29", "Ngọc Mai Hương- pico 10/10/26", km="P-M"),
+               self.anh(D, "14:37:37", km="P-M"), self.anh(D, "14:37:42", km="P-H")]
+        kq = self.ghep()
+        self.assertEqual({kq[i][:2] for i in (ids[1], ids[2], ids[4])}, {("H1", "chac")})
+        self.assertNotEqual(kq[ids[5]][:2], ("H1", "chac"))
 
 
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
