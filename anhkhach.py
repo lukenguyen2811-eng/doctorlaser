@@ -2096,24 +2096,37 @@ def _trang(title: str, body: str) -> bytes:
             f"<div id=zoom onclick=\"this.style.display='none'\"><img></div></body></html>").encode()
 
 
-def _trang_chu(conn) -> bytes:
+CAN_DUYET = "xn_hd IS NULL AND bo_qua=0 AND COALESCE(do_tin,'')!='chac'"  # Lượng 16/10: chỉ duyệt ảnh chưa chắc/nghi
+
+
+def _trang_chu(conn, tat_ca: bool = False) -> bytes:
     rows = conn.execute(
-        "SELECT ngay, COUNT(*) n, SUM(xn_hd IS NOT NULL OR bo_qua=1) d, "
-        "SUM(do_tin='chac') c FROM photos GROUP BY ngay ORDER BY ngay").fetchall()
-    o = ["<header><b>Duyệt ảnh khách hàng</b><span class=small>Bấm vào một ngày để duyệt."
-         f" Xanh = đã duyệt hết.</span>{_o_tim()}</header><main><div class=days>"]
-    for r in rows:
-        pct = (r["d"] or 0) * 100 // r["n"]
-        o.append(f"<a class=day href='/ngay?d={r['ngay']}'><b>{r['ngay'][8:]}/{r['ngay'][5:7]}</b>"
-                 f"<div class=small>{r['n']} ảnh · đã duyệt {r['d'] or 0}</div>"
-                 f"<div class=bar><i style='width:{pct}%'></i></div></a>")
+        "SELECT ngay, COUNT(*) n, SUM(xn_hd IS NOT NULL OR bo_qua=1) d, SUM(do_tin='chac') c, "
+        f"SUM({CAN_DUYET}) can, SUM({CAN_DUYET} AND ly_do LIKE 'cảnh báo:%') cb "
+        "FROM photos GROUP BY ngay ORDER BY ngay DESC").fetchall()
+    con = [r for r in rows if r["can"]]
+    tong = sum(r["can"] for r in rows)
+    o = ["<header><b>Duyệt ảnh khách hàng</b><span class=small>"
+         f"Còn <b>{tong:,}</b> ảnh cần duyệt (gợi ý / chưa rõ / cảnh báo) ở {len(con)} ngày — ảnh CHẮC CHẮN đã ẩn. "
+         + ("<a href='/'>Chỉ ngày còn cần duyệt</a>" if tat_ca else "<a href='/?tat_ca=1'>Xem cả ngày đã xong</a>")
+         + f"</span>{_o_tim()}</header><main><div class=days>"]
+    for r in (rows if tat_ca else con):
+        xong = not r["can"]
+        cb = f" · <b style='color:var(--bad)'>⚠ {r['cb']} cảnh báo</b>" if r["cb"] else ""
+        tt = "xong" if xong else f"cần duyệt {r['can']}"
+        o.append(f"<a class=day href='/ngay?d={r['ngay']}'{' style=opacity:.5' if xong else ''}>"
+                 f"<b>{r['ngay'][8:]}/{r['ngay'][5:7]}/{r['ngay'][2:4]}</b>"
+                 f"<div class=small>{tt}{cb}</div>"
+                 f"<div class=small>{r['n']} ảnh · chắc {r['c'] or 0} · đã duyệt {r['d'] or 0}</div></a>")
     if not rows:
         o.append("<p>Chưa có ảnh. Chạy <code>python3 anhkhach.py quet YYYY-MM</code> trước.</p>")
+    elif not con and not tat_ca:
+        o.append("<p>Không còn ảnh nào cần duyệt.</p>")
     o.append("</div></main>")
     return _trang("Duyệt ảnh khách", "".join(o))
 
 
-def _trang_ngay(conn, ngay: str) -> bytes:
+def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
     visits = conn.execute("SELECT * FROM visits WHERE ngay=? ORDER BY gio", (ngay,)).fetchall()
     photos = conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)).fetchall()
     # Nhãn ghi ngày khác ngày chụp (chụp 10/10, nhãn 'Nam-xx 9/10') -> hóa đơn ngày khác cũng phải chọn được.
@@ -2170,8 +2183,11 @@ def _trang_ngay(conn, ngay: str) -> bytes:
             f"<option value='{html.escape(x)}'{' selected' if x == (gia_tri or '') else ''}>"
             f"{html.escape(x or goi_y)}</option>" for x in ds) + "</select>"
 
+    so_an = sum(1 for p in photos if p["do_tin"] == "chac" and not p["xn_hd"] and not p["bo_qua"]) if not tat_ca else 0
+    loc = (f"<a href='/ngay?d={ngay}&tat_ca=1'>Xem cả {so_an} ảnh chắc chắn</a>" if not tat_ca
+           else f"<a href='/ngay?d={ngay}'>Chỉ ảnh cần duyệt</a>")
     o = [f"<header><b>Ngày {ngay}</b> {nav}<span class=small>{len(photos)} ảnh · "
-         f"{len(visits)} hóa đơn</span></header><main>"]
+         f"{len(visits)} hóa đơn · {loc}</span></header><main>"]
     o.append("<div class=visits><b>Hóa đơn trong ngày:</b><br>" + (
         "<br>".join(dong(v) for v in visits)
         or "<span class=small>Không có hóa đơn ngày này.</span>") + (
@@ -2181,14 +2197,21 @@ def _trang_ngay(conn, ngay: str) -> bytes:
         if visits_khac else "") + "</div>")
     dots: dict[int, list] = {}
     mau_nho: dict = {}  # ảnh mẫu theo mã KH (ảnh gợi ý theo gói)
+    an_chac: dict[int, int] = {}
     for p in photos:
+        if not tat_ca and (p["do_tin"] == "chac" and not p["xn_hd"] and not p["bo_qua"]):
+            an_chac[p["dot"] or 0] = an_chac.get(p["dot"] or 0, 0) + 1  # Lượng 16/10: ảnh chắc chắn ẩn
+            continue
         dots.setdefault(p["dot"] or 0, []).append(p)
+    # Đợt có ảnh cảnh báo (mặt thuộc khách khác) lên đầu
+    dots = dict(sorted(dots.items(), key=lambda kv: (not any((p["ly_do"] or "").startswith("cảnh báo:") for p in kv[1]), kv[0])))
     for so, ps in dots.items():
         # 15/10: bỏ ô "chọn 1 khách cho cả đợt" (từng gộp 5 khách vào 1 HĐ). Nút mới lưu MỖI ảnh theo
         # khách đang chọn ở chính ảnh đó; ảnh chưa có khách thì bỏ qua.
         so_khach = len({p["xn_hd"] or p["goi_y_hd"] for p in ps if p["xn_hd"] or p["goi_y_hd"]})
         o.append(f"<div class=dot><h3>Đợt chụp {ps[0]['thoi_gian'][11:16]}–{ps[-1]['thoi_gian'][11:16]}"
-                 f" ({len(ps)} ảnh · {so_khach} khách)"
+                 f" ({len(ps)} ảnh cần duyệt · {so_khach} khách"
+                 + (f" · {an_chac[so]} ảnh chắc chắn đã ẩn" if an_chac.get(so) else "") + ")"
                  f"<button class=p onclick='caDot({so})'>✓ Đồng ý gợi ý cả đợt</button>"
                  f"<span class=small>lưu mỗi ảnh theo khách đang chọn ở ảnh đó — ảnh sai thì sửa ảnh đó trước</span>"
                  f"</h3><div class=grid>")
@@ -2403,9 +2426,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/":
-            return self._gui(_trang_chu(self.conn))
+            return self._gui(_trang_chu(self.conn, bool(parse_qs(u.query).get("tat_ca"))))
         if u.path == "/ngay":
-            return self._gui(_trang_ngay(self.conn, parse_qs(u.query).get("d", [""])[0]))
+            q = parse_qs(u.query)
+            return self._gui(_trang_ngay(self.conn, q.get("d", [""])[0], bool(q.get("tat_ca"))))
         if u.path == "/khach":
             q = parse_qs(u.query)
             return self._gui(_trang_khach(self.conn, q.get("ma", [""])[0], q.get("dv", [""])[0]))
