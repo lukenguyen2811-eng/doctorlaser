@@ -494,8 +494,9 @@ def _tu_ten_kh(ten: str) -> list[tuple[str, str]]:
 
 # Họ phổ biến (CEO 16/10): tên ĐÚNG 2 chữ mà chữ cuối là họ ('Vy Nguyễn' = ghi kiểu Tên Họ) -> chữ đầu là tên gọi.
 # Không gồm chữ vừa là họ vừa là tên (mai, hà, lý, thái, tăng...).
-HO_PHO_BIEN = {"nguyen", "tran", "le", "pham", "huynh", "hoang", "phan", "vo", "vu", "dang", "bui", "do", "ngo",
-               "duong", "dinh", "truong", "doan", "lam", "luong", "trinh", "cao", "ta"}
+# CEO 16/10: bỏ các chữ vừa là họ vừa hay là TÊN GỌI (Hoàng, Dương, Trường/Trương, Lâm, Vũ, Lương, Trinh)
+HO_PHO_BIEN = {"nguyen", "tran", "le", "pham", "huynh", "phan", "vo", "dang", "bui", "do", "ngo",
+               "dinh", "doan", "cao", "ta"}
 
 
 def _thu_tu_goi(tu: list) -> list:

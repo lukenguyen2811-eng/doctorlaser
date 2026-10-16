@@ -251,3 +251,10 @@ class MatNoi(Nen):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoMoHo(unittest.TestCase):  # CEO 16/10: chữ vừa là họ vừa là tên -> không đảo
+    def test_ten_goi_khong_dao_chu_mo_ho(self):
+        for ten, goi in [("HUY HOÀNG", "Hoàng"), ("MINH DƯƠNG", "Dương"), ("KINH LƯƠNG", "Lương"),
+                         ("THU TRINH", "Trinh"), ("VY NGUYỄN", "Vy"), ("MAI TRẦN", "Mai")]:
+            self.assertEqual(A.ten_goi(ten), goi, ten)
