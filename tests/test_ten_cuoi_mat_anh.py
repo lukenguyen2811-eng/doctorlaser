@@ -218,8 +218,14 @@ class MatNoi(Nen):
         self.hd("HX", D, "KX", "Lê Như Thảo", "Pico")
         self.assertNotEqual(self.mot("Như Thảo-csd 10/10/26")[1], "chac")
 
-    def test_mot_chu_dem_cum_manh_khong_chac(self):  # âm (luật 1): 'Thảo' ~ chữ đệm của K
+    def test_mot_chu_dem_cum_manh_chac(self):  # CEO 16/10 lần 2: 'Thảo' ~ chữ đệm của K + mặt mạnh -> chắc
         self.cum("K1", "Phạm Đỗ Thảo Vy")
+        k = self.mot("Thảo-csd 10/10/26")
+        self.assertEqual(k[:2], ("K1-D", "chac"))
+
+    def test_mot_chu_dem_khach_khac_ten_cuoi_khong_chac(self):  # âm: ngày đó có khách khác TÊN CUỐI 'Thảo'
+        self.cum("K1", "Phạm Đỗ Thảo Vy")
+        self.hd("HX", D, "KX", "Lê Thị Thảo", "Pico")
         k = self.mot("Thảo-csd 10/10/26")
         self.assertNotEqual(k[1], "chac")
 
@@ -244,7 +250,7 @@ class MatNoi(Nen):
         self.assertTrue(f(n("Thaor Nguyên-x 1/1/26"), "Phan Thị Thảo Nguyên"))
         self.assertTrue(f(n("Hoàng Minh-x 1/1/26"), "Đỗ Hoàng Minh Khang"))
         self.assertTrue(f(n("Ngọc Mai-x 1/1/26"), "Trịnh Xuân Mai"))
-        self.assertFalse(f(n("Thảo-x 1/1/26"), "Phạm Đỗ Thảo Vy"))
+        self.assertTrue(f(n("Thảo-x 1/1/26"), "Phạm Đỗ Thảo Vy"))  # chữ đệm: cụm mạnh thì hợp (CEO 16/10 lần 2)
         self.assertFalse(f(n("Ngọc Lan-x 1/1/26"), "Trịnh Xuân Mai"))
         self.assertFalse(f(n("Vy-x 1/1/26"), "Phạm Thị Vân"))
 

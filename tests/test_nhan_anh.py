@@ -99,8 +99,8 @@ class KhopNhan(unittest.TestCase):
     def test_ten_trong_ho_ten_co_duoi_ghi_chu(self):
         self.assertEqual(self.khop("Vy-csd 9/10/26", "2026-10-09")[:2], ("HD8", 85))  # + dịch vụ khớp
         self.assertEqual(self.khop("Vy-pico 9/10/26", "2026-10-09")[:2], ("HD8", 40))  # dịch vụ lệch: 40, không làm neo
-        # CEO 16/10: nhãn 1 chữ chỉ chắc khi = TÊN CUỐI; 'Manami' là chữ đầu của 'Manami Yoshida' -> chỉ gợi ý 50.
-        self.assertEqual(self.khop("Manami- csd 3/10/26", "2026-10-03")[:2], ("HD6", 50))
+        # CEO 16/10 (lần 2): tên Tây -> tên gọi = chữ ĐẦU; 'Manami' ~ 'Manami Yoshida' chắc như cũ.
+        self.assertEqual(self.khop("Manami- csd 3/10/26", "2026-10-03")[:2], ("HD6", 85))
 
     def test_ocr_sai_mot_chu_chi_goi_y(self):
         self.assertEqual(self.khop("Thann-botox 3/10/26", "2026-10-03")[:2], ("HD7", 50))
