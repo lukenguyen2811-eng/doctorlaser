@@ -487,6 +487,8 @@ def _tu_ten_kh(ten: str) -> list[tuple[str, str]]:
                     j -= 1
             tu = tu[:j]
             break
+    if len(tu) > 2 and [k for _, k in tu[-2:]] == ["gan", "spa"]:  # 'CÔ THẢO GẦN SPA' -> 'cô thảo' (cụm cuối)
+        tu = tu[:-2]
     return tu or _tu_goc(ten)
 
 
@@ -1003,6 +1005,20 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
     if not ung and w:  # tên gọi trong ngoặc: nhãn 'Lisa-dvm' ~ 'Nguyễn Thị X (LISA)'
         ung, k = [v for v in visits if any(set(w) <= set(b) for b in _bi_danh(v["ten_kh"]))], len(w)
     gan_dung = False
+    w2 = w[next((i for i, x in enumerate(w) if x not in _CHU_THUA_TEN), 0):]  # bỏ chữ chung bên trái
+    if not ung and len(w2) >= 2:
+        # CEO 16/10: tên Việt có ĐỦ mọi chữ nhãn trong họ tên nhưng không đúng đuôi ('Kim Mỹ' ~ '... Mỹ Kim',
+        # 'Cao Thanh' ~ 'Cao Thị Thanh', 'Ngọc Huyền' ~ '... Ngọc Huyền Trân') -> ứng viên, tối đa 50 (gợi ý).
+        du = [v for v in visits if not ngoai(v) and set(w2) <= set(t(v))]
+        if du:
+            hop = du if _dv_chung(dv) else [v for v in du if _dv_khop(dv, v["dich_vu"])]
+            chon = hop or du
+            if len({v["ma_kh"] or v["code"] for v in chon}) > 1:
+                return None, len(chon), ""
+            v = min(chon, key=lambda v: v["gio"] or "99")
+            if hop or _dv_gan_dung(dv, v["dich_vu"]):
+                return v, 50, "có đủ tên nhưng khác thứ tự/vị trí —"
+            return v, 40, "có đủ tên nhưng khác thứ tự/vị trí, lệch dịch vụ —"
     if not ung and w:
         # Tên nước ngoài đảo thứ tự ('Cheng Wei' ~ 'Wu Cheng Wei') -> tên nằm trong họ tên; OCR sai
         # 1 chữ ('Thann' ~ 'Thanh'). Chỉ "chắc" khi tên nằm trong họ tên VÀ dịch vụ trên nhãn khớp.
@@ -1036,8 +1052,10 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
         # Khớp đuôi tên nhưng dịch vụ lệch ('Thu' ~ '... Thư' mài sẹo, trong khi khách 'THU (KH TỰ ĐẾN)'
         # làm pico) -> xét khách có tên nằm trong họ tên + dịch vụ khớp; không có thì chỉ gợi ý.
         khac = [v for v in visits if v["code"] != ung[0]["code"]
-                and set(w[-k:]) <= set(t(v)) and (k < 2 or ngoai(v)) and _dv_khop(dv, v["dich_vu"])]
+                and set(w[-k:]) <= set(t(v)) and _dv_khop(dv, v["dich_vu"])]
         if len(khac) == 1:
+            if k >= 2 and not ngoai(khac[0]):  # tên Việt đủ chữ nhưng không đúng đuôi: chỉ gợi ý (CEO 16/10)
+                return khac[0], 50, "có đủ tên nhưng khác thứ tự/vị trí + dịch vụ —"
             if k == len(w):
                 return khac[0], 85, "khớp tên + dịch vụ"
             return khac[0], 50, "khớp một phần tên + dịch vụ"
@@ -1224,7 +1242,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         ket_qua[p["id"]] = {"dot": dot, "hd": None, "do_tin": "chua_ro", "ly_do": "", "diem": 0,
                             "nhan": False, "gio": dt.datetime.fromisoformat(p["thoi_gian"]),
                             "xn": p["xn_hd"], "ngay_goc": 0 if p["id"] in khong_tin else 1,
-                            "goc": _ngay_goc(p)}  # ngay_goc THẬT (1 = có EXIF): luật ngày nhãn sai 16/10
+                            # luật ngày 16/10: 1 = có EXIF, hoặc ngay_goc=0 sát ảnh EXIF cùng buổi (<= BO_GIAY s)
+                            "goc": 1 if _ngay_goc(p) == 0 and p["id"] not in khong_tin else _ngay_goc(p)}
     # Giờ trùng đến từng giây ở >= TRUNG_GIAY ảnh: giờ nhập/lưu -> không lan đợt, không dùng luật giờ.
     dem_giay = {}
     for p in photos:
@@ -1444,12 +1463,12 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
     if not w:
         return True
     dau_kh = _co_dau([g for g, _ in tg])
-    ngoai = _ten_ngoai(wg, [g for g, _ in tg])
     for k in range(len(w), 0, -1):
         if not _bot_duoc(w, k):  # luật tên 16/10: nhãn >= 2 chữ chỉ bớt chữ chung bên trái
             break
-        # >= 2 chữ tên Việt: phải là ĐUÔI họ tên ('Ngọc Anh' != 'Nguyễn Thị Anh'); tên nước ngoài: nằm trong.
-        if (t[-k:] == w[-k:]) if (k >= 2 and not ngoai) else set(w[-k:]) <= set(t):
+        # Đủ mọi chữ nhãn (không kể chữ chung bỏ bên trái) có trong họ tên -> có thể là khách này, kể cả khác thứ
+        # tự/vị trí (CEO 16/10); thiếu chữ nào ('Ngọc Anh' vs 'Nguyễn Thị Anh') -> tên khác.
+        if set(w[-k:]) <= set(t):
             if not (dau_kh and _co_dau(wg[-k:])) or all(
                     any(khong_dau(a) == kk and _chu_mot_chieu(a, g) for g, kk in tg) for a in wg[-k:]):
                 return True

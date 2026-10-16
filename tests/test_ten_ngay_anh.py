@@ -66,14 +66,43 @@ class LuatTen(Nen):
         self.hd("H2", D, "K2", "Nguyễn Thị Anh", "CSD")
         self.assertIsNone(self.khop("Ngọc Anh-csd")[0])
 
-    def test_ngoc_anh_khong_khop_khi_nam_giua_ten_viet(self):  # âm: 'Ngọc Anh' giữa 'Lê Ngọc Anh Thư'
+    def test_ngoc_anh_nam_giua_ten_viet_chi_goi_y(self):  # CEO 16/10 (2): đủ chữ, sai vị trí -> tối đa 50
         self.hd("H3", D, "K3", "Lê Ngọc Anh Thư", "CSD")
+        hd, d, ly_do = self.khop("Ngọc Anh-csd")
+        self.assertEqual((hd, d), ("H3", 50))
+        self.assertIn("có đủ tên nhưng khác thứ tự/vị trí", ly_do)
+
+    def test_dao_thu_tu_co_ho_ten_goi_3_chu_chi_goi_y(self):  # (2)
+        for i, (nhan, ten) in enumerate([("Kim Mỹ", "Trần Thị Mỹ Kim"), ("Cao Thanh", "Cao Thị Thanh"),
+                                          ("Ngọc Huyền", "Nguyễn Ngọc Huyền Trân"), ("Trần Hà", "Hà Trần")]):
+            self.c.execute("DELETE FROM visits")
+            self.hd(f"H{i}", D, f"K{i}", ten, "CSD")
+            self.assertEqual(self.khop(f"{nhan}-csd")[:2], (f"H{i}", 50), nhan)
+
+    def test_du_chu_hai_khach_nguoi_chon(self):  # âm (2): 2 khách đủ chữ -> không đoán
+        self.hd("H1", D, "K1", "Trần Thị Mỹ Kim", "CSD")
+        self.hd("H2", D, "K2", "Lê Kim Mỹ Hoa", "CSD")
+        self.assertEqual(self.khop("Kim Mỹ-csd")[:2], (None, 0))
+
+    def test_du_chu_lech_dich_vu_40(self):  # (2) + lệch dịch vụ -> 40, không làm neo
+        self.hd("H1", D, "K1", "Trần Thị Mỹ Kim", "Pico")
+        self.assertEqual(self.khop("Kim Mỹ-csd")[:2], ("H1", 40))
+
+    def test_thieu_mot_chu_khong_khop(self):  # âm (3): thiếu chữ 'Ngọc' -> không khớp, không rơi xuống 'Anh'
+        self.hd("H2", D, "K2", "Nguyễn Thị Anh", "CSD")
+        self.hd("H4", D, "K4", "Phạm Anh Ngân", "CSD")
         self.assertIsNone(self.khop("Ngọc Anh-csd")[0])
+
+    def test_gan_spa_cum_cuoi(self):  # ten_sach bỏ 'gần spa' cuối -> khớp đúng đuôi, chắc
+        self.assertEqual(A.ten_sach("CÔ THẢO GẦN SPA"), "co thao")
+        self.assertEqual(A.ten_sach("Gần Spa"), "gan spa")  # cả tên chỉ có cụm này: giữ
+        self.hd("H1", D, "K1", "CÔ THẢO GẦN SPA", "TIÊM FILLER")
+        self.assertEqual(self.khop("Cô Thảo - trc filler môi 10/10/26")[:2], ("H1", 85))
 
     def test_khong_dau_van_phai_khop_duoi(self):  # nhãn mất dấu, tên khách có dấu -> vẫn là tên Việt
         self.hd("H2", D, "K2", "Nguyễn Thị Anh", "CSD")
         self.hd("H3", D, "K3", "Lê Ngọc Anh Thư", "CSD")
-        self.assertIsNone(self.khop("Ngoc Anh-csd")[0])
+        self.assertEqual(self.khop("Ngoc Anh-csd")[:2], ("H3", 50))  # (2): chỉ gợi ý
         self.hd("H1", D, "K1", "Trần Ngọc Anh", "CSD")
         self.assertEqual(self.khop("Ngoc Anh-csd")[0], "H1")
 
@@ -103,13 +132,15 @@ class LuatTen(Nen):
         self.hd("H1", D, "K1", "Trần Ngọc Anh", "Pico")
         self.hd("H3", D, "K3", "Lê Ngọc Anh Thư", "CSD")
         hd, d, _ = self.khop("Ngọc Anh-csd")
-        self.assertEqual((hd, d), ("H1", 40))
+        self.assertEqual((hd, d), ("H3", 50))  # khách đủ chữ + đúng dịch vụ: chỉ gợi ý, không 85
 
     def test_ten_nhan_hop(self):
         n2 = {"ten": "ngoc anh", "ten_goc": "ngọc anh"}
         self.assertTrue(A._ten_nhan_hop(n2, "Trần Ngọc Anh"))
         self.assertFalse(A._ten_nhan_hop(n2, "Nguyễn Thị Anh"))
-        self.assertFalse(A._ten_nhan_hop(n2, "Lê Ngọc Anh Thư"))
+        self.assertTrue(A._ten_nhan_hop(n2, "Lê Ngọc Anh Thư"))  # (2) đủ chữ: không phải 'tên khác'
+        self.assertTrue(A._ten_nhan_hop({"ten": "kim my", "ten_goc": "kim mỹ"}, "Trần Thị Mỹ Kim"))
+        self.assertFalse(A._ten_nhan_hop({"ten": "ngoc mai", "ten_goc": "ngọc mai"}, "Trịnh Xuân Mai"))
         self.assertTrue(A._ten_nhan_hop({"ten": "anh", "ten_goc": "anh"}, "Nguyễn Thị Anh"))  # 1 chữ như cũ
         self.assertTrue(A._ten_nhan_hop({"ten": "cheng wei", "ten_goc": "cheng wei"}, "Wu Cheng Wei"))
         self.assertTrue(A._ten_nhan_hop({"ten": "laser trang", "ten_goc": "laser trang"}, "Lê Thu Trang"))
@@ -134,6 +165,16 @@ class LuatNgay(Nen):
         hd, d, ly_do = self.khop("Quyên-csd 8/10/26", goc=1)
         self.assertEqual((hd, d), ("HD10", 50))
         self.assertIn("có khách khác cùng tên", ly_do)
+
+    def test_ngay_goc_0_sat_anh_exif_coi_nhu_co_ngay_goc(self):
+        self.hd("HD10", D, "K1", "Nguyễn Thị Quyên", "CSD MỤN")
+        self.hd("HD8", N, "K1", "Nguyễn Thị Quyên", "CSD MỤN")
+        self.anh(D, "10:00:00", "", ngay_goc=1)
+        a = self.anh(D, "10:00:30", "Quyên-csd 8/10/26", ngay_goc=0)   # sát ảnh EXIF 30s
+        b = self.anh(D, "16:00:00", "Quyên-csd 8/10/26", ngay_goc=0)   # đứng riêng: âm, theo nhãn
+        k = self.ghep()
+        self.assertEqual(k[a][0], "HD10")
+        self.assertEqual(k[b][0], "HD8")
 
     def test_khong_ngay_goc_theo_nhan(self):  # âm: ngay_goc 0 / NULL -> ngày nhãn như cũ
         self.hd("HD10", D, "K1", "Nguyễn Thị Quyên", "CSD MỤN")
@@ -216,6 +257,21 @@ class MatTheoNgay(Nen):
         k = self.ghep(self.D3)[a]
         self.assertEqual(k[:2], ("A4", "chac"))
         self.assertIn("theo ngày chụp", k[2])
+
+    def test_mat_va_nhan_du_chu_khac_vi_tri_len_chac(self):
+        self.c.execute("UPDATE visits SET ten_kh='Trần Một Khach' WHERE ma_kh='KH1'")  # nhãn 'Khach Một' đảo thứ tự
+        self.c.execute("DELETE FROM visits WHERE ma_kh='KH9'")
+        a = self.anh(self.D3, "09:00:00", "Khach Một-laser 3/10/26", ngay_goc=1, km="P-A")
+        k = self.ghep(self.D3)[a]
+        self.assertEqual(k[:2], ("A4", "chac"))
+        self.assertNotIn("nhãn ghi tên khác", k[2])
+
+    def test_mat_nhan_thieu_chu_la_ten_khac(self):  # âm (3)
+        self.c.execute("UPDATE visits SET ten_kh='Trần Thị Mot' WHERE ma_kh='KH1'")
+        self.c.execute("DELETE FROM visits WHERE ma_kh='KH9'")
+        a = self.anh(self.D3, "09:00:00", "Ngọc Mot-laser 3/10/26", ngay_goc=1, km="P-A")
+        k = self.ghep(self.D3)[a]
+        self.assertNotEqual(k[1], "chac")
 
     def test_mat_khong_ngay_goc_nhu_cu(self):  # âm: như cũ (luật 'cùng khuôn mặt' đã gắn A4 -> giữ), không ghi chú ngày
         a = self.anh(self.D3, "09:00:00", "Mot-laser 1/10/26", ngay_goc=None, km="P-A")
