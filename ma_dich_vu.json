@@ -177,6 +177,24 @@
       "vein"
     ]
   },
+  "tiem giai": {
+    "nghia": "tiêm giải (mắt) = tan filler (CEO thêm 16/10 — đồng nghĩa hiển nhiên)",
+    "khop": [
+      "tan filler",
+      "tieu filler",
+      "tiem giai",
+      "filler"
+    ]
+  },
+  "laser lift": {
+    "nghia": "laser lift = laser nội bì (CEO thêm 16/10 — đồng nghĩa hiển nhiên)",
+    "khop": [
+      "laser lift",
+      "laserlift",
+      "lifting",
+      "noi bi"
+    ]
+  },
   "_ocr_sai": {
     "gsd": "csd",
     "isd": "csd",

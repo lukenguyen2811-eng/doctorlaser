@@ -622,7 +622,9 @@ class SietVong6(Nen):  # CEO 16/10 lần 6: chỉ siết
                self.anh(D, "16:19:04", km="P-A"), self.anh(D, "16:19:07", km="P-A"),
                self.anh(D, "16:19:09", "Ngọc Bích-Revivio 10/10/26", km="P-B")]
         ids += [self.anh(D, f"16:19:{15 + i * 5}", km="P-B") for i in range(4)]
-        self.assertNotEqual(self.ghep()[ids[3]][:2], ("H2", "chac"))
+        kq = self.ghep()
+        self.assertNotEqual(kq[ids[3]][:2], ("H2", "chac"))
+        self.assertEqual(kq[ids[3]][:2], ("H1", "goi_y"))  # gợi ý HĐ của nhãn bên kia (cùng mặt) — ca 07308BE4
 
     def test_combo_hon_san_pham(self):  # ca DA329CFE: combo CSD mụn hơn HĐ chỉ sữa rửa mặt
         self.assertLess(A._hang_hd("COMBO CSD MỤN ( 10 LẦN )"), A._hang_hd("REVSKIN - SỬA RỬA MẶT DEEP CLEASER"))
@@ -643,6 +645,48 @@ class SietVong6(Nen):  # CEO 16/10 lần 6: chỉ siết
               {"code": "b", "ngay": D, "gio": "14:14", "dich_vu": "TRIỆT LÔNG MÉP/MẶT | PEEL DA MỤN (LẦN LẺ)"}]
         r = {"hd": None, "gio": dt_.datetime.fromisoformat(f"{D}T11:34:45"), "goc": 1}
         self.assertEqual(A._chon_hd_mat(vs, [D], r, [], ["peel"])["code"], "b")
+
+
+class ThuTuHdVong7(unittest.TestCase):  # CEO 16/10 lần 7: dịch vụ nhãn -> loại HĐ chỉ SP/thu tiền -> giờ; hạng buổi chỉ khi < 20'
+    import datetime as _dt
+
+    def chon(self, vs, gio, ma=(), quanh=()):
+        vs = [{"code": c, "ngay": D, "gio": g, "dich_vu": dv} for c, g, dv in vs]
+        r = {"hd": None, "gio": self._dt.datetime.fromisoformat(f"{D}T{gio}"), "goc": 1}
+        return A._chon_hd_mat(vs, [D], r, list(ma), list(quanh))["code"]
+
+    def test_tiem_giai_la_tan_filler(self):  # ca 374C2565
+        self.assertEqual(self.chon([("a", "17:03", "TIÊM SẸO LỒI"), ("b", "16:43", "ĐẶT CỌC | TIÊM TAN FILLER LÀM ĐẦY")],
+                                   "16:28:12", ma=[A.doc_nhan("Hoa- tiêm giải mắt 10/10/26", 2026)[0]["ma_dv"]]), "b")
+
+    def test_dong_thanh_toan_khong_de_gio(self):  # ca 7A6D7343: dòng thanh toán công nợ không đè giờ
+        self.assertEqual(self.chon([("a", "17:14", "TIÊM XÓA NHĂN"), ("b", "14:52", "THANH TOÁN CÔNG NỢ VEIN | LASER NỘI BÌ")],
+                                   "14:47:37"), "b")
+
+    def test_laser_lift_la_noi_bi(self):
+        self.assertEqual(self.chon([("a", "14:50", "TIÊM XÓA NHĂN"), ("b", "17:14", "LASER NỘI BÌ (2 VÙNG)")],
+                                   "14:47:37", ma=["laser lift"]), "b")
+
+    def test_chu_dv_lap_trong_hd(self):  # ca B51FBC22: nhãn 'exosome' (không có trong bảng) đúng chữ trong tên HĐ
+        self.assertEqual(self.chon([("a", "09:47", "LASER FRACTIONAL"), ("b", "16:39", "TIÊM EXOSOME")], "09:30:13",
+                                   quanh=["exosome"]), "b")
+        self.assertEqual(self.chon([("a", "09:47", "CSD MỤN"), ("b", "16:39", "BÙ KIM RF")], "09:30:13",
+                                   quanh=["kim"]), "a")  # âm: chữ ngắn lạ không xếp hạng
+
+    def test_nhan_gach_duoi(self):  # ca 226F532B: 'Nhat Minh_sẹo'
+        n = A.doc_nhan("Nhat Minh_sẹo 1 1/1 1/25", 2025)[0]
+        self.assertEqual((n["ten"], n["ma_dv"]), ("nhat minh", "seo"))
+
+    def test_gio_thang_khi_khong_nhan(self):  # ca 59BE90A2: 14' vs 76', không nhãn dịch vụ -> giờ thắng
+        self.assertEqual(self.chon([("a", "14:47", "LASER ĐỐT MỤN THỊT MẶT"),
+                                    ("b", "13:17", "KEM REVITALUX | ĐIỀU TRỊ SẸO RỖ")], "13:31:41"), "b")
+
+    def test_hang_buoi_chi_khi_gio_sat(self):  # B76B82C7 giữ: chênh 2' -> buổi CSD hơn đặt cọc/combo
+        self.assertEqual(self.chon([("a", "15:54", "CSD MỤN | TRIỆT LÔNG MẶT"), ("b", "15:56", "ĐẶT CỌC CSD | COMBO CSD")],
+                                   "15:58:38", ma=["csd"]), "a")
+        # chênh > 20' -> giờ thắng dù HĐ gần là combo
+        self.assertEqual(self.chon([("a", "15:00", "CSD MỤN"), ("b", "15:56", "COMBO CSD ( 10 LẦN )")], "15:58:38",
+                                   ma=["csd"]), "b")
 
 
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
