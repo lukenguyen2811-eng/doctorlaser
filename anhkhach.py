@@ -3351,7 +3351,8 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
                 if v_xa and v_xa["ngay"] != ngay:
                     k_xa = _khoa_hd(conn, cum, v_xa["code"], nho)
                     ma_nhan = [n["ma_dv"] for n in nhans if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
-                    if ma_nhan and _la_hd_goi(v_xa) and not any(_dv_goi_khop(m, v_xa["dich_vu"] or "") for m in ma_nhan):
+                    if ma_nhan and any(_MOC_GOI in (p["ly_do"] or "") for p in moc) and not any(
+                            _dv_goi_khop(m, v_xa["dich_vu"] or "") for m in ma_nhan):  # chỉ mốc gói (B2), không mốc A
                         # CEO lần 14 (12CB524D): nhãn trong đơn vị ghi dịch vụ khác gói VÀ khách có HĐ lẻ dịch vụ đó trong
                         # ±30 ngày -> không gắn gói (ưu tiên HĐ đó, ghép đã gợi ý)
                         d_ = dt.date.fromisoformat(ngay)
