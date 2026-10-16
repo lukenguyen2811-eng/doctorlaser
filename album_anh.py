@@ -59,6 +59,11 @@ NHOM = [
     ("Căng chỉ", ["cang chi"]),
     ("Laserlift", ["laser lift", "laserlift", "lifting"]),
     ("Triệt lông", ["triet long"]),
+    # CEO 16/10 thêm theo số ảnh bị bỏ sót: nội bì ~860 ảnh, Revivio ~210, HIFU/Thermax/RF, Exosome
+    ("Laser nội bì", ["noi bi"]),
+    ("Revivio", ["revivio"]),
+    ("HIFU, Thermax, RF", ["hifu", "thermax", "rf"]),
+    ("Exosome", ["exosome"]),
 ]
 # Dòng không phải dịch vụ làm trên người: công nợ / cọc, và sản phẩm bán kèm (kem, serum, thuốc...).
 _KHONG_DV = re.compile(r"\b(cong no|dat coc|chuyen coc)\b")
