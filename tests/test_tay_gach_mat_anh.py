@@ -843,6 +843,16 @@ class Vong11(Nen):  # CEO 17/10 lần 11 (ca F5256326, HD002294 ngày 24/08/2026
         ids, kq = self.ca(mat_khac="P-X")
         self.assertEqual(kq[ids[0]][:2], ("H1", "chac"))
 
+    def test_bo_lan_khong_ha_khi_mat_gop_2_nguoi(self):  # âm (a), ma20 0E7B26E5: 2 phần bộ, mỗi phần nhãn riêng, cùng mã mặt
+        self.hd("H1", D, "K1", "Trần Thị Kim Ngân", "CSD MỤN", "10:00")
+        self.hd("H2", D, "K2", "Nguyễn Thị Thu Hà", "CSD MỤN", "10:05")
+        gio = ["10:42:09", "10:42:16", "10:42:24", "10:42:32", "10:42:39", "10:42:56", "10:43:04", "10:43:17", "10:43:28",
+               "10:43:38"]
+        ids = [self.anh(D, g, {0: "Kim Ngân - csd 24/8/26", 5: "Thu Hà - csd 24/8/26"}.get(i, ""), km="P-G")
+               for i, g in enumerate(gio)]
+        kq = self.ghep()
+        self.assertFalse([i for i in ids if "nhãn ghi tên khác chụp liền" in (kq[i][2] or "")])
+
     def test_phan_ten_mat_khac_khong_keo_sang_khach(self):  # HD002294: khớp một phần tên, mặt khác hẳn ảnh chắc của K2
         ids, kq = self.ca()
         self.assertNotEqual(kq[ids[1]][0], "H2")

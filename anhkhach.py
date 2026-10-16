@@ -1637,7 +1637,10 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None, cum: dict | None 
         mx = x.get("mat_ds") or set()
         ten2 = any(len([w for w in n["ten"].split() if w not in XUNG_HO and w not in _chu_dv_nhan() and len(w) >= 2]) >= 2
                    for n in x.get("nhan_ds") or ())
-        if x["xn"] or (x.get("khoa_nhan") and ten2) or x["do_tin"] != "chac" or not x["hd"] or not mx or len(mx) > MAT_TOI_DA \
+        # chỉ ảnh chắc theo NHÃN TRÊN CHÍNH ẢNH (nhãn 1 chữ tên gọi): ảnh lan theo luật bộ không xét — bộ đã tách theo
+        # nhãn từng phần, mã mặt app Ảnh có thể gộp 2 người (đo ma20: ca 0E7B26E5 hạ oan)
+        if x["xn"] or (x.get("khoa_nhan") and ten2) or not x["nhan"] or not (x["ly_do"] or "").startswith(_NEO_TEN) \
+                or x["do_tin"] != "chac" or not x["hd"] or not mx or len(mx) > MAT_TOI_DA \
                 or any(k in (x["ly_do"] or "") for k in ("khớp SĐT", "khớp mã KH", "khớp tên + dịch vụ", "khớp tên '")):
             continue
         k = khoa_hd.get(x["hd"])
