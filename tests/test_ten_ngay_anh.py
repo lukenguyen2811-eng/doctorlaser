@@ -90,6 +90,7 @@ class LuatTen(Nen):
     def test_bot_chu_chung_ben_trai_van_duoc(self):  # 'Laser Trang' -> 'Trang' (chữ chung, không phải tên)
         self.hd("H1", D, "K1", "Lê Thu Trang", "CSD")
         self.assertEqual(self.khop("Laser Trang-csd")[0], "H1")
+        self.assertEqual(self.khop("Rỗ Trang-csd")[0], "H1")  # 'rỗ' = sẹo rỗ, không phải tên
 
     def test_ocr_lech_mot_chu_phai_dung_chu_truoc(self):
         self.hd("H1", D, "K1", "Trần Ngọc Thanh", "CSD")

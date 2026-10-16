@@ -682,7 +682,7 @@ def _lech_1(a: str, b: str) -> bool:
 # ('Trần Ngọc Anh'), không khớp 'Nguyễn Thị Anh', không rơi xuống khớp 1 chữ 'Anh'. Chỉ được bớt chữ thừa
 # bên trái khi chữ đó không phải tên: chữ chung ('laser', 'doctor'), xưng hô, mã dịch vụ, chữ ghi chú.
 _CHU_THUA_TEN = ((_KHONG_PHAI_TEN | XUNG_HO | set(LOAI_NHAN) | DV_CHUNG | DONG_TU_DV | _TU_DV_THEM
-                  | _GHI_CHU_TEN | set(MA_DV) | set(MA_DV_OCR)) - _KHONG_GACH_BO)
+                  | _GHI_CHU_TEN | set(MA_DV) | set(MA_DV_OCR) | {"ro"}) - _KHONG_GACH_BO)  # 'rỗ' (sẹo rỗ)
 
 
 def _bot_duoc(w: list[str], k: int) -> bool:
