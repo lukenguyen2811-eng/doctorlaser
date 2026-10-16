@@ -38,6 +38,13 @@ from urllib.parse import parse_qs, quote, urlparse
 DB_FILE = os.environ.get("ANH_DB", "anhkhach.db")
 # Tắt từng luật để đo riêng (CEO 17/10 lần 12): TAT_LUAT="L2,L3,L5" (mặc định bật hết).
 _TAT = set(x.strip() for x in os.environ.get("TAT_LUAT", "").split(",") if x.strip())
+# Luật TẮT mặc định trong mã, chỉ bật bằng BAT_LUAT (CEO 17/10 lần 13: L5 mặt yếu soát 4/5 -> không lên).
+_BAT = set(x.strip() for x in os.environ.get("BAT_LUAT", "").split(",") if x.strip())
+_MAC_DINH_TAT = {"L5"}
+
+
+def _luat_bat(ten: str) -> bool:
+    return ten not in _TAT and (ten not in _MAC_DINH_TAT or ten in _BAT)
 PORT = int(os.environ.get("ANH_PORT", "8765"))
 GIO_TRUOC, GIO_SAU = 30, 45  # hóa đơn trong [đầu đợt - 30', cuối đợt + 45'] coi là gần giờ chụp
 DOT_PHUT = 15  # ảnh cách nhau <= 15 phút coi là cùng một đợt chụp
@@ -1683,6 +1690,8 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None, cum: dict | None 
         k = khoa_hd.get(hd)
         if r.get("mat_k") and k is not None and r["mat_k"] != k:
             continue
+        if conn is not None and _nhan_ten_khac_bo(conn, r["gio"].date().isoformat(), r, ds, t):
+            continue  # CEO 17/10 lần 13: bộ có nhãn ghi tên khách khác -> nhường
         x = min(gan, key=lambda x: abs((x["gio"] - r["gio"]).total_seconds()))
         r.update(hd=hd, do_tin="chac", diem=80,
                  ly_do=f"cùng người (mã mặt app Ảnh) với ảnh khớp chắc cùng ngày lúc {x['gio']:%H:%M} — tách theo người"
@@ -2157,6 +2166,15 @@ def _chu_mot_chieu(a: str, g: str) -> bool:
 
 
 _GIAY_TO = ("phieu", "don thuoc", "cam ket", "hoa don", "doctorlaser org")
+
+
+_TU_PHIEU = ("sdt", "ngay den", "nguoi gioi thieu", "tong tien", "ho ten", "dia chi", "ngay sinh", "so dien thoai")
+
+
+def _la_phieu(p) -> bool:
+    """Ảnh phiếu/giấy tờ (L3, CEO 17/10 lần 13): _la_giay_to hoặc có chữ in của phiếu (SĐT, NGÀY ĐẾN, HỌ TÊN…)."""
+    chu = khong_dau(p["ocr"] or "")
+    return _la_giay_to(p) or any(re.search(rf"\b{k}\b", chu) for k in _TU_PHIEU)
 
 
 def _la_giay_to(p) -> bool:
@@ -2771,6 +2789,23 @@ _MOC_GOI = "HĐ gói duy nhất trong 180 ngày"
 _MOC_SAU = "HĐ của chính khách 1–2 ngày sau"
 
 
+def _nhan_ten_khac_bo(conn, ngay: str, r: dict, ds: list[dict], ten_k: str | None) -> bool:
+    """CEO 17/10 lần 13 (ca A37410F4): trong bộ (cùng bộ hoặc cách <= CHUOI_GIAY) có nhãn THẬT ghi tên KHÁC khách được
+    gắn/gợi ý: nhãn có mã dịch vụ nhận ra được, hoặc tên khớp HĐ của khách khác cùng ngày -> True (luật nhường)."""
+    if not ten_k:
+        return False
+    khac = [v["ten_kh"] for v in conn.execute("SELECT ten_kh FROM visits WHERE ngay=?", (ngay,))
+            if v["ten_kh"] and v["ten_kh"] != ten_k]
+    for x in ds:
+        if not ((r["bo"] is not None and x["bo"] == r["bo"]) or abs((x["gio"] - r["gio"]).total_seconds()) <= CHUOI_GIAY):
+            continue
+        for n in x.get("nhan_ds") or ():
+            if _ten_that_nhan(n) and not _ten_hop_mo(n, ten_k) and (
+                    _ma_ro(n["ma_dv"]) or any(_ten_hop_mo(n, t) for t in khac)):
+                return True
+    return False
+
+
 def _la_hd_goi(v) -> bool:
     return bool(_GOI_RE.search(v["dich_vu"] or ""))
 
@@ -2782,6 +2817,11 @@ def _buoi_goi(conn, p, photos, ket_qua, cum, k, c, mas, ngay, cu_all, ma_dvs, mo
         gắn HĐ gói gốc.
     B2: K có ĐÚNG 1 HĐ gói trong 180 ngày trước -> gợi ý HĐ đó (mốc _MOC_GOI, tự duyệt tính là 1 nguồn).
     An toàn: K có HĐ gói SAU ngày chụp (<= 30 ngày) mà trước ngày chụp không có gói nào -> không áp (A cũng không)."""
+    r0 = ket_qua[p["id"]]
+    ten_k = next((v["ten_kh"] for v in cu_all), None) or (conn.execute(
+        f"SELECT ten_kh FROM visits WHERE ma_kh IN ({','.join('?' * len(mas))}) LIMIT 1", mas).fetchone() or [None])[0]
+    if _nhan_ten_khac_bo(conn, ngay, r0, list(ket_qua.values()), ten_k):
+        return None
     d0 = dt.date.fromisoformat(ngay)
     dau = ",".join("?" * len(mas))
     sau = [v for v in conn.execute(
@@ -3117,7 +3157,8 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
                 continue
             bo_chac = ks.pop()
             mat_chac = {u for p in chac_dv for u in _doc_mat(p["khuon_mat"])}
-            dv = chac_dv + [p for p in dv if p not in chac_dv and not (
+            # CEO 17/10 lần 13 (ca 2DBFC2D8): ảnh giấy tờ (phiếu của khách khác) không theo ảnh chắc
+            dv = chac_dv + [p for p in dv if p not in chac_dv and not _la_phieu(p) and not (
                 _doc_mat(p["khuon_mat"]) and mat_chac and not set(_doc_mat(p["khuon_mat"])) & mat_chac)]
         # xet_lai (lặp nhiều lượt): ảnh đã tự duyệt cũng xét lại để kiểm kết quả không đổi; ảnh bị loại vì đổi HĐ ('BỎ:')
         # không xét nữa.
@@ -3141,7 +3182,7 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
             nhans = [n for p in cho for n in _td_nhan_that(p)]
         gy = [p["goi_y_hd"] for p in cho if p["goi_y_hd"] and not (p["ly_do"] or "").startswith("tự duyệt")]
         yeu = set()
-        if "L5" not in _TAT and mat_yeu:
+        if _luat_bat("L5") and mat_yeu:
             for u in mat:
                 if u not in cum["cum"] and u not in cum["lan"] and len(mat_yeu.get(u) or ()) == 1:
                     yeu |= set(mat_yeu[u])
@@ -3155,7 +3196,8 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
                 v_xa = conn.execute("SELECT * FROM visits WHERE code=?", (next(iter(hds_xa)),)).fetchone()
                 if v_xa and v_xa["ngay"] != ngay:
                     k_xa = _khoa_hd(conn, cum, v_xa["code"], nho)
-                    if k_xa and k_xa not in ung:
+                    if k_xa and k_xa not in ung and not any(
+                            _ten_that_nhan(n) and not _ten_hop_mo(n, v_xa["ten_kh"]) for n in nhans):
                         ung[k_xa] = [v_xa]
                         xa = (k_xa, v_xa)
         ctx = {"chu_mat": chu, "chu_nhan_mat": chu_nm, "nhans": nhans, "gio": dt.datetime.fromisoformat(dv[0]["thoi_gian"]),

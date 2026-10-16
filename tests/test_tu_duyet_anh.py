@@ -332,3 +332,34 @@ class Vong12(TuDuyet):  # CEO 17/10 lần 12: buổi theo gói (A/B1/B2), L5 m�
     def test_l3_tat(self):
         ids, td = self.l3(tat=True)
         self.assertFalse(any(i in td for i in ids))
+
+
+class Vong13(Vong12):  # CEO 17/10 lần 13: chỉ siết
+    def test_l5_tat_mac_dinh(self):
+        self.assertFalse(A._luat_bat("L5"))
+        A._BAT.add("L5")
+        try:
+            self.assertTrue(A._luat_bat("L5"))
+        finally:
+            A._BAT.discard("L5")
+
+    def test_l3_bo_anh_phieu(self):  # ca 2DBFC2D8: ảnh phiếu giấy trong đơn vị đã chắc -> không theo
+        self.hd("K1-D", D, "K1", "Phan Thị Lan", "CSD", "10:05")
+        self.hd("L1-D", D, "L1", "Trần Văn Nam", "CSD", "15:00")
+        ids = [self.anh(D, "10:08:10", km="P-K", do_tin="chac", goi_y="K1-D", ly_do="nhãn 'Lan-csd' khớp Phan Thị Lan"),
+               self.anh(D, "10:08:15", "HỌ TÊN: Trần Văn Nam  SĐT: 0909", do_tin="chua_ro"),
+               self.anh(D, "10:08:20", do_tin="chua_ro")]
+        td = A.tu_duyet_on_dinh(self.c, [D])
+        self.assertNotIn(ids[1], td)
+        self.assertEqual(td[ids[2]][0], "K1-D")  # âm: ảnh thường vẫn theo
+
+    def test_lg_nhuong_nhan_ten_khac_trong_bo(self):  # ca A37410F4: bộ có nhãn tên khách khác -> không gợi ý gói
+        self.nen()
+        ids, kq, td = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"), ("14:00:20", "Hoa - pico 10/10/26", "P-K"))
+        self.assertFalse(any(A._MOC_GOI in (kq[i][2] or "") for i in ids))  # luật gói nhường (gợi ý cũ 'HĐ gần nhất' giữ như base)
+        self.assertFalse(any(td.get(i, ("",))[0] == "G1" for i in ids))
+
+    def test_lg_nhan_cung_ten_van_ap(self):  # âm: nhãn trong bộ là tên chính khách -> vẫn áp
+        self.nen()
+        ids, kq, _ = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "Lan - csd 10/10/26", "P-K"))
+        self.assertEqual(kq[ids[1]][:2], ("G1", "chac"))

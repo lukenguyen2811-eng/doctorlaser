@@ -894,6 +894,12 @@ class Vong12L2(Nen):  # CEO 17/10 lần 12 (L2): tách theo người CẢ NGÀY
         ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N P-Q")]
         self.assertNotIn("cả ngày", self.ghep()[ids[1]][2] or "")
 
+    def test_l2_nhuong_nhan_ten_khac_trong_bo(self):  # CEO lần 13: bộ có nhãn ghi tên khách khác -> L2 không áp
+        self.nen()
+        ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N"),
+               self.anh(D, "13:00:20", "Hoàng Huy - csd 10/10/26", km="P-B")]
+        self.assertNotIn("cả ngày", self.ghep()[ids[1]][2] or "")
+
     def test_tat_l2(self):
         self.nen()
         ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N")]
