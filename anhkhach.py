@@ -280,8 +280,10 @@ def _bo_chu_may_ghi(mo_ta: str | None) -> str:
 
 
 def _la_album_may(ten: str) -> bool:
-    """Album máy tạo (xuat --album): 'KH000123 · Tên', 'DV · ...' — không phải chữ của người."""
-    return bool(_DONG_MAY.match(ten or "")) or (ten or "").startswith("DV · ")
+    """Album máy tạo (xuat --album, album_anh.py): 'KH000123 · Tên', 'DV · ...', tháng 'YYYY-MM'
+    — không phải chữ của người."""
+    return (bool(_DONG_MAY.match(ten or "")) or (ten or "").startswith("DV · ")
+            or bool(re.fullmatch(r"\d{4}-\d{2}", ten or "")))
 
 
 def _tu_khoa_may_ghi() -> dict[str, set]:
