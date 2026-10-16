@@ -221,3 +221,114 @@ import unittest.mock  # noqa: E402
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Vong12(TuDuyet):  # CEO 17/10 lần 12: buổi theo gói (A/B1/B2), L5 mặt yếu, L3 phần còn lại của đơn vị đã chắc
+    def nen(self, goi=(("G1", "2026-09-20", "COMBO CSD ( 10 LẦN )"),)):
+        self.cum("K1", "Phan Thị Lan", "P-K")
+        for code, ngay, dv in goi:
+            self.hd(code, ngay, "K1", "Phan Thị Lan", dv, "09:00")
+        self.hd("L1-D", D, "L1", "Trần Văn Nam", "CSD", "10:20")
+        self.hd("M1-D", D, "M1", "Lê Thị Hoa", "CSD", "18:20")
+
+    def ghep_td(self, *anh):
+        ids = [self.anh(D, g, o, km=k) for g, o, k in anh]
+        A.ghep_ngay(self.c, D)
+        kq = {r[0]: (r[1], r[2], r[3]) for r in self.c.execute("SELECT id, goi_y_hd, do_tin, ly_do FROM photos WHERE ngay=?", (D,))}
+        return ids, kq, A.tu_duyet_on_dinh(self.c, [D])
+
+    def test_b2_goi_duy_nhat_goi_y_roi_tu_duyet(self):
+        self.nen()
+        ids, kq, td = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"))
+        self.assertEqual(kq[ids[0]][:2], ("G1", "goi_y"))
+        self.assertIn(A._MOC_GOI, kq[ids[0]][2])
+        self.assertEqual({td[i][0] for i in ids}, {"G1"})
+
+    def test_b1_nhan_dich_vu_khop_1_goi_chac(self):
+        self.nen()
+        ids, kq, _ = self.ghep_td(("14:00:10", "Lan - csd 10/10/26", "P-K"), ("14:00:15", "", "P-K"))
+        self.assertEqual(kq[ids[0]][:2], ("G1", "chac"))
+        self.assertIn("buổi theo gói — ngày chụp 10/10, HĐ gói G1 ngày 20/09", kq[ids[0]][2])
+
+    def test_b3_hai_goi_khong_ap(self):  # âm: >= 2 HĐ gói, không nhãn phân định
+        self.nen((("G1", "2026-09-20", "COMBO CSD ( 10 LẦN )"), ("G2", "2026-08-20", "COMBO TRIỆT LÔNG ( 6 LẦN )")))
+        ids, kq, td = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"))
+        self.assertNotIn(A._MOC_GOI, kq[ids[0]][2] or "")
+        self.assertFalse(any(td.get(i, ("",))[0] in ("G1", "G2") for i in ids))
+
+    def test_goi_moi_sau_ngay_chup_khong_ap(self):  # âm: không gói trước ngày chụp, có gói MỚI sau -> không áp (cả A)
+        self.nen((("G9", "2026-10-11", "COMBO CSD ( 10 LẦN )"),))
+        ids, kq, td = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"))
+        self.assertNotIn("G9", {kq[i][0] for i in ids})
+        self.assertFalse(any(i in td for i in ids))
+
+    def test_a_hd_1_2_ngay_sau(self):
+        self.nen((("S1", "2026-10-11", "CSD MỤN ( LẦN LẺ )"),))
+        ids, kq, td = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"))
+        self.assertEqual(kq[ids[0]][:2], ("S1", "goi_y"))
+        self.assertIn(A._MOC_SAU, kq[ids[0]][2])
+        self.assertEqual({td[i][0] for i in ids}, {"S1"})
+
+    def test_tat_lg(self):  # TAT_LUAT=LG -> hành vi cũ
+        self.nen()
+        A._TAT.add("LG")
+        try:
+            ids, kq, td = self.ghep_td(("14:00:10", "", "P-K"), ("14:00:15", "", "P-K"))
+        finally:
+            A._TAT.discard("LG")
+        self.assertNotIn(A._MOC_GOI, kq[ids[0]][2] or "")
+
+    # ---- L5 mặt yếu ----
+    def test_l5_mat_yeu_la_nguon_phu(self):
+        ctx = {"chu_mat": set(), "chu_nhan_mat": set(), "nhans": [], "gio": A.dt.datetime(2026, 10, 10, 10, 8),
+               "co_goc": True, "goi_y": None, "chu_mat_yeu": {"K"}}
+        v = {"code": "H", "ngay": "2026-10-10", "gio": "10:05", "ten_kh": "x", "dich_vu": "CSD"}
+        self.assertEqual(A._td_diem([], "K", [v], ctx)["mat"], A.TD_MAT_YEU)
+        self.assertEqual(A._td_diem([], "J", [v], ctx)["mat"], 0.0)  # mặt yếu không phản bác khách khác
+
+    def test_l5_mat_yeu_gio_khong_du(self):  # âm: mặt yếu + giờ sát -> không nhận
+        d = {"K": {"mat": A.TD_MAT_YEU, "nhan": 0.0, "gio": 1.5, "goi_y": 0.0},
+             "J": {"mat": 0.0, "nhan": 0.0, "gio": -1.5, "goi_y": 0.0}}
+        self.assertIsNone(A._td_quyet(d)[0])
+
+    def test_l5_mat_yeu_cong_nhan(self):
+        d = {"K": {"mat": A.TD_MAT_YEU, "nhan": A.TD_NHAN_CO, "gio": 0.0, "goi_y": 0.0},
+             "J": {"mat": 0.0, "nhan": A.TD_NHAN_PHAN, "gio": 0.0, "goi_y": 0.0}}
+        self.assertEqual(A._td_quyet(d)[0], "K")
+
+    def test_l5_mat_yeu_tu_anh_chac_ngay_khac(self):
+        self.hd("K1-0", "2026-09-01", "K1", "Phan Thị Lan", "CSD")
+        self.anh("2026-09-01", "10:00:00", km="P-W", do_tin="chac", goi_y="K1-0", ly_do="nhãn 'x-csd' khớp")
+        cum = A.cum_khach(self.c)
+        self.assertNotIn("P-W", cum["cum"])
+        self.assertEqual(set(A._td_mat_yeu(self.c, cum)["P-W"]), {A._khoa_hd(self.c, cum, "K1-0", {})})
+
+    # ---- L3 phần còn lại của đơn vị đã có ảnh chắc ----
+    def l3(self, ly0="nhãn 'Lan-csd' khớp Phan Thị Lan", km1="", tat=False):
+        self.hd("K1-D", D, "K1", "Phan Thị Lan", "CSD", "10:05")
+        self.hd("L1-D", D, "L1", "Trần Văn Nam", "CSD", "15:00")
+        ids = [self.anh(D, "10:08:10", km="P-K", do_tin="chac", goi_y="K1-D", ly_do=ly0),
+               self.anh(D, "10:08:15", km=km1, do_tin="chua_ro"), self.anh(D, "10:08:20", do_tin="chua_ro")]
+        if tat:
+            A._TAT.add("L3")
+        try:
+            return ids, A.tu_duyet_on_dinh(self.c, [D])
+        finally:
+            A._TAT.discard("L3")
+
+    def test_l3_phan_con_lai_theo_anh_chac(self):
+        ids, td = self.l3()
+        self.assertEqual({td[i][0] for i in ids[1:]}, {"K1-D"})
+        self.assertNotIn(ids[0], td)  # ảnh chắc (ghép) không bị ghi đè
+
+    def test_l3_anh_chac_theo_mat_khong_tinh(self):  # âm: ảnh chắc do luật mặt -> không làm nguồn bộ
+        ids, td = self.l3(ly0="khuôn mặt thuộc khách K1 (cụm 9 ảnh đã xác nhận) + HĐ cùng ngày")
+        self.assertFalse(any(i in td for i in ids))
+
+    def test_l3_xen_ke_mat_khac(self):  # âm: ảnh còn lại mang mặt KHÁC ảnh chắc -> bỏ khỏi đơn vị
+        ids, td = self.l3(km1="P-Z")
+        self.assertNotIn(ids[1], td)
+
+    def test_l3_tat(self):
+        ids, td = self.l3(tat=True)
+        self.assertFalse(any(i in td for i in ids))

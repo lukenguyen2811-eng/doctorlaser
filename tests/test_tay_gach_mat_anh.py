@@ -864,6 +864,46 @@ class Vong11(Nen):  # CEO 17/10 lần 11 (ca F5256326, HD002294 ngày 24/08/2026
         self.assertEqual(kq[ids[1]][0], "H2")
 
 
+class Vong12L2(Nen):  # CEO 17/10 lần 12 (L2): tách theo người CẢ NGÀY
+    def nen(self):
+        self.hd("H1", D, "K1", "Trần Thị Kim Ngân", "CSD MỤN", "08:00")
+        self.hd("H2", D, "K2", "Nguyễn Thị Thu Hà", "PICO NÁM", "15:00")
+        self.hd("H3", D, "K3", "Lê Văn Bình", "CSD MỤN", "11:00")
+
+    def test_cung_mat_cach_xa_len_chac(self):
+        self.nen()
+        ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N")]
+        kq = self.ghep()
+        self.assertEqual(kq[ids[1]][:2], ("H1", "chac"))
+        self.assertIn("tách theo người cả ngày", kq[ids[1]][2])
+
+    def test_mat_co_neo_2_hd_khong_len(self):  # âm: cùng mặt có ảnh neo của 2 HĐ khác nhau trong ngày
+        self.nen()
+        ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N"),
+               self.anh(D, "15:10:00", "Thu Hà - pico 10/10/26", km="P-N")]
+        self.assertNotEqual(self.ghep()[ids[1]][:2], ("H1", "chac"))
+
+    def test_mat_co_nhan_ten_khac_trong_ngay_khong_len(self):  # âm: cùng mặt có ảnh nhãn ghi tên khác (chưa khớp HĐ)
+        self.nen()
+        ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N"),
+               self.anh(D, "16:00:00", "Hoàng Huy - csd 10/10/26", km="P-N")]
+        self.assertNotEqual(self.ghep()[ids[1]][:2], ("H1", "chac"))
+
+    def test_anh_2_mat_khong_len(self):  # âm: ảnh 2 mặt (có thể 2 người) không áp cả ngày
+        self.nen()
+        ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N P-Q")]
+        self.assertNotIn("cả ngày", self.ghep()[ids[1]][2] or "")
+
+    def test_tat_l2(self):
+        self.nen()
+        ids = [self.anh(D, "08:10:00", "Kim Ngân - csd 10/10/26", km="P-N"), self.anh(D, "13:00:00", km="P-N")]
+        A._TAT.add("L2")
+        try:
+            self.assertNotIn("cả ngày", self.ghep()[ids[1]][2] or "")
+        finally:
+            A._TAT.discard("L2")
+
+
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
     import datetime as _dt
 

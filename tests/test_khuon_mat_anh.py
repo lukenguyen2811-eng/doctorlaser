@@ -106,7 +106,8 @@ class KhuonMat(unittest.TestCase):
         self.anh("moi", "2026-10-03", "14:00", "P-A")
         r = self.ghep()
         self.assertEqual(r["n"][:2], ("H2", "chac"))
-        self.assertEqual(r["moi"][:2], ("H2", "goi_y"))
+        # CEO 17/10 lần 12 (L2 tách theo người cả ngày): cùng mặt, đúng 1 HĐ neo trong ngày -> chắc (trước: gợi ý)
+        self.assertEqual(r["moi"][:2], ("H2", "chac"))
 
     def test_cot_moi_tren_db_cu(self):  # DB cũ chưa có cột -> thêm, giữ dữ liệu
         f = os.path.join(self.tam, "cu.db")
