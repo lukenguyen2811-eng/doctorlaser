@@ -170,9 +170,15 @@ class CumMat(unittest.TestCase):
 
     def test_nhieu_hd_chon_gio_gan(self):
         self.cum_kh1()
-        self.c.execute("INSERT INTO visits VALUES ('A5',?,'09:05','KH1','Khach Mot','0901000001','Kem','')", (D,))
+        self.c.execute("INSERT INTO visits VALUES ('A5',?,'09:05','KH1','Khach Mot','0901000001','Laser','')", (D,))
         a = self.anh(D, "09:00:00", "P-A")
         self.assertEqual(self.ghep()[a][:2], ("A5", "chac"))
+
+    def test_nhieu_hd_hd_kem_xep_sau(self):  # CEO 16/10 lần 3: HĐ chỉ bán kem gần giờ hơn vẫn xếp sau HĐ dịch vụ
+        self.cum_kh1()
+        self.c.execute("INSERT INTO visits VALUES ('A5',?,'09:05','KH1','Khach Mot','0901000001','Kem','')", (D,))
+        a = self.anh(D, "09:00:00", "P-A")
+        self.assertNotEqual(self.ghep()[a][0], "A5")
 
     def test_anh_nhieu_mat_khong_duoc_nhan(self):
         self.cum_kh1()

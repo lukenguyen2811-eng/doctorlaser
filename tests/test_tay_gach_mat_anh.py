@@ -116,15 +116,47 @@ class ChuDemMat(MatNen):
         self.cum("K1", "Nguyễn Thị Yến")
         self.assertTrue(A._ten_hop_mat({"ten": "t yen", "ten_goc": "t yến"}, "Nguyễn Thị Yến"))
 
-    def test_chu_dem_khong_mat_goi_y(self):  # không mặt: 1 khách khớp chữ đệm + dịch vụ -> gợi ý 50
+    def test_chu_dem_khong_mat_dv_khop_chac(self):  # CEO 16/10 lần 3: chỉ 1 khách khớp chữ đệm + dịch vụ -> chắc
         self.hd("H1", D, "K1", "Lê Thị Phương Thảo", "CSD")
         a = self.anh(D, "15:10:00", "Phương-csd 10/10/26")
-        k = self.ghep()[a]
-        self.assertEqual(k[:2], ("H1", "goi_y"))
+        self.assertEqual(self.ghep()[a][:2], ("H1", "chac"))
 
-    def test_chu_dem_mat_yeu_khong_chac(self):  # âm: cụm chưa mạnh
+    def test_chu_dem_khong_mat_gan_gio_chac(self):  # dịch vụ lệch nhưng giờ HĐ cách giờ chụp <= 30' -> chắc
+        self.hd("H1", D, "K1", "Lê Thị Phương Thảo", "Laser Fractional", "15:00")
+        a = self.anh(D, "15:10:00", "Phương-pico 10/10/26")
+        self.assertEqual(self.ghep()[a][:2], ("H1", "chac"))
+
+    def test_chu_dem_lech_dv_xa_gio_goi_y(self):  # âm (ca 24A56F34): dịch vụ lệch + giờ HĐ cách 2 giờ -> gợi ý
+        self.hd("H1", D, "K1", "Lê Thị Phương Thảo", "Triệt lông nách", "11:55")
+        a = self.anh(D, "13:53:00", "Phương-ha môi 10/10/26")
+        self.assertNotEqual(self.ghep()[a][1], "chac")
+
+    def test_chu_dem_hai_khach_khong_chac(self):  # âm: khách khác cùng ngày có tên cuối 'Phương'
+        self.hd("H1", D, "K1", "Lê Thị Phương Thảo", "CSD", "15:00")
+        self.hd("H2", D, "K2", "Trần Thu Phương", "Botox", "09:00")
+        a = self.anh(D, "15:10:00", "Phương-csd 10/10/26")
+        self.assertNotEqual(self.ghep()[a][:2], ("H1", "chac"))
+
+    def test_mat_khac_anh_cu_khong_nang(self):  # âm (ca 24A56F34): mặt khác hẳn ảnh đã chắc của khách -> không nâng
+        self.hd("H0", "2026-09-01", "K1", "Lê Thị Phương Thảo", "CSD")
+        self.anh("2026-09-01", "10:00:00", km="P-CU", do_tin="chac", goi_y="H0", ly_do="nhãn 'x' khớp")
+        self.hd("H1", D, "K1", "Lê Thị Phương Thảo", "CSD | Tiêm filler")
+        a = self.anh(D, "15:10:00", "Phương-ha môi 10/10/26", km="P-LA")
+        self.assertNotEqual(self.ghep()[a][1], "chac")
+
+    def test_ho_khong_nang(self):  # âm (ca DBBAAD78): nhãn = HỌ ('Trân' ~ 'Trần Hà Anh Thư') -> không chắc
+        self.hd("H1", D, "K1", "Trần Hà Anh Thư", "Pico", "15:05")
+        a = self.anh(D, "15:10:00", "Trần-pico 10/10/26")
+        self.assertNotEqual(self.ghep()[a][1], "chac")
+
+    def test_dao_thu_tu_gan_gio_chac(self):  # ca E243DBDB: 'Trường Sơn' ~ 'Phạm Lý Sơn Trường' + giờ khớp
+        self.hd("H1", D, "K1", "Phạm Lý Sơn Trường", "Điện di C sau sẹo", "16:45")
+        a = self.anh(D, "16:55:00", "Trường Sơn-csd 10/10/26")
+        self.assertEqual(self.ghep()[a][:2], ("H1", "chac"))
+
+    def test_chu_dem_mat_yeu_lech_khong_chac(self):  # âm: cụm chưa mạnh, dịch vụ lệch, giờ xa
         self.cum("K1", "Lê Thị Phương Thảo", n=3)
-        a = self.anh(D, "15:10:00", "Phương-csd 10/10/26", km="P-K")
+        a = self.anh(D, "17:50:00", "Phương-botox 10/10/26", km="P-K")
         self.assertNotEqual(self.ghep()[a][1], "chac")
 
 
@@ -191,6 +223,33 @@ class ChonHdMat(MatNen):
         kq = self.ghep()
         self.assertEqual({kq[i][:2] for i in ids}, {("K1-b", "chac")})
 
+    def test_bo_chu_rac_hd_khac_cung_khach_van_lan(self):  # ca A6FCB23F: tấm OCR rác gợi ý HĐ khác của CÙNG khách
+        self.cum("K1", "Phan Thị Lan")
+        self.hd("K1-a", D, "K1", "Phan Thị Lan", "Thanh toán combo | Tiêm PRP", "13:20")
+        self.hd("K1-b", D, "K1", "Phan Thị Lan", "Dặm vein mặt", "13:22")
+        ids = [self.anh(D, "13:23:39", "xoá-vein", km="P-K")] + \
+            [self.anh(D, f"13:23:{50 + i * 3}", km="P-K") for i in range(3)]
+        kq = self.ghep()
+        self.assertEqual({kq[i][1] for i in ids[1:]}, {"chac"})
+
+    def test_ma_trong_ten_nhan_cung_bo(self):  # ca 57707D17: nhãn bộ 'Khắc Bách XVM' (mã nằm trong phần tên)
+        self.cum("K1", "Châu Khắc Bách")
+        self.hd("K1-a", D, "K1", "Châu Khắc Bách", "Tiêm mesotherapy | Xóa vein mũi", "17:22")
+        self.hd("K1-b", D, "K1", "Châu Khắc Bách", "Peel da mụn", "17:12")
+        self.anh(D, "17:11:15", "Khắc Bách XVM 10/10/26", km="P-K")
+        a = self.anh(D, "17:11:24", km="P-K")
+        self.assertEqual(self.ghep()[a][:2], ("K1-a", "chac"))
+
+    def test_bo_hd_khach_khac_van_chan(self):  # âm: tấm trong bộ khớp chắc HĐ của khách KHÁC -> không lan
+        self.cum("K1", "Phan Thị Lan")
+        self.hd("K1-a", D, "K1", "Phan Thị Lan", "CSD", "13:20")
+        self.hd("HX", D, "KX", "Nguyễn Thị Hoa", "CSD", "13:20")
+        ids = [self.anh(D, "13:23:39", "Hoa-csd 10/10/26")] + [self.anh(D, f"13:23:{50 + i * 3}", km="P-K")
+                                                              for i in range(3)]
+        kq = self.ghep()
+        self.assertEqual(kq[ids[0]][:2], ("HX", "chac"))
+        self.assertNotIn("với ảnh nhận theo khuôn mặt", kq[ids[0]][2])
+
     def test_ham_chon_hd(self):
         import datetime as dt
         vs = [{"code": "x1", "ngay": D, "gio": "14:39", "dich_vu": "Tiêm filler"},
@@ -201,6 +260,50 @@ class ChonHdMat(MatNen):
         self.assertEqual(A._chon_hd_mat(vs, [D, "2026-10-09"], r, [])["code"], "x2")  # giờ gần hơn HĐ đang gắn
         r["hd"] = "x3"  # HĐ đang gắn ở ngày khác (buổi theo nhãn) -> giữ ngày đó (như cũ)
         self.assertEqual(A._chon_hd_mat(vs, [D, "2026-10-09"], r, ["csd"])["code"], "x3")
+
+
+
+class ChonHdDv(unittest.TestCase):  # CEO 16/10 lần 3: dịch vụ nhãn (sát nhất) -> dịch vụ thật -> giờ -> HĐ đang gắn
+    import datetime as _dt
+    R = {"hd": None, "gio": _dt.datetime.fromisoformat(f"{D}T12:00:00"), "goc": 1}
+
+    def chon(self, vs, ma=(), quanh=(), chu=""):
+        vs = [{"code": c, "ngay": D, "gio": g, "dich_vu": dv} for c, g, dv in vs]
+        return A._chon_hd_mat(vs, [D], dict(self.R), list(ma), list(quanh), chu)["code"]
+
+    def test_co2_fractional_sat_hon_mun_thit(self):  # ca D14C5AD7
+        self.assertEqual(self.chon([("a", "11:51", "LASER FRACTIONAL | CSD MỤN"),
+                                    ("b", "11:58", "LASER MỤN THỊT VÙNG BỤNG ( LẦN LẺ )")], quanh=["co2"]), "a")
+
+    def test_sau_filler_khong_phai_tan_filler(self):  # ca 28355FAE
+        vs = [("a", "11:52", "TIÊM FILLER LÀM ĐẦY HÀN ( 1CC )"), ("b", "11:59", "TIÊM TAN FILLER LÀM ĐẦY")]
+        self.assertEqual(self.chon(vs, quanh=["filler"], chu="sau filler"), "a")
+        self.assertEqual(self.chon(vs, ma=["filler"], chu="tan filler"), "b")  # nhãn ghi 'tan filler' -> HĐ tan
+
+    def test_pico_sat_hon_chu_nam(self):  # ca C27CEF61
+        self.assertEqual(self.chon([("a", "08:21", "Laser Picolight toàn mặt trị nám"),
+                                    ("b", "11:50", "MELASMA-REVSKIN | TIÊM MESO SKIN BOOSTER (giảm nám)")],
+                                   quanh=["pico"]), "a")
+
+    def test_hd_thuoc_xep_sau(self):  # ca 4ACBA65E: không nhãn, HĐ chỉ bán thuốc gần giờ hơn
+        self.assertEqual(self.chon([("a", "11:25", "TIÊM MESOTHERAPY | XÓA VEIN MẶT"),
+                                    ("b", "11:58", "THUỐC TRỊ THÂM MEDICOS ARBUTIN")]), "a")
+
+    def test_ma_rac_dung_nhan_quanh(self):  # ca AE3CDAC3: mã OCR rác của chính ảnh -> dùng nhãn cùng bộ/đợt
+        self.assertEqual(self.chon([("a", "09:22", "TIÊM FILLER"), ("b", "11:50", "TIÊM PRP PREMIUM")],
+                                   ma=["limeorange"], quanh=["filler"]), "a")
+
+    def test_chu_ma_trong_ten_nhan(self):  # ca EB9573DF: 'Khắc Bách xvm' -> 'xvm' ~ 'XÓA VEIN MŨI'
+        self.assertEqual(self.chon([("a", "10:22", "TIÊM MESOTHERAPY | XÓA VEIN MŨI ( LẦN LẺ )"),
+                                    ("b", "12:01", "PEEL DA MỤN (LẦN LẺ)")], ma=["xvm"], quanh=["csd"]), "a")
+
+    def test_dv_ngang_thi_gio(self):  # ca tốt D2B814B2/5D32A7BC: cùng là dịch vụ, không nhãn -> giờ gần nhất
+        self.assertEqual(self.chon([("a", "09:11", "TIÊM MESO SKIN BOOSTER | TIÊM FILLER"),
+                                    ("b", "12:01", "TIÊM FILLER THẨM MỸ")]), "b")
+
+    def test_dat_coc_cong_no_xep_sau(self):  # ca tốt D87AB34D, AEBEB0C6
+        self.assertEqual(self.chon([("a", "11:59", "ĐẶT CỌC"), ("b", "11:40", "COMBO PICOLIGHT 5 LẦN")]), "b")
+        self.assertEqual(self.chon([("a", "11:59", "THANH TOÁN CÔNG NỢ CSD"), ("b", "11:40", "ĐIỆN DI C SAU SẸO")]), "b")
 
 
 if __name__ == "__main__":

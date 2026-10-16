@@ -66,11 +66,15 @@ class LuatTen(Nen):
         self.hd("H2", D, "K2", "Nguyễn Thị Anh", "CSD")
         self.assertIsNone(self.khop("Ngọc Anh-csd")[0])
 
-    def test_ngoc_anh_nam_giua_ten_viet_chi_goi_y(self):  # CEO 16/10 (2): đủ chữ, sai vị trí -> tối đa 50
+    def test_ngoc_anh_nam_giua_ten_viet_chac(self):  # CEO 16/10 lần 3: chữ đệm + tên LIỀN NHAU -> khớp tên (85)
         self.hd("H3", D, "K3", "Lê Ngọc Anh Thư", "CSD")
         hd, d, ly_do = self.khop("Ngọc Anh-csd")
-        self.assertEqual((hd, d), ("H3", 50))
-        self.assertIn("có đủ tên nhưng khác thứ tự/vị trí", ly_do)
+        self.assertEqual((hd, d), ("H3", 85))
+        self.assertIn("liền nhau", ly_do)
+
+    def test_khoi_lien_khong_gom_ho(self):  # âm: khối liền nhau bắt đầu ở họ ('Lê Ngọc' ~ 'Lê Ngọc Anh Thư') -> 50
+        self.hd("H3", D, "K3", "Lê Ngọc Anh Thư", "CSD")
+        self.assertEqual(self.khop("Lê Ngọc-csd")[:2], ("H3", 50))
 
     def test_dao_thu_tu_co_ho_ten_goi_3_chu_chi_goi_y(self):  # (2)
         for i, (nhan, ten) in enumerate([("Kim Mỹ", "Trần Thị Mỹ Kim"), ("Cao Thanh", "Cao Thị Thanh"),
@@ -78,7 +82,8 @@ class LuatTen(Nen):
             self.c.execute("DELETE FROM visits")
             self.hd(f"H{i}", D, f"K{i}", ten, "CSD")
             # CEO 16/10: 'Hà Trần' (2 chữ, cuối là họ phổ biến) = tên gọi Hà -> 'Trần Hà' khớp đúng như đuôi.
-            self.assertEqual(self.khop(f"{nhan}-csd")[:2], (f"H{i}", 85 if ten == "Hà Trần" else 50), nhan)
+            # CEO 16/10 lần 3: 'Ngọc Huyền' = chữ liền nhau trong họ tên -> 85.
+            self.assertEqual(self.khop(f"{nhan}-csd")[:2], (f"H{i}", 85 if ten in ("Hà Trần", "Nguyễn Ngọc Huyền Trân") else 50), nhan)
 
     def test_du_chu_hai_khach_nguoi_chon(self):  # âm (2): 2 khách đủ chữ -> không đoán
         self.hd("H1", D, "K1", "Trần Thị Mỹ Kim", "CSD")
@@ -103,7 +108,7 @@ class LuatTen(Nen):
     def test_khong_dau_van_phai_khop_duoi(self):  # nhãn mất dấu, tên khách có dấu -> vẫn là tên Việt
         self.hd("H2", D, "K2", "Nguyễn Thị Anh", "CSD")
         self.hd("H3", D, "K3", "Lê Ngọc Anh Thư", "CSD")
-        self.assertEqual(self.khop("Ngoc Anh-csd")[:2], ("H3", 50))  # (2): chỉ gợi ý
+        self.assertEqual(self.khop("Ngoc Anh-csd")[:2], ("H3", 85))  # chữ liền nhau (CEO 16/10 lần 3)
         self.hd("H1", D, "K1", "Trần Ngọc Anh", "CSD")
         self.assertEqual(self.khop("Ngoc Anh-csd")[0], "H1")
 
