@@ -1562,7 +1562,7 @@ def _ten_that_nhan(n: dict) -> bool:
                                         for w in n["ten"].split())
 
 
-def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None) -> None:
+def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None, cum: dict | None = None) -> None:
     """Bộ/loạt chụp nhiều khách (CEO 16/10 lần 7, ca 91E9E71A): ảnh chưa chắc có MÃ MẶT (app Ảnh) trùng ảnh neo chắc
     theo chứng cứ riêng (nhãn/tên/SĐT/mã KH) chụp liền (cùng bộ hoặc cách <= CHUOI_GIAY), không trùng mặt ảnh nhãn
     nào khác HĐ, mặt không thuộc cụm mạnh khách khác -> 'chac' theo neo đó (tách theo người, không hạ cả bộ).
@@ -1576,8 +1576,6 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None) -> None:
     truoc = {id(x): x["hd"] for x in ds}  # trạng thái trước luật (tránh lan dây chuyền trong vòng lặp)
     neo = [x for x in ds if x["hd"] and x["diem"] >= 80 and x["do_tin"] == "chac" and x.get("mat_ds")
            and (x["ly_do"] or "").startswith(_NEO_TEN)]
-    if not neo:
-        return
     nhan_khac = [x for x in ds if x["nhan"] and x.get("mat_ds")]
     ten_nho: dict = {}
 
@@ -1632,6 +1630,44 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None) -> None:
         r.update(hd=hd, do_tin="chac", diem=80,
                  ly_do=f"cùng người (mã mặt app Ảnh) với ảnh khớp chắc chụp cách"
                  f" {abs((x['gio'] - r['gio']).total_seconds()):.0f}s — tách bộ theo người{cu}")
+    # CEO 17/10 lần 11 (ca F5256326): ảnh CHẮC mà cùng mã mặt có ảnh nhãn ghi TÊN KHÁC khách của HĐ đó chụp liền (cùng
+    # người mang 2 tên) -> cũng không chắc. Giữ: đã duyệt, nhãn trên chính ảnh có >= 2 chữ tên khớp, SĐT, mã KH, đủ họ
+    # tên trên ảnh, và mặt thuộc cụm đã xác nhận của chính khách đó (nhãn kia là tên gọi khác — bài học vòng 9).
+    for x in ds:
+        mx = x.get("mat_ds") or set()
+        ten2 = any(len([w for w in n["ten"].split() if w not in XUNG_HO and w not in _chu_dv_nhan() and len(w) >= 2]) >= 2
+                   for n in x.get("nhan_ds") or ())
+        if x["xn"] or (x.get("khoa_nhan") and ten2) or x["do_tin"] != "chac" or not x["hd"] or not mx or len(mx) > MAT_TOI_DA \
+                or any(k in (x["ly_do"] or "") for k in ("khớp SĐT", "khớp mã KH", "khớp tên + dịch vụ", "khớp tên '")):
+            continue
+        k = khoa_hd.get(x["hd"])
+        if cum is not None and k is not None and any(cum["cum"].get(u, {}).get("khach") == k for u in mx):
+            continue
+        if ten_khac(x, mx, x["hd"]):
+            x.pop("khoa_nhan", None)  # nhãn 1 chữ (tên gọi) trên ảnh không còn là bậc 1 khi cùng người có nhãn tên khác
+            x.update(do_tin="goi_y", diem=40,
+                     ly_do=(x["ly_do"] or "") + " — nhưng cùng mã mặt với ảnh có nhãn ghi tên khác chụp liền — người chọn")
+
+
+def _bo_goi_y_phan_ten_mat_khac(ds: list[dict], khoa_hd: dict, cum: dict) -> None:
+    """CEO 17/10 lần 11 (ca HD002294): gợi ý từ nhãn KHỚP MỘT PHẦN TÊN (và ảnh lan từ đó) mà mặt trên ảnh khác hẳn mặt
+    các ảnh CHẮC cùng ngày của chính HĐ đó (và không thuộc cụm mặt của khách đó) -> bỏ gợi ý, người chọn."""
+    mat_hd: dict = {}
+    for x in ds:
+        if x["hd"] and (x["do_tin"] == "chac" or x["xn"]) and x.get("mat_ds") and len(x["mat_ds"]) <= MAT_TOI_DA:
+            mat_hd.setdefault(x["hd"], set()).update(x["mat_ds"])
+    for r in ds:
+        ly = r["ly_do"] or ""
+        if r["do_tin"] != "goi_y" or r["xn"] or not r["hd"] or "khớp một phần tên" not in ly:
+            continue
+        m, cua = r.get("mat_ds") or set(), mat_hd.get(r["hd"])
+        if not m or len(m) > MAT_TOI_DA or not cua or m & cua:
+            continue
+        k = khoa_hd.get(r["hd"])
+        if any(cum["cum"].get(u, {}).get("khach") == k for u in m):
+            continue
+        r.update(hd=None, do_tin="chua_ro", diem=0,
+                 ly_do=f"nhãn khớp một phần tên khách của {r['hd']} nhưng mặt khác hẳn ảnh chắc của khách đó — người chọn")
 
 
 def _xen_ke(phan: list[dict], hd: str, khoa_hd: dict | None) -> bool:
@@ -1858,7 +1894,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
     if cum is None:
         cum = cum_khach(conn)
     _lan_bo_theo_mat(ket_qua, _nhan_lai_theo_mat(conn, ngay, photos, ket_qua, nhan_that, cum), conn)
-    _tach_theo_nguoi([ket_qua[p["id"]] for p in photos], khoa_hd, conn)
+    _tach_theo_nguoi([ket_qua[p["id"]] for p in photos], khoa_hd, conn, cum)
+    _bo_goi_y_phan_ten_mat_khac([ket_qua[p["id"]] for p in photos], khoa_hd, cum)
     _canh_bao_mat(conn, photos, ket_qua, cum)
 
     _khoa_nhan_tren_anh(ket_qua)

@@ -822,6 +822,38 @@ class Vong10(Nen):  # CEO 17/10 lần 10: tách theo người
         self.assertEqual(ds[0]["hd"], "H2")
 
 
+class Vong11(Nen):  # CEO 17/10 lần 11 (ca F5256326, HD002294 ngày 24/08/2026)
+    def ca(self, nhan_neo="Ngân - csd 24/8/26", mat_khac="P-N", mat_ha="P-H"):
+        self.hd("H1", D, "K1", "Trần Thị Kim Ngân", "CSD MỤN", "14:00")
+        self.hd("H2", D, "K2", "Nguyễn Thị Thu Hà", "PICO NÁM", "15:00")
+        ids = [self.anh(D, "14:25:17", nhan_neo, km="P-N"), self.anh(D, "14:25:17", "Thu - csd 24/8/26", km=mat_khac),
+               self.anh(D, "14:25:22", km=mat_khac), self.anh(D, "16:17:34", "Thu Hà - pico 24/8/26", km=mat_ha),
+               self.anh(D, "16:17:38", km=mat_ha)]
+        return ids, self.ghep()
+
+    def test_neo_cung_mat_nhan_ten_khac_khong_chac(self):  # F5256326: nhãn 1 chữ + cùng mặt có nhãn tên khác -> gợi ý
+        ids, kq = self.ca()
+        self.assertEqual(kq[ids[0]][:2], ("H1", "goi_y"))
+
+    def test_neo_ho_ten_du_van_chac(self):  # âm: nhãn trên ảnh >= 2 chữ tên khớp -> giữ chắc
+        ids, kq = self.ca("Kim Ngân - csd 24/8/26")
+        self.assertEqual(kq[ids[0]][:2], ("H1", "chac"))
+
+    def test_nhan_ten_khac_khac_mat_van_chac(self):  # âm: ảnh nhãn tên khác là NGƯỜI KHÁC (khác mã mặt) -> giữ chắc
+        ids, kq = self.ca(mat_khac="P-X")
+        self.assertEqual(kq[ids[0]][:2], ("H1", "chac"))
+
+    def test_phan_ten_mat_khac_khong_keo_sang_khach(self):  # HD002294: khớp một phần tên, mặt khác hẳn ảnh chắc của K2
+        ids, kq = self.ca()
+        self.assertNotEqual(kq[ids[1]][0], "H2")
+        self.assertNotEqual(kq[ids[2]][0], "H2")
+        self.assertEqual(kq[ids[3]][:2], ("H2", "chac"))
+
+    def test_phan_ten_cung_mat_van_goi_y(self):  # âm: mặt trùng ảnh chắc của K2 -> vẫn theo K2
+        ids, kq = self.ca(mat_khac="P-H")
+        self.assertEqual(kq[ids[1]][0], "H2")
+
+
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
     import datetime as _dt
 
