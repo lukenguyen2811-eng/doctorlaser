@@ -381,8 +381,7 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
         self.hd("G4", "2025-09-09", "K1", "Phan Thị Lan", dv, "09:00")
         for i in range(so_ngay):
             ng = f"2025-{9 + i:02d}-15"
-            self.hd(f"L{i}", ng, "K1", "Phan Thị Lan", "ĐIỀU TRỊ SẸO RỖ", "09:00")
-            self.anh(ng, "10:00:00", km="P-K", do_tin="chac", goi_y=f"L{i}", ly_do="nhãn 'x-seo' khớp")
+            self.anh(ng, "10:00:00", km="P-K", do_tin="chac", goi_y="G4", ly_do="buổi theo gói")
         return self.c.execute("SELECT * FROM visits WHERE code='G4'").fetchone()
 
     def test_goi_het_buoi(self):
@@ -391,6 +390,14 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
 
     def test_goi_con_buoi(self):  # âm: mới 3/4 buổi
         v = self.goi(so_ngay=3)
+        self.assertTrue(A._goi_con_buoi(self.c, v, ["K1"], "2026-02-26"))
+
+    def test_goi_khong_dem_hd_le_cung_dich_vu(self):  # âm, ma22 6F7DA67F: buổi lẻ trả tiền riêng không trừ buổi gói
+        v = self.goi(so_ngay=0)
+        for i in range(5):
+            ng = f"2025-{9 + i:02d}-20"
+            self.hd(f"X{i}", ng, "K1", "Phan Thị Lan", "ĐIỀU TRỊ SẸO RỖ", "09:00")
+            self.anh(ng, "10:00:00", km="P-K", do_tin="chac", goi_y=f"X{i}", ly_do="nhãn 'x-seo' khớp")
         self.assertTrue(A._goi_con_buoi(self.c, v, ["K1"], "2026-02-26"))
 
     def test_goi_khong_ghi_so_lan_coi_nhu_con(self):  # âm: gói không ghi số lần ('BH 12 tháng') -> không biết -> còn

@@ -2992,27 +2992,19 @@ _SO_LAN = re.compile(r"(\d+)\s*(?:LẦN|LAN|BUỔI|BUOI)\b", re.I)
 
 
 def _goi_con_buoi(conn, v, mas, ngay: str) -> bool:
-    """CEO 17/10 lần 14 (ca 12CB524D): gói ghi số lần ('4 LẦN', '10 buổi') mà số NGÀY đã có buổi của khách (ảnh chắc /
-    người duyệt của khách, hoặc HĐ lẻ cùng dịch vụ) từ ngày mua tới TRƯỚC ngày chụp đã đủ -> hết buổi (False).
-    Gói không ghi số lần -> không biết, coi như còn (True). Dòng 'TẶNG KÈM n LẦN' không tính là số buổi gói."""
+    """CEO 17/10 lần 14 (ca 12CB524D): gói ghi số lần ('4 LẦN', '10 buổi') mà số NGÀY đã có buổi của gói từ ngày mua tới
+    TRƯỚC ngày chụp đã đủ -> hết buổi (False). Ngày có buổi = ngày có ảnh chắc / người duyệt gắn CHÍNH HĐ gói.
+    KHÔNG đếm HĐ lẻ cùng dịch vụ: đo ma22 ca 6F7DA67F (soát đúng) — 'CSD MỤN', 'ĐIỆN DI C SAU SẸO' là buổi trả tiền
+    riêng, đếm vào làm gói 10 lần 'hết' sai. Gói không ghi số lần -> không biết, coi như còn (True). 'TẶNG KÈM n LẦN'
+    không tính."""
     dong = [x for x in (v["dich_vu"] or "").split("|") if _GOI_RE.search(x)]  # chữ gốc (có dấu) từng dòng
     so = [int(m.group(1)) for x in dong for m in [_SO_LAN.search(re.sub(r"(tặng kèm|tang kem|tặng|tang)\b.*", "", x,
                                                                          flags=re.I))] if m]
     if not so:
         return True
-    dau = ",".join("?" * len(mas))
-    ma_goi = [m for m in MA_DV if _dv_goi_khop(m, " | ".join(dong))]
-    if not ma_goi:
-        return True  # không biết gói dịch vụ gì -> không đếm được
-    # ngày đã có buổi: ảnh chắc/người duyệt gắn CHÍNH HĐ gói, hoặc gắn HĐ của khách có CÙNG dịch vụ gói
     ngays = {r[0] for r in conn.execute(
-        f"SELECT DISTINCT p.ngay, x.code, x.dich_vu FROM photos p JOIN visits x ON x.code = COALESCE(p.xn_hd, p.goi_y_hd)"
-        f" WHERE x.ma_kh IN ({dau}) AND (p.xn_hd IS NOT NULL OR p.do_tin = 'chac') AND p.ngay >= ? AND p.ngay < ?",
-        (*mas, v["ngay"], ngay)) if r[1] == v["code"] or any(_dv_goi_khop(m, r[2] or "") for m in ma_goi)}
-    ngays |= {x["ngay"] for x in conn.execute(
-        f"SELECT * FROM visits WHERE ma_kh IN ({dau}) AND ngay > ? AND ngay < ? AND code != ?", (*mas, v["ngay"], ngay,
-                                                                                               v["code"]))
-              if not _la_hd_goi(x) and any(_dv_goi_khop(m, x["dich_vu"] or "") for m in ma_goi)}
+        "SELECT DISTINCT ngay FROM photos WHERE COALESCE(xn_hd, goi_y_hd) = ? AND (xn_hd IS NOT NULL OR do_tin = 'chac')"
+        " AND ngay >= ? AND ngay < ?", (v["code"], v["ngay"], ngay))}
     return len(ngays) < max(so)
 
 
@@ -3360,7 +3352,14 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
                     k_xa = _khoa_hd(conn, cum, v_xa["code"], nho)
                     ma_nhan = [n["ma_dv"] for n in nhans if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
                     if ma_nhan and _la_hd_goi(v_xa) and not any(_dv_goi_khop(m, v_xa["dich_vu"] or "") for m in ma_nhan):
-                        k_xa = None  # CEO lần 14 (12CB524D): nhãn trong đơn vị ghi dịch vụ khác gói -> không gắn gói
+                        # CEO lần 14 (12CB524D): nhãn trong đơn vị ghi dịch vụ khác gói VÀ khách có HĐ lẻ dịch vụ đó trong
+                        # ±30 ngày -> không gắn gói (ưu tiên HĐ đó, ghép đã gợi ý)
+                        d_ = dt.date.fromisoformat(ngay)
+                        if any(not _la_hd_goi(x) and any(_dv_khop(m, x["dich_vu"] or "") for m in ma_nhan)
+                               for x in conn.execute("SELECT * FROM visits WHERE ma_kh=? AND ngay BETWEEN ? AND ?",
+                                                     (v_xa["ma_kh"], (d_ - dt.timedelta(days=30)).isoformat(),
+                                                      (d_ + dt.timedelta(days=30)).isoformat()))):
+                            k_xa = None
                     if k_xa and k_xa not in ung and not any(  # nhường: đơn vị có nhãn tên khách khác có HĐ hôm nay
                             _ten_that_nhan(n) and not _ten_hop_mo(n, v_xa["ten_kh"])
                             and any(_ten_hop_mo(n, v["ten_kh"]) for v in visits) for n in nhans):
