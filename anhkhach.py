@@ -774,6 +774,8 @@ def _nhan_khong_nam(chu: str, nam: int) -> list[dict]:
     dv = (set(MA_DV) | set(MA_DV_OCR) | _TU_DV_THEM) - _KHONG_GACH_BO
     for m in _NHAN_KHONG_NAM.finditer(chu):
         tu = [(g, khong_dau(g).lower()) for g in m.group(1).split()]
+        if not tu or tu[-1][1] not in _DUOI_KH or not any(k in ("kh", "khach") for _, k in tu[-3:]):
+            continue  # chỉ dạng có chữ 'kh/khách (mới/cũ)' sát trước ngày — đo ma22: không dấu hiệu này bắt nhầm nhiều
         while tu and tu[-1][1] in _DUOI_KH:
             tu.pop()
         tu = [x for x in tu if len(x[1]) >= 2][-3:]
@@ -825,7 +827,7 @@ def doc_nhan(chu: str, nam_mac_dinh: int) -> list[dict]:
         ra.append({"goc": " ".join(goc.split()), "ten": " ".join(k for _, k in ten),
                    "ten_goc": " ".join(g for g, _ in ten),
                    "ma_dv": ma_dv, "ngay": ngay, "loai": loai, "gach": True})
-    return _danh_dau_quan_he(chu, ra or _nhan_khong_gach(chu) or _nhan_khong_nam(chu, nam_mac_dinh))
+    return _danh_dau_quan_he(chu, ra or _nhan_khong_gach(chu))
 
 
 # Nhãn ghi NGƯỜI NHÀ (CEO 16/10 lần 4, ca 7C1078AF 'Con Chị Châu'): chữ quan hệ đứng trước (xưng hô +) tên -> người
@@ -1732,6 +1734,26 @@ def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None, cum: dict | None 
 NGAY_NHAN_LECH = 7  # ngày trên nhãn lệch ngày ảnh > 7 ngày = ảnh cũ lưu lại (CEO 17/10 lần 14, ca 20FBABFE)
 
 
+def _goi_y_nhan_khong_nam(conn, ngay: str, photos, ket_qua) -> None:
+    """CEO 17/10 lần 14 (ca 2F1DF9D9): ảnh CHƯA chắc có nhãn 'Tên kh mới dd/mm …' (không gạch, không năm) mà tên khớp
+    ĐÚNG 1 khách có HĐ đúng ngày nhãn (<= ngày ảnh, trong 60 ngày) -> gợi ý HĐ đó. Không đưa vào doc_nhan (không kéo bộ,
+    không đổi luật đợt), không bao giờ lên chắc."""
+    d0 = dt.date.fromisoformat(ngay)
+    for p in photos:
+        r = ket_qua[p["id"]]
+        if r["xn"] or r["do_tin"] in ("chac", "khong_hd"):
+            continue
+        for n in _nhan_khong_nam(f"{p['chu_thich'] or ''} {p['ocr'] or ''}", int(ngay[:4])):
+            dn = dt.date.fromisoformat(n["ngay"])
+            if not 0 < (d0 - dn).days <= 60:
+                continue
+            vs = [v for v in conn.execute("SELECT * FROM visits WHERE ngay=?", (n["ngay"],)) if _ten_nhan_hop(n, v["ten_kh"])]
+            if len({v["ma_kh"] or v["code"] for v in vs}) == 1 and r["hd"] != vs[0]["code"]:
+                r.update(hd=vs[0]["code"], do_tin="goi_y", diem=45,
+                         ly_do=f"nhãn (không gạch, không năm) ghi tên khách có HĐ ngày {_dd_mm(n['ngay'])} — người chọn")
+                break
+
+
 def _ha_ngay_nhan_lech(conn, ngay: str, ds: list[dict]) -> None:
     """Ảnh CHẮC (không phải người duyệt / nhãn bậc 1 trên chính ảnh) mà chính ảnh hoặc ảnh cùng bộ CÙNG NGƯỜI (cùng mã
     mặt, hoặc một trong hai không có mặt) mang NGÀY TRÊN NHÃN lệch ngày ảnh > NGAY_NHAN_LECH ngày, và HĐ đang gắn không
@@ -1746,8 +1768,8 @@ def _ha_ngay_nhan_lech(conn, ngay: str, ds: list[dict]) -> None:
             nho[code] = (v["ngay"], v["ma_kh"]) if v else (None, None)
         return nho[code]
     for x in ds:
-        if x["xn"] or x["do_tin"] != "chac" or not x["hd"] or x.get("khoa_nhan"):
-            continue
+        if x["xn"] or x["do_tin"] != "chac" or not x["hd"] or x.get("khoa_nhan") or x["ngay_goc"] != 0:
+            continue  # ảnh có ngày chụp gốc (EXIF) không phải ảnh cũ lưu lại
         mx = x.get("mat_ds") or set()
         lech = []
         for y in ds:
@@ -2029,6 +2051,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
     _bo_goi_y_phan_ten_mat_khac([ket_qua[p["id"]] for p in photos], khoa_hd, cum)
     if "LN" not in _TAT:
         _ha_ngay_nhan_lech(conn, ngay, [ket_qua[p["id"]] for p in photos])
+    _goi_y_nhan_khong_nam(conn, ngay, photos, ket_qua)
     _canh_bao_mat(conn, photos, ket_qua, cum)
 
     _khoa_nhan_tren_anh(ket_qua)
@@ -2981,11 +3004,14 @@ def _goi_con_buoi(conn, v, mas, ngay: str) -> bool:
     if not so:
         return True
     dau = ",".join("?" * len(mas))
+    ma_goi = [m for m in MA_DV if _dv_goi_khop(m, " | ".join(dong))]
+    if not ma_goi:
+        return True  # không biết gói dịch vụ gì -> không đếm được
+    # ngày đã có buổi: ảnh chắc/người duyệt gắn CHÍNH HĐ gói, hoặc gắn HĐ của khách có CÙNG dịch vụ gói
     ngays = {r[0] for r in conn.execute(
-        f"SELECT DISTINCT p.ngay FROM photos p JOIN visits x ON x.code = COALESCE(p.xn_hd, p.goi_y_hd)"
+        f"SELECT DISTINCT p.ngay, x.code, x.dich_vu FROM photos p JOIN visits x ON x.code = COALESCE(p.xn_hd, p.goi_y_hd)"
         f" WHERE x.ma_kh IN ({dau}) AND (p.xn_hd IS NOT NULL OR p.do_tin = 'chac') AND p.ngay >= ? AND p.ngay < ?",
-        (*mas, v["ngay"], ngay))}
-    ma_goi = [m for m in MA_DV if _dv_goi_khop(m, v["dich_vu"] or "")]
+        (*mas, v["ngay"], ngay)) if r[1] == v["code"] or any(_dv_goi_khop(m, r[2] or "") for m in ma_goi)}
     ngays |= {x["ngay"] for x in conn.execute(
         f"SELECT * FROM visits WHERE ma_kh IN ({dau}) AND ngay > ? AND ngay < ? AND code != ?", (*mas, v["ngay"], ngay,
                                                                                                v["code"]))

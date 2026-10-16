@@ -381,7 +381,7 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
         self.hd("G4", "2025-09-09", "K1", "Phan Thị Lan", dv, "09:00")
         for i in range(so_ngay):
             ng = f"2025-{9 + i:02d}-15"
-            self.hd(f"L{i}", ng, "K1", "Phan Thị Lan", "CSD", "09:00")
+            self.hd(f"L{i}", ng, "K1", "Phan Thị Lan", "ĐIỀU TRỊ SẸO RỖ", "09:00")
             self.anh(ng, "10:00:00", km="P-K", do_tin="chac", goi_y=f"L{i}", ly_do="nhãn 'x-seo' khớp")
         return self.c.execute("SELECT * FROM visits WHERE code='G4'").fetchone()
 
@@ -406,13 +406,16 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
         self.assertNotEqual(td.get(ids[1], ("",))[0], "G1")
 
     # ---- 1. ảnh cũ lưu lại: ngày trên nhãn lệch > 7 ngày (ca 20FBABFE) ----
+    ngay_goc = 0
+
     def ds(self, ngay_nhan, mat2="P-K"):
         import datetime as dt
         self.hd("HN", "2026-10-08", "K1", "Phan Thị Lan", "PRP", "09:00")
         self.hd("HC", "2025-03-28", "K1", "Phan Thị Lan", "PRP", "09:00")
         g = dt.datetime(2026, 10, 10, 14, 39)
         x = {"hd": "HN", "do_tin": "chac", "ly_do": "khuôn mặt thuộc khách K1 (cụm 9 ảnh) + HĐ cùng ngày (HĐ ngày 08/10)",
-             "diem": 80, "xn": None, "bo": 1, "gio": g, "mat_ds": {"P-K"}, "nhan": False, "nhan_ds": []}
+             "diem": 80, "xn": None, "bo": 1, "gio": g, "mat_ds": {"P-K"}, "nhan": False, "nhan_ds": [],
+             "ngay_goc": self.ngay_goc}
         y = dict(x, mat_ds={mat2}, nhan=True, nhan_ds=A.doc_nhan(f"Lan- prp {ngay_nhan}", 2026))
         A._ha_ngay_nhan_lech(self.c, "2026-10-10", [x, y])
         return x
@@ -420,6 +423,10 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
     def test_nhan_ngay_cu_ha_goi_y_hd_gan_ngay_nhan(self):
         x = self.ds("28/03/2025")
         self.assertEqual((x["hd"], x["do_tin"]), ("HC", "goi_y"))
+
+    def test_anh_co_exif_khong_ha(self):  # âm: ảnh có ngày chụp gốc (EXIF) không phải ảnh cũ lưu lại
+        self.ngay_goc = 1
+        self.assertEqual(self.ds("28/03/2025")["do_tin"], "chac")
 
     def test_nhan_sai_nam_khong_ha(self):  # âm: cùng ngày/tháng, khác năm = OCR sai năm
         self.assertEqual(self.ds("10/10/2023")["do_tin"], "chac")
@@ -432,12 +439,13 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
 
     # ---- 3. nhãn không gạch, không năm (ca 2F1DF9D9) ----
     def test_nhan_khong_nam_doc_duoc(self):
-        n = A.doc_nhan("Phạm Kim Anh kh mới 22/10 laser đốt mụn L1", 2020)
+        n = A._nhan_khong_nam("Phạm Kim Anh kh mới 22/10 laser đốt mụn L1", 2020)
+        self.assertEqual(A.doc_nhan("Phạm Kim Anh kh mới 22/10 laser đốt mụn L1", 2020), [])  # không vào doc_nhan
         self.assertEqual([(x["ten"], x["ngay"], x.get("khong_nam")) for x in n], [("pham kim anh", "2020-10-22", True)])
 
     def test_nhan_khong_nam_khong_bat_chu_thuong(self):  # âm
-        self.assertEqual(A.doc_nhan("giá 1/2 hộp", 2020), [])
-        self.assertEqual(A.doc_nhan("Lan 3/4", 2020), [])
+        for t in ("giá 1/2 hộp", "Lan 3/4", "Phạm Kim Anh 22/10 laser"):  # không có 'kh mới' -> không đọc
+            self.assertEqual(A._nhan_khong_nam(t, 2020), [], t)
 
     def test_nhan_khong_nam_chi_goi_y(self):
         self.hd("HK", "2026-10-08", "K9", "Phạm Thị Kim Anh", "LASER ĐỐT MỤN", "09:00")
