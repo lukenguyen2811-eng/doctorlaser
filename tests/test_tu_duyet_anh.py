@@ -120,6 +120,17 @@ class TuDuyet(Nen):
         vs[1]["gio"] = "10:15"
         self.assertTrue(A._td_ro_buoi(vs, vs[0], [], ctx))  # HĐ kia chỉ sản phẩm
 
+    def test_hd_my_pham_khong_thang_dich_vu(self):  # ca 920BC0D2: tự duyệt chọn HĐ dịch vụ, không HĐ kem gần giờ hơn
+        self.hd("K1-a", D, "K1", "Phan Thị An", "U mạch máu", "10:52")
+        self.hd("K1-b", D, "K1", "Phan Thị An", "Kem Revitalux", "11:53")
+        self.hd("L1-D", D, "L1", "Trần Văn Nam", "CSD", "11:30")
+        ids = self.don_vi("11:44", ocr0="An- pico 10/10/26")
+        A.ghep_ngay(self.c, D)
+        kq = A.tu_duyet_on_dinh(self.c, [D])
+        self.assertNotIn("K1-b", {kq[i][0] for i in ids if i in kq})
+        self.assertTrue(A._hd_that("U MẠCH MÁU"))
+        self.assertFalse(A._hd_that("KEM TRỊ THÂM NÁCH"))  # âm: sản phẩm có chữ 'thâm' vẫn là sản phẩm
+
     def test_ham_quyet(self):
         d = lambda m, n, g, y: {"mat": m, "nhan": n, "gio": g, "goi_y": y}  # noqa: E731
         self.assertEqual(A._td_quyet({"K": d(3, 0, 1.5, 0), "L": d(-5, 0, 1.5, 0)})[0], "K")

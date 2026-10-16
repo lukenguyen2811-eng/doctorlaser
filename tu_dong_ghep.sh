@@ -28,5 +28,15 @@ while true; do
       fi
     fi
   done
+  # Mỗi giờ (cùng vòng kéo hóa đơn): ghép lại tháng trước + tháng này rồi TỰ DUYỆT (CEO 16/10 lần 9). Tắt: TU_DUYET=0.
+  # --lap 3: xét lại cả ảnh đã tự duyệt, ảnh đổi HĐ giữa các lượt thì bỏ; không bao giờ đụng ảnh người đã duyệt.
+  if [ "${TU_DUYET:-1}" = "1" ] && [ $(((VONG - 1) % 6)) -eq 0 ]; then
+    TRUOC=$(date -v-1m +%Y-%m); NAY=$(date +%Y-%m)
+    for m in "$TRUOC" "$NAY"; do
+      .venv/bin/python anhkhach.py ghep "$m" > /dev/null 2>&1 || echo "  ! lỗi ghép $m trước tự duyệt"
+    done
+    echo "== tự duyệt $TRUOC $NAY $(date +%H:%M)"
+    .venv/bin/python anhkhach.py tu_duyet "$TRUOC" "$NAY" --lap 3 | tail -3 || echo "  ! lỗi tự duyệt"
+  fi
   sleep "$CHU_KY"
 done

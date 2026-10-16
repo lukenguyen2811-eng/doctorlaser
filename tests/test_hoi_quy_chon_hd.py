@@ -69,6 +69,9 @@ CA = [
     ("290D2AA1", "10:00", [("a", "11:00", "COMBO CSD MỤN & IPL"), ("b", "10:05", "CHĂM SÓC DA VỚI IPL ÁNH SÁNG")],
      [], ["csd"], "csd mun", "a"),
     ("B01A93ED", "10:00", [("a", "10:45", "CSD MỤN"), ("b", "10:02", "ĐIỆN DI C")], ["csd"], [], "", "a"),
+    # soat_td8 (vòng 9): HĐ chỉ mỹ phẩm gần giờ không thắng HĐ dịch vụ cùng khách (nhãn 'pico' không khớp HĐ nào)
+    ("920BC0D2", "11:44", [("a", "11:53", "KEM REVITALUX"), ("b", "10:52", "U MẠCH MÁU")], [], ["pico"], "", "b"),
+    ("920BC0D2-0", "11:44", [("a", "11:53", "KEM REVITALUX"), ("b", "10:52", "U MẠCH MÁU")], [], [], "", "b"),
     ("2BA84ADB", "10:00", [("a", "11:00", "COMBO CSD ( 10 LẦN )"), ("b", "10:05", "ĐIỆN DI C SAU SẸO")], [], ["csd"], "", "a"),
 ]
 

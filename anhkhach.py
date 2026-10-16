@@ -2228,7 +2228,9 @@ def _chi_thu_tien(dich_vu: str | None) -> bool:
 _SAN_PHAM = re.compile(r"^(kem|thuoc|serum|sua rua|mat na|toner|gel|kcn|xit|vien uong|tinh chat|nuoc|lotion|my pham)\b"
                        r"|\b(cream|serum|pads?|gel|lotion|toner|cleanser|cleaser|sunscreen|mask|\d+\s*(g|ml))\b")
 _TU_DV_THAT = re.compile(r"\b(tiem|laser|triet|peel|csd|cham soc|dien di|meso|prp|filler|botox|combo|lieu trinh|dieu tri"
-                         r"|tri|xoa|mai|hifu|cang chi|nang|ipl|pico|picolight|fractional|co2|tre hoa|dot|lan le|kham)\b")
+                         r"|tri|xoa|mai|hifu|cang chi|nang|ipl|pico|picolight|fractional|co2|tre hoa|dot|lan le|kham"
+                         # tên bệnh/vùng điều trị = buổi dịch vụ ('U MẠCH MÁU' — ca 920BC0D2, CEO 16/10 lần 9)
+                         r"|u|mach mau|seo|mun|tham|nam|ruoi|tan nhang|mo hoi|rung toc)\b")
 
 
 def _dong_dv(dich_vu: str | None) -> list[str]:
