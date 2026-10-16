@@ -401,9 +401,9 @@ class Vong14(Vong12):  # CEO 17/10 lần 14: chỉ siết / sửa gợi ý
         self.nen()
         self.hd("F1", "2026-10-03", "K1", "Phan Thị Lan", "LASER FRACTIONAL CO2", "09:00")
         ids, kq, td = self.ghep_td(("14:00:10", "Lan - co2 10/10/26", "P-K"), ("14:00:15", "", "P-K"))
-        self.assertEqual(kq[ids[1]][:2], ("F1", "goi_y"))
-        self.assertIn("HĐ dịch vụ khớp nhãn", kq[ids[1]][2])
-        self.assertNotEqual(td.get(ids[1], ("",))[0], "G1")
+        self.assertEqual(kq[ids[0]][:2], ("F1", "goi_y"))
+        self.assertIn("HĐ dịch vụ khớp nhãn", kq[ids[0]][2])
+        self.assertFalse(any(td.get(i, ("",))[0] == "G1" for i in ids))  # đơn vị có nhãn co2 -> tự duyệt không gắn gói CSD
 
     # ---- 1. ảnh cũ lưu lại: ngày trên nhãn lệch > 7 ngày (ca 20FBABFE) ----
     ngay_goc = 0

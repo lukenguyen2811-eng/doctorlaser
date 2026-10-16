@@ -774,10 +774,10 @@ def _nhan_khong_nam(chu: str, nam: int) -> list[dict]:
     dv = (set(MA_DV) | set(MA_DV_OCR) | _TU_DV_THEM) - _KHONG_GACH_BO
     for m in _NHAN_KHONG_NAM.finditer(chu):
         tu = [(g, khong_dau(g).lower()) for g in m.group(1).split()]
-        if not tu or tu[-1][1] not in _DUOI_KH or not any(k in ("kh", "khach") for _, k in tu[-3:]):
-            continue  # chỉ dạng có chữ 'kh/khách (mới/cũ)' sát trước ngày — đo ma22: không dấu hiệu này bắt nhầm nhiều
-        while tu and tu[-1][1] in _DUOI_KH:
-            tu.pop()
+        vt = [i for i, (_, k) in enumerate(tu) if k in ("kh", "khach") and i >= len(tu) - 3]
+        if not vt:
+            continue  # chỉ dạng có chữ 'kh/khách (mới/cũ …)' sát trước ngày — đo ma22: không dấu hiệu này bắt nhầm nhiều
+        tu = tu[:vt[0]]
         tu = [x for x in tu if len(x[1]) >= 2][-3:]
         if len(tu) < 2 or any(k in _KHONG_PHAI_TEN or k in _chu_dv_nhan() for _, k in tu) or all(k in XUNG_HO for _, k in tu):
             continue
@@ -2957,19 +2957,16 @@ def _buoi_goi(conn, p, photos, ket_qua, cum, k, c, mas, ngay, cu_all, ma_dvs, mo
                     ly_do=f"mặt thuộc {mo}, không HĐ ngày chụp {dd} — {_MOC_SAU} ({v['ngay'][8:10]}/{v['ngay'][5:7]})"
                     " — người chọn")
     ro = [m for m in ma_dvs if _ma_ro(m) and not _dv_chung(m)]
-    # CEO 17/10 lần 14 (ca 12CB524D): nhãn dịch vụ (trên ảnh / ảnh cùng bộ cùng mặt) khớp 1 HĐ dịch vụ LẺ của K trong
-    # ±30 ngày -> ưu tiên gợi ý HĐ đó, không gắn gói.
-    mp = set(_doc_mat(p["khuon_mat"]))
-    ro_bo = ro + [n["ma_dv"] for q in photos if q["id"] != p["id"] and r0["bo"] is not None
-                  and ket_qua[q["id"]]["bo"] == r0["bo"] and mp & set(_doc_mat(q["khuon_mat"]))
-                  for n in (ket_qua[q["id"]].get("nhan_ds") or ()) if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
+    # CEO 17/10 lần 14 (ca 12CB524D): nhãn dịch vụ trên chính ảnh khớp 1 HĐ dịch vụ LẺ của K trong ±30 ngày (và không
+    # gói còn buổi nào khớp nhãn) -> ưu tiên gợi ý HĐ đó, không gắn gói. Ảnh cùng đơn vị không nhãn: tự duyệt không gắn
+    # gói khi nhãn trong đơn vị ghi dịch vụ khác gói.
     goi_truoc = [v for v in goi_truoc if _goi_con_buoi(conn, v, mas, ngay)]
-    khop_bo = [v for v in goi_truoc if any(_dv_goi_khop(m, v["dich_vu"] or "") for m in ro_bo)]
-    if ro_bo and not khop_bo:  # chỉ khi KHÔNG gói còn buổi nào khớp dịch vụ nhãn
+    khop_bo = [v for v in goi_truoc if any(_dv_goi_khop(m, v["dich_vu"] or "") for m in ro)]
+    if ro and not khop_bo:  # nhãn TRÊN CHÍNH ẢNH; chỉ khi KHÔNG gói còn buổi nào khớp dịch vụ nhãn (đo ma22)
         quanh = [v for v in conn.execute(
             f"SELECT * FROM visits WHERE (ma_kh IN ({dau}) OR code IN ({dau})) AND ngay BETWEEN ? AND ? AND ngay != ?",
             (*mas, *mas, (d0 - dt.timedelta(days=30)).isoformat(), (d0 + dt.timedelta(days=30)).isoformat(), ngay))
-            if not _la_hd_goi(v) and any(_dv_khop(m, v["dich_vu"] or "") for m in ro_bo)]
+            if not _la_hd_goi(v) and any(_dv_khop(m, v["dich_vu"] or "") for m in ro)]
         if quanh:
             v = min(quanh, key=lambda v: abs((dt.date.fromisoformat(v["ngay"]) - d0).days))
             return dict(hd=v["code"], do_tin="goi_y", diem=45,
@@ -2983,7 +2980,7 @@ def _buoi_goi(conn, p, photos, ket_qua, cum, k, c, mas, ngay, cu_all, ma_dvs, mo
         return dict(hd=v["code"], do_tin="chac", diem=80,
                     ly_do=f"buổi theo gói — ngày chụp {dd}, HĐ gói {v['code']} ngày {v['ngay'][8:10]}/{v['ngay'][5:7]}"
                     f" (mặt thuộc {mo}, nhãn dịch vụ khớp đúng 1 gói)")
-    if len(goi_truoc) == 1 and (not ro_bo or khop_bo):
+    if len(goi_truoc) == 1 and (not ro or khop):
         v = goi_truoc[0]
         return dict(hd=v["code"], do_tin="goi_y", diem=50,
                     ly_do=f"mặt thuộc {mo}, không HĐ ngày chụp {dd} — {_MOC_GOI} ({v['code']} ngày "
@@ -3361,6 +3358,9 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
                 v_xa = conn.execute("SELECT * FROM visits WHERE code=?", (next(iter(hds_xa)),)).fetchone()
                 if v_xa and v_xa["ngay"] != ngay:
                     k_xa = _khoa_hd(conn, cum, v_xa["code"], nho)
+                    ma_nhan = [n["ma_dv"] for n in nhans if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
+                    if ma_nhan and _la_hd_goi(v_xa) and not any(_dv_goi_khop(m, v_xa["dich_vu"] or "") for m in ma_nhan):
+                        k_xa = None  # CEO lần 14 (12CB524D): nhãn trong đơn vị ghi dịch vụ khác gói -> không gắn gói
                     if k_xa and k_xa not in ung and not any(  # nhường: đơn vị có nhãn tên khách khác có HĐ hôm nay
                             _ten_that_nhan(n) and not _ten_hop_mo(n, v_xa["ten_kh"])
                             and any(_ten_hop_mo(n, v["ten_kh"]) for v in visits) for n in nhans):
