@@ -2960,6 +2960,7 @@ def _buoi_goi(conn, p, photos, ket_qua, cum, k, c, mas, ngay, cu_all, ma_dvs, mo
     # CEO 17/10 lần 14 (ca 12CB524D): nhãn dịch vụ trên chính ảnh khớp 1 HĐ dịch vụ LẺ của K trong ±30 ngày (và không
     # gói còn buổi nào khớp nhãn) -> ưu tiên gợi ý HĐ đó, không gắn gói. Ảnh cùng đơn vị không nhãn: tự duyệt không gắn
     # gói khi nhãn trong đơn vị ghi dịch vụ khác gói.
+    goi_tat_ca = goi_truoc  # quyết B1/B2 trên danh sách GỐC (lọc hết buổi chỉ được BỚT, không tạo ca 'đúng 1 gói' mới)
     goi_truoc = [v for v in goi_truoc if _goi_con_buoi(conn, v, mas, ngay)]
     khop_bo = [v for v in goi_truoc if any(_dv_goi_khop(m, v["dich_vu"] or "") for m in ro)]
     if ro and not khop_bo:  # nhãn TRÊN CHÍNH ẢNH; chỉ khi KHÔNG gói còn buổi nào khớp dịch vụ nhãn (đo ma22)
@@ -2974,14 +2975,18 @@ def _buoi_goi(conn, p, photos, ket_qua, cum, k, c, mas, ngay, cu_all, ma_dvs, mo
                         f"{v['ngay'][8:10]}/{v['ngay'][5:7]} (±30 ngày) — người chọn")
     if not goi_truoc:
         return None
-    khop = [v for v in goi_truoc if any(_dv_goi_khop(m, v["dich_vu"] or "") for m in ro)] if ro else []
+    khop = [v for v in goi_tat_ca if any(_dv_goi_khop(m, v["dich_vu"] or "") for m in ro)] if ro else []
+    if len(khop) == 1 and khop[0] not in goi_truoc:
+        return None  # gói khớp nhãn đã hết buổi
+    if len(goi_tat_ca) == 1 and goi_tat_ca[0] not in goi_truoc and not khop:
+        return None
     if len(khop) == 1 and c["neo"] >= CUM_MANH and _bo_chi_mat_k(p, photos, ket_qua, cum, k):
         v = khop[0]
         return dict(hd=v["code"], do_tin="chac", diem=80,
                     ly_do=f"buổi theo gói — ngày chụp {dd}, HĐ gói {v['code']} ngày {v['ngay'][8:10]}/{v['ngay'][5:7]}"
                     f" (mặt thuộc {mo}, nhãn dịch vụ khớp đúng 1 gói)")
-    if len(goi_truoc) == 1 and (not ro or khop):
-        v = goi_truoc[0]
+    if len(goi_tat_ca) == 1 and (not ro or khop):
+        v = goi_tat_ca[0]
         return dict(hd=v["code"], do_tin="goi_y", diem=50,
                     ly_do=f"mặt thuộc {mo}, không HĐ ngày chụp {dd} — {_MOC_GOI} ({v['code']} ngày "
                     f"{v['ngay'][8:10]}/{v['ngay'][5:7]}) — người chọn")
