@@ -184,7 +184,8 @@ class BuoiTheoGoi(unittest.TestCase):
         # Trang duyệt: HĐ cũ cùng năm hiện trong mục "Hóa đơn ngày khác" với ngày dd/mm.
         trang = A._trang_ngay(self.c, "2026-02-20").decode()
         self.assertIn("Hóa đơn ngày khác", trang)
-        self.assertIn("<option value='HDG' selected>20/01 ", trang)
+        self.assertIn("data-hd='HDG'", trang)  # bộ chọn sẵn HĐ gói
+        self.assertIn({"c": "HDG", "n": "20/01"}, [{"c": v["c"], "n": v["n"]} for v in A.du_lieu_trang(trang)["hd"]])
 
     def test_ngay_co_hd_khach_khac_bo_chup_chi_goi_y(self):
         self.hd("HDG", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")
@@ -205,7 +206,8 @@ class BuoiTheoGoi(unittest.TestCase):
         p = self.anh_ngay("2026-02-20")["q1"]
         self.assertEqual((p["goi_y_hd"], p["do_tin"]), ("HDG", "goi_y"))
         trang = A._trang_ngay(self.c, "2026-02-20").decode()
-        self.assertIn("<option value='HDG' selected>15/12/25 ", trang)
+        self.assertIn("data-hd='HDG'", trang)
+        self.assertIn({"c": "HDG", "n": "15/12/25"}, [{"c": v["c"], "n": v["n"]} for v in A.du_lieu_trang(trang)["hd"]])
 
     def anh_mat(self, km_nay, km_cu):
         self.hd("HDG", "2026-08-10", "KH01", "Nguyễn Thị Quyên", "COMBO CSD ( 10 LẦN )")

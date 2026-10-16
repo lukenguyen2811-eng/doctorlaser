@@ -241,8 +241,9 @@ class TrangDuyet(Nen):
         self.anh("b", "10:30:00", "", 0)
         t = A._trang_ngay(self.c, D).decode()
         self.assertEqual(t.count("⚠ không có ngày chụp gốc"), 1)
+        ma = [v["c"] for v in A.du_lieu_trang(t)["hd"]]
         for c in ("HD9", "HD8"):
-            self.assertIn(f"value='{c}'", t)
+            self.assertIn(c, ma)
         for c in ("HD7", "HD11"):
             self.assertNotIn(c, t)
 

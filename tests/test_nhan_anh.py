@@ -133,11 +133,12 @@ class KhopNhan(unittest.TestCase):
         self.assertEqual(self.c.execute("SELECT goi_y_hd FROM photos").fetchone()[0], None)  # trùng 2 Hoà
         self.c.execute("UPDATE photos SET goi_y_hd='HD2'")
         trang = A._trang_ngay(self.c, "2026-10-10").decode()
-        self.assertIn("<option value='HD2' selected>08/10", trang)
+        self.assertIn("data-hd='HD2'", trang)
+        self.assertIn({"c": "HD2", "n": "08/10"}, [{"c": v["c"], "n": v["n"]} for v in A.du_lieu_trang(trang)["hd"]])
         self.assertIn("Hóa đơn ngày khác", trang)
         self.assertIn("chưa tải về máy", trang)  # ảnh chưa có file -> chữ, không khung vỡ
         self.assertNotIn("id=dot", trang)  # 15/10: không còn ô chọn 1 khách đè cả đợt
-        self.assertIn("Đồng ý gợi ý cả đợt", trang)
+        self.assertIn("Đúng khách này (cả bộ 1 ảnh)", trang)  # 16/10: 1 quyết định cho cả bộ chụp
         self.assertIn("boQua(", trang)
         self.assertNotIn("src='/anh/p9'", trang)
 

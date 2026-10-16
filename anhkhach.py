@@ -2068,25 +2068,25 @@ a{color:#0b57d0;text-decoration:none}main{padding:16px;max-width:1400px;margin:a
 button.p{background:#0b57d0;color:#fff;border-color:#0b57d0}
 .cot{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.cot h4{margin:0 0 6px;font-size:13px}
 .cot .ph{margin-bottom:8px}.tim input{padding:4px 8px;width:240px}.tag.cd{background:var(--warn)}
+.bo{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px;scroll-margin-top:70px}
+.bo.cur{box-shadow:0 0 0 3px #0b57d055}.bo.cb{border-color:var(--bad)}
+.bo.xong{background:#eef8f0;border-color:var(--ok);padding:6px 10px}.bo.xong .than{display:none}
+.daluu{display:none;margin-left:auto;color:var(--ok)}.bo.xong .daluu{display:inline}
+.boh{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.t{border:2px solid var(--line);border-radius:6px;display:inline-flex;width:140px;height:140px;background:#222;overflow:hidden;align-items:center;justify-content:center}
+.t img{width:100%;height:100%;object-fit:cover;cursor:zoom-in}.t i{color:#ccc;font-size:11px;text-align:center}
+.t.ok{border-color:var(--ok)}.t.skip{opacity:.4}
+.quyet{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.quyet .loc{width:170px}.quyet .hd{min-width:280px;max-width:100%;font-size:14px;padding:4px}.quyet .ghi{width:220px}
+.quyet input,.quyet select{padding:4px}.nut{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+button.lon{font-size:15px;padding:8px 16px;font-weight:600}
+.canh{color:var(--bad);font-weight:600;margin:4px 0}.dem{font-size:15px}
+.tach{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:10px}.tach[hidden]{display:none}
 #zoom{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9;align-items:center;justify-content:center}#zoom img{max-width:96vw;max-height:96vh}
 """
 
 JS = """
-async function luu(id, extra){
-  const el=document.getElementById('p'+id);
-  const d={id, hd:el.querySelector('.hd').value, loai:el.querySelector('.loai').value,
-           vung:el.querySelector('.vung').value, ghi:el.querySelector('.ghi').value, ...extra};
-  const r=await fetch('/luu',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
-  if(!r.ok){alert('Lưu lỗi');return}
-  const st=(await r.json()).st; el.className='ph '+st;
-}
-async function caDot(dot){
-  const ps=[...document.querySelectorAll('[data-dot="'+dot+'"]')].filter(el=>el.querySelector('.hd').value);
-  const kh=new Set(ps.map(el=>el.querySelector('.hd').value));
-  if(!confirm('Lưu '+ps.length+' ảnh theo khách đang chọn ở từng ảnh ('+kh.size+' khách)?')) return;
-  for(const el of ps){ await luu(el.dataset.id,{}); }
-}
-function boQua(id){ if(confirm('Ảnh này KHÔNG phải ảnh khách (ảnh cá nhân, giấy tờ, chụp màn hình)?')) luu(id,{bo_qua:1}); }
 function zoom(src){const z=document.getElementById('zoom');z.querySelector('img').src=src;z.style.display='flex'}
 """
 
@@ -2128,7 +2128,98 @@ def _trang_chu(conn, tat_ca: bool = False) -> bytes:
     return _trang("Duyệt ảnh khách", "".join(o))
 
 
+def ten_goi(ten: str, so_chu: int = 1) -> str:
+    """Tên gọi kiểu Việt = chữ cuối của họ tên đã bỏ ghi chú: 'NGUYỄN KINH LƯƠNG (KH TỰ ĐẾN)' -> 'Lương'
+    (so_chu=2 -> 'Kinh Lương', dùng khi 2 khách trùng tên gọi)."""
+    tu = [g for g, _ in _tu_ten_kh(ten)]
+    if not tu:
+        return (ten or "").strip()
+    return " ".join(w.capitalize() for w in tu[-so_chu:])
+
+
+def _dv_ngan(dich_vu: str | None) -> str:
+    ds = _ds_dv(dich_vu)
+    if not ds:
+        return ""
+    return ds[0][:28] + (f" +{len(ds) - 1}" if len(ds) > 1 else "")
+
+
+def _luc_hd(v) -> dt.datetime | None:
+    try:
+        return dt.datetime.fromisoformat(f"{v['ngay']}T{(v['gio'] or '00:00')[:8]}")
+    except (TypeError, ValueError):
+        return None
+
+
+def _gom_bo(photos) -> list[list]:
+    """Chia ảnh 1 ngày (đã xếp theo thoi_gian) thành BỘ CHỤP như ghép (_chia_bo): chuỗi ảnh liền, 2 ảnh kề cách
+    <= BO_GIAY; ảnh trùng giây (2 bản) vẫn cùng bộ. Giây có >= TRUNG_GIAY ảnh = giờ nhập/lưu, không phải giờ chụp
+    -> mỗi ảnh 1 bộ riêng (đo 16/10: ngày 29/08/2019 gom thành bộ 258 ảnh nếu không tách)."""
+    dem: dict[str, int] = {}
+    for p in photos:
+        dem[p["thoi_gian"]] = dem.get(p["thoi_gian"], 0) + 1
+    ds = [{"p": p, "gio": dt.datetime.fromisoformat(p["thoi_gian"]),
+           "trung_giay": dem[p["thoi_gian"]] >= TRUNG_GIAY} for p in photos if p["thoi_gian"]]
+    _chia_bo(ds)
+    bo: dict = {}
+    for i, r in enumerate(ds):
+        bo.setdefault(("bo", r["bo"]) if r["bo"] is not None else ("le", i), []).append(r["p"])
+    return list(bo.values())
+
+
+def _khop_ten_goi(w: list[str], bi_danh: list[list[str]], ten_nhan: list[list[str]]) -> bool:
+    """Tên trên nhãn ('C Quyên' -> ['quyen']) là đuôi họ tên khách (không dấu) hoặc là tên gọi trong ngoặc."""
+    for t in ten_nhan:
+        while len(t) > 1 and t[0] in XUNG_HO:
+            t = t[1:]
+        if t and (w[-len(t):] == t or t in bi_danh):
+            return True
+    return False
+
+
+def _thu_tu_ung_vien(hds: list[dict], goi_y: list[str], ten_nhan: list[list[str]], luc: dt.datetime) -> list[int]:
+    """Thứ tự ô chọn khách của 1 bộ: (a) HĐ máy gợi ý / đã duyệt (nhiều ảnh trước), (b) khách có tên gọi khớp tên
+    trên nhãn, (c) còn lại; trong (b), (c) HĐ gần giờ bộ chụp trước. hds: [{'c','w','bd','luc'}] -> chỉ số."""
+    def xa(i):
+        t = hds[i]["luc"]
+        return abs((t - luc).total_seconds()) if t else float("inf")
+
+    vi_tri = {h["c"]: i for i, h in enumerate(hds)}
+    a = [vi_tri[c] for c in goi_y if c in vi_tri]
+    con = [i for i in range(len(hds)) if i not in set(a)]
+    b = sorted((i for i in con if _khop_ten_goi(hds[i]["w"], hds[i]["bd"], ten_nhan)), key=xa)
+    c = sorted((i for i in con if i not in set(b)), key=xa)
+    return a + b + c
+
+
+def _chu_nhan(n: dict) -> str:
+    """Nhãn đọc được: nguyên chữ nhân viên viết ('Lương-xoá xăm 14/10/26'); thiếu thì dựng 'Tên-mã dd/mm'."""
+    if n.get("goc"):
+        return n["goc"]
+    s = (n.get("ten_goc") or n.get("ten") or "").title()
+    if n.get("ma_dv"):
+        s += f"-{n['ma_dv']}"
+    if n.get("ngay"):
+        s += f" {int(n['ngay'][8:10])}/{int(n['ngay'][5:7])}"
+    if n.get("loai"):
+        s += f" ({n['loai']})"
+    return s
+
+
+def _json_nhung(o) -> str:
+    """JSON nhúng trong <script type=application/json>: chặn '</script>' và '<!--'."""
+    return json.dumps(o, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e")
+
+
+def du_lieu_trang(trang: str) -> dict:
+    """JSON nhúng của trang ngày (HĐ + ảnh) — cho test."""
+    m = re.search(r"<script type=application/json id=duLieu>(.*?)</script>", trang, re.S)
+    return json.loads(m.group(1)) if m else {}
+
+
 def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
+    """Lượng 16/10: duyệt THEO BỘ CHỤP — mỗi bộ (chuỗi ảnh liền <= BO_GIAY) 1 thẻ, 1 quyết định cho cả bộ
+    (POST /luu_bo); 'Tách bộ' mở chọn riêng từng ảnh (/luu). Danh sách HĐ nhúng 1 lần (JSON), ô chọn sinh bằng JS."""
     visits = conn.execute("SELECT * FROM visits WHERE ngay=? ORDER BY gio", (ngay,)).fetchall()
     photos = conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)).fetchall()
     # Nhãn ghi ngày khác ngày chụp (chụp 10/10, nhãn 'Nam-xx 9/10') -> hóa đơn ngày khác cũng phải chọn được.
@@ -2137,123 +2228,333 @@ def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
     visits_khac = [conn.execute("SELECT * FROM visits WHERE code=?", (c,)).fetchone() for c in khac]
     visits_khac = [v for v in visits_khac if v]
     khong_tin = _ngay_khong_tin(photos)
+    visits_lui = []
     if khong_tin:
-        # Ảnh không có ngày chụp gốc (gửi qua Zalo...): ngày chụp thật có thể 1–2 ngày TRƯỚC -> cho chọn cả
-        # HĐ các ngày đó (không lấy ngày sau).
+        # Ảnh không có ngày chụp gốc (gửi qua Zalo...): ngày chụp thật có thể 1–2 ngày TRƯỚC -> bộ có ảnh đó được
+        # chọn cả HĐ các ngày đó (không lấy ngày sau).
         d0 = dt.date.fromisoformat(ngay)
         da = co | {v["code"] for v in visits_khac}
         for lui in LUI_NGAY:
             n = (d0 - dt.timedelta(days=lui)).isoformat()
-            visits_khac += [v for v in conn.execute("SELECT * FROM visits WHERE ngay=? ORDER BY gio", (n,))
-                            if v["code"] not in da]
+            visits_lui += [v for v in conn.execute("SELECT * FROM visits WHERE ngay=? ORDER BY gio", (n,))
+                           if v["code"] not in da]
     ngays = [r[0] for r in conn.execute("SELECT DISTINCT ngay FROM photos ORDER BY ngay")]
     i = ngays.index(ngay) if ngay in ngays else -1
     nav = "<a href='/'>← Tất cả ngày</a>"
     if i > 0:
-        nav += f" · <a href='/ngay?d={ngays[i - 1]}'>‹ {ngays[i - 1]}</a>"
+        nav += f" · <a href='/ngay?d={html.escape(ngays[i - 1])}'>‹ {html.escape(ngays[i - 1])}</a>"
     if 0 <= i < len(ngays) - 1:
-        nav += f" · <a href='/ngay?d={ngays[i + 1]}'>{ngays[i + 1]} ›</a>"
+        nav += f" · <a href='/ngay?d={html.escape(ngays[i + 1])}'>{html.escape(ngays[i + 1])} ›</a>"
 
-    def ngay_cua(v):  # HĐ ngày khác: 'dd/mm '; khác năm (HĐ gói mua từ năm trước): 'dd/mm/yy '
+    def ngay_cua(v):  # HĐ ngày khác: 'dd/mm'; khác năm (HĐ gói mua từ năm trước): 'dd/mm/yy'
         if v["ngay"] == ngay:
             return ""
-        return f"{v['ngay'][8:10]}/{v['ngay'][5:7]}" + (f"/{v['ngay'][2:4]}" if v["ngay"][:4] != ngay[:4] else "") + " "
-
-    def nhan(v):
-        return html.escape(f"{ngay_cua(v)}{v['gio']} · {v['ten_kh']} ({v['ma_kh']}) · {v['dich_vu'][:50]}")
+        return f"{v['ngay'][8:10]}/{v['ngay'][5:7]}" + (f"/{v['ngay'][2:4]}" if v["ngay"][:4] != ngay[:4] else "")
 
     def dong(v):  # 1 dòng hóa đơn; tên khách là link sang trang diễn tiến
         ngay_hd = ngay_cua(v)
         ten = html.escape(v["ten_kh"] or "")
         if v["ma_kh"]:
             ten = f"<a href='{_link_khach(v['ma_kh'])}'>{ten}</a>"
-        return (f"<span class=small>{html.escape(ngay_hd + (v['gio'] or ''))} · {ten} "
+        return (f"<span class=small>{html.escape((ngay_hd + ' ' if ngay_hd else '') + (v['gio'] or ''))} · {ten} "
                 f"({html.escape(v['ma_kh'] or '')}) · {html.escape((v['dich_vu'] or '')[:50])}"
                 f" · HĐ {html.escape(v['code'])}</span>")
 
-    theo_ma = {v["code"]: v for v in visits + visits_khac}
+    # ---- danh sách HĐ dựng 1 lần ----
+    tat_hd = visits + visits_khac + visits_lui
+    lui_ma = {v["code"] for v in visits_lui}
+    theo_ma = {v["code"]: v for v in tat_hd}
+    goi1: dict[str, set] = {}
+    for v in tat_hd:
+        goi1.setdefault(khong_dau(ten_goi(v["ten_kh"])), set()).add(v["ma_kh"] or v["code"])
+    hds, js_hd = [], []
+    for v in tat_hd:
+        tg = ten_goi(v["ten_kh"])
+        if len(goi1.get(khong_dau(tg), ())) > 1:  # 2 khách cùng tên gọi -> 2 chữ cuối
+            tg = ten_goi(v["ten_kh"], 2)
+        hds.append({"c": v["code"], "w": ten_sach(v["ten_kh"]).split(), "bd": _bi_danh(v["ten_kh"]),
+                    "luc": _luc_hd(v)})
+        js_hd.append({"c": v["code"], "t": tg, "f": v["ten_kh"] or "", "m": v["ma_kh"] or "",
+                      "d": _dv_ngan(v["dich_vu"]), "g": (v["gio"] or "")[:5], "n": ngay_cua(v)})
+    idx_lui = {i for i, v in enumerate(tat_hd) if v["code"] in lui_ma}
 
-    def chon_hd(gia_tri, cls, extra=""):
-        s = [f"<select class={cls} {extra}><option value=''>— chọn khách —</option>"]
-        for v in visits + visits_khac:
-            sel = " selected" if v["code"] == gia_tri else ""
-            s.append(f"<option value='{html.escape(v['code'])}'{sel}>{nhan(v)}</option>")
-        return "".join(s) + "</select>"
+    def an(p):  # Lượng 16/10: ảnh chắc chắn chưa duyệt ẩn
+        return not tat_ca and p["do_tin"] == "chac" and not p["xn_hd"] and not p["bo_qua"]
 
-    def chon(ds, gia_tri, cls, goi_y):
-        return f"<select class={cls}>" + "".join(
-            f"<option value='{html.escape(x)}'{' selected' if x == (gia_tri or '') else ''}>"
-            f"{html.escape(x or goi_y)}</option>" for x in ds) + "</select>"
+    def can(p):  # = CAN_DUYET
+        return not p["xn_hd"] and not p["bo_qua"] and p["do_tin"] != "chac"
 
-    so_an = sum(1 for p in photos if p["do_tin"] == "chac" and not p["xn_hd"] and not p["bo_qua"]) if not tat_ca else 0
-    loc = (f"<a href='/ngay?d={ngay}&tat_ca=1'>Xem cả {so_an} ảnh chắc chắn</a>" if not tat_ca
-           else f"<a href='/ngay?d={ngay}'>Chỉ ảnh cần duyệt</a>")
-    o = [f"<header><b>Ngày {ngay}</b> {nav}<span class=small>{len(photos)} ảnh · "
-         f"{len(visits)} hóa đơn · {loc}</span></header><main>"]
-    o.append("<div class=visits><b>Hóa đơn trong ngày:</b><br>" + (
-        "<br>".join(dong(v) for v in visits)
-        or "<span class=small>Không có hóa đơn ngày này.</span>") + (
-        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh"
-        + (f"; có ảnh không có ngày chụp gốc -> thêm HĐ {len(LUI_NGAY)} ngày trước"
-           if khong_tin else "") + "):</b><br>" + "<br>".join(dong(v) for v in visits_khac)
-        if visits_khac else "") + "</div>")
-    dots: dict[int, list] = {}
-    mau_nho: dict = {}  # ảnh mẫu theo mã KH (ảnh gợi ý theo gói)
-    an_chac: dict[int, int] = {}
+    def ma_khach(hd):
+        v = theo_ma.get(hd)
+        return (v["ma_kh"] or v["code"]) if v else hd
+
+    nam = int(ngay[:4]) if ngay[:4].isdigit() else dt.date.today().year
+    mau_nho: dict = {}
+    the: list[tuple] = []  # (khoá xếp, html)
+    js_ph: dict = {}
+    tong_bo = tong_anh = 0
+    dem_giay: dict[str, int] = {}
     for p in photos:
-        if not tat_ca and (p["do_tin"] == "chac" and not p["xn_hd"] and not p["bo_qua"]):
-            an_chac[p["dot"] or 0] = an_chac.get(p["dot"] or 0, 0) + 1  # Lượng 16/10: ảnh chắc chắn ẩn
+        dem_giay[p["thoi_gian"]] = dem_giay.get(p["thoi_gian"], 0) + 1
+    ten_goi_hd = {h["c"]: h["t"] for h in js_hd}
+    dot_cb = {p["dot"] for p in photos if not an(p) and (p["ly_do"] or "").startswith("cảnh báo:")}
+    for k, bo in enumerate(_gom_bo(photos)):
+        hien = [p for p in bo if not an(p)]
+        if not hien:
             continue
-        dots.setdefault(p["dot"] or 0, []).append(p)
-    # Đợt có ảnh cảnh báo (mặt thuộc khách khác) lên đầu
-    dots = dict(sorted(dots.items(), key=lambda kv: (not any((p["ly_do"] or "").startswith("cảnh báo:") for p in kv[1]), kv[0])))
-    for so, ps in dots.items():
-        # 15/10: bỏ ô "chọn 1 khách cho cả đợt" (từng gộp 5 khách vào 1 HĐ). Nút mới lưu MỖI ảnh theo
-        # khách đang chọn ở chính ảnh đó; ảnh chưa có khách thì bỏ qua.
-        so_khach = len({p["xn_hd"] or p["goi_y_hd"] for p in ps if p["xn_hd"] or p["goi_y_hd"]})
-        o.append(f"<div class=dot><h3>Đợt chụp {ps[0]['thoi_gian'][11:16]}–{ps[-1]['thoi_gian'][11:16]}"
-                 f" ({len(ps)} ảnh cần duyệt · {so_khach} khách"
-                 + (f" · {an_chac[so]} ảnh chắc chắn đã ẩn" if an_chac.get(so) else "") + ")"
-                 f"<button class=p onclick='caDot({so})'>✓ Đồng ý gợi ý cả đợt</button>"
-                 f"<span class=small>lưu mỗi ảnh theo khách đang chọn ở ảnh đó — ảnh sai thì sửa ảnh đó trước</span>"
-                 f"</h3><div class=grid>")
-        for p in ps:
-            st = "skip" if p["bo_qua"] else ("ok" if p["xn_hd"] else "")
-            hd = p["xn_hd"] or p["goi_y_hd"] or ""
-            chu = html.escape(((p["chu_thich"] or "") + " " + (p["ocr"] or "")).strip()[:120])
-            v_hd = theo_ma.get(hd)
-            den_kh = (f"<div class=small><a href='{_link_khach(v_hd['ma_kh'])}'>→ diễn tiến "
-                      f"{html.escape(v_hd['ma_kh'])}</a></div>" if v_hd and v_hd["ma_kh"] else "")
-            if (v_hd and v_hd["ma_kh"] and not p["xn_hd"] and p["goi_y_hd"] == hd
-                    and "buổi theo gói" in (p["ly_do"] or "")):
-                den_kh += _o_anh_mau(conn, v_hd["ma_kh"], ngay, mau_nho)
-            elif not p["xn_hd"]:
-                # Luật cụm mặt: ảnh nhận theo mặt / cảnh báo mặt lệch -> ảnh mẫu của khách theo mặt (và khách đang gắn).
+        so_an = len(bo) - len(hien)
+        so_can = sum(1 for p in hien if can(p))
+        xong = all(p["xn_hd"] or p["bo_qua"] for p in hien)
+        # Phiếu bầu khách: đã duyệt -> xn_hd, chưa -> gợi ý máy (kể cả ảnh chắc đã ẩn cùng bộ).
+        phieu: dict[str, int] = {}
+        for p in bo:
+            hd = p["xn_hd"] or (None if p["bo_qua"] else p["goi_y_hd"])
+            if hd:
+                phieu[hd] = phieu.get(hd, 0) + 1
+        goi_y = sorted(phieu, key=lambda c: -phieu[c])
+        hd_chon = goi_y[0] if goi_y else ""
+        so_khach = len({ma_khach(c) for c in goi_y})
+        nhan_ds = [n for p in bo for n in _nhan_that(p, nam)]
+        chu_nhan = list(dict.fromkeys(_chu_nhan(n) for n in nhan_ds if n.get("ten")))[:3]
+        p_nhan = next((p for p in hien if _nhan_that(p, nam)), hien[0])
+        ly_do = p_nhan["ly_do"] or ""
+        cb = any((p["ly_do"] or "").startswith("cảnh báo:") for p in hien)
+        if xong:
+            muc = ("Đã duyệt", "chac")
+        elif cb:
+            muc = ("⚠ Cảnh báo", "chua_ro")
+        elif any(can(p) and p["do_tin"] == "goi_y" for p in hien):
+            muc = ("Gợi ý", "goi_y")
+        elif any(can(p) for p in hien):
+            muc = ("Chưa rõ", "chua_ro")
+        else:
+            muc = ("Chắc chắn", "chac")
+        kt = [p for p in bo if p["id"] in khong_tin]
+        luc = dt.datetime.fromisoformat(hien[0]["thoi_gian"])
+        thu_tu = _thu_tu_ung_vien(hds, goi_y, [n["ten"].split() for n in nhan_ds if n.get("ten")], luc)
+        if not kt:
+            thu_tu = [x for x in thu_tu if x not in idx_lui]
+        # Ô trước/sau, vùng, ghi chú: giá trị chung của các ảnh; trước/sau lấy từ nhãn nếu ảnh chưa có.
+        def chung(cot):
+            gt = {p[cot] or "" for p in hien}
+            return gt.pop() if len(gt) == 1 else ""
+        loai = chung("loai_anh") or next((n["loai"] for n in nhan_ds if n.get("loai")), "")
+        ghi_rieng = len({p["ghi_chu"] or "" for p in hien}) > 1
+        # Ảnh mẫu so mặt (như thẻ ảnh cũ), mỗi khách 1 lần trong bộ.
+        mau, da_mau = [], set()
+
+        def them_mau(ma, nhan=""):
+            if (ma, nhan) not in da_mau:
+                da_mau.add((ma, nhan))
+                mau.append(_o_anh_mau(conn, ma, ngay, mau_nho, nhan))
+        for p in hien:
+            if p["xn_hd"]:
+                continue
+            v_p = theo_ma.get(p["goi_y_hd"] or "")
+            if v_p and v_p["ma_kh"] and "buổi theo gói" in (p["ly_do"] or ""):
+                them_mau(v_p["ma_kh"])
+            else:
                 ma_mat = _ma_tu_ly_do_mat(p["ly_do"])
                 if ma_mat:
-                    den_kh += _o_anh_mau(conn, ma_mat, ngay, mau_nho, "theo khuôn mặt")
-                    if "cảnh báo: khuôn mặt" in (p["ly_do"] or "") and v_hd and v_hd["ma_kh"] \
-                            and v_hd["ma_kh"] != ma_mat:
-                        den_kh += _o_anh_mau(conn, v_hd["ma_kh"], ngay, mau_nho, "khách đang gắn")
-            o.append(
-                f"<div class='ph {st}' id='p{p['id']}' data-id='{p['id']}' data-dot='{so}'>"
-                + (f"<img loading=lazy src='/anh/{p['id']}' onclick=\"zoom(this.src)\">"
-                   if p["anh_xem"] and os.path.exists(p["anh_xem"]) else
-                   "<div class=small style='height:200px;display:flex;align-items:center;justify-content:center;"
-                   "background:#eee;text-align:center'>Ảnh còn trên iCloud,<br>chưa tải về máy</div>") +
-                f"<div class=small>{p['thoi_gian'][11:16]} · {html.escape(p['ten_file'])} "
-                f"<span class='tag {p['do_tin']}'>{NHAN_NGAN.get(p['do_tin'], '')}</span></div>"
-                + ("<div class=small style='color:#b45309'>⚠ không có ngày chụp gốc</div>"
-                   if p["id"] in khong_tin else "") +
-                f"<div class=small>{html.escape(p['ly_do'] or '')}{' · ' + chu if chu else ''}</div>{den_kh}"
-                f"{chon_hd(hd, 'hd')}{chon(LOAI_ANH, p['loai_anh'], 'loai', '— trước/sau —')}{chon(VUNG, p['vung'], 'vung', '— vùng —')}"
-                f"<input class=ghi placeholder='ghi chú (tình trạng, kết quả...)' value='{html.escape(p['ghi_chu'] or '')}'>"
-                f"<div style='display:flex;gap:6px;margin-top:6px'>"
-                f"<button class=p onclick=\"luu('{p['id']}',{{}})\">✓ Lưu</button>"
-                f"<button onclick=\"boQua('{p['id']}')\">Không phải ảnh khách</button></div></div>")
-        o.append("</div></div>")
-    o.append("</main>")
+                    them_mau(ma_mat, "theo khuôn mặt")
+                    if "cảnh báo: khuôn mặt" in (p["ly_do"] or "") and v_p and v_p["ma_kh"] and v_p["ma_kh"] != ma_mat:
+                        them_mau(v_p["ma_kh"], "khách đang gắn")
+        v_chon = theo_ma.get(hd_chon)
+        den_kh = (f"<a href='{_link_khach(v_chon['ma_kh'])}'>→ diễn tiến {html.escape(v_chon['ma_kh'])}</a>"
+                  if v_chon and v_chon["ma_kh"] else "")
+        thumbs = []
+        for p in hien:
+            st = "skip" if p["bo_qua"] else ("ok" if p["xn_hd"] else "")
+            co_anh = bool(p["anh_xem"] and os.path.exists(p["anh_xem"]))
+            pid = html.escape(p["id"], quote=True)
+            thumbs.append(
+                f"<span class='t {st}' id='p{pid}' data-id='{pid}' title='{html.escape(p['thoi_gian'][11:19])} · "
+                f"{html.escape(p['ten_file'] or '', quote=True)}'>"
+                + (f"<img loading=lazy src='/anh/{pid}' onclick=\"zoom(this.src)\">" if co_anh else
+                   "<i>chưa tải về máy</i>") + "</span>")
+            js_ph[p["id"]] = {"g": p["thoi_gian"][11:19], "f": p["ten_file"] or "", "t": p["do_tin"] or "",
+                              "l": p["ly_do"] or "",
+                              "u": ((p["chu_thich"] or "") + " " + (p["ocr"] or "")).strip()[:120],
+                              "h": p["xn_hd"] or p["goi_y_hd"] or "", "a": p["loai_anh"] or "",
+                              "v": p["vung"] or "", "n": p["ghi_chu"] or "", "s": st, "i": int(co_anh),
+                              "k": int(p["id"] in khong_tin)}
+        if xong:
+            v_x = theo_ma.get(hd_chon)
+            if all(p["bo_qua"] for p in hien):
+                da_luu = "Không phải ảnh khách"
+            elif len({p["xn_hd"] for p in hien if p["xn_hd"]}) > 1:
+                da_luu = f"theo từng ảnh ({so_khach} khách)"
+            else:
+                da_luu = (f"{ten_goi_hd.get(hd_chon, '')} — {_dv_ngan(v_x['dich_vu'])}"
+                          if v_x else hd_chon)
+        else:
+            da_luu = ""
+        n = len(hien)
+        o = [f"<div class='bo{' xong' if xong else ''}{' cb' if cb else ''}' id='b{k}' data-k='{k}' "
+             f"data-ids='{html.escape(','.join(p['id'] for p in hien), quote=True)}' "
+             f"data-o='{','.join(map(str, thu_tu))}' data-hd='{html.escape(hd_chon, quote=True)}' "
+             f"data-loai='{html.escape(loai, quote=True)}' data-vung='{html.escape(chung('vung'), quote=True)}' "
+             f"data-can='{so_can}' data-gr='{int(ghi_rieng)}'>"
+             f"<div class=boh><b>{hien[0]['thoi_gian'][11:16]}"
+             + (f"–{hien[-1]['thoi_gian'][11:16]}" if hien[-1]["thoi_gian"][11:16] != hien[0]["thoi_gian"][11:16] else "")
+             + f"</b> · {n} ảnh <span class='tag {muc[1]}'>{muc[0]}</span>"
+             + (f" · nhãn: <b>{' / '.join(html.escape(x) for x in chu_nhan)}</b>" if chu_nhan else
+                " · <span class=small>không đọc được nhãn</span>")
+             + (f" <span class=small>· {so_an} ảnh chắc chắn đã ẩn (cùng bộ)</span>" if so_an else "")
+             + f"<span class=daluu>đã lưu: <b>{html.escape(da_luu)}</b> <button onclick='suaBo({k})'>Sửa</button></span>"
+             "</div><div class=than>"]
+        if ly_do:
+            o.append(f"<div class=small>Máy: {html.escape(ly_do)}</div>")
+        if so_khach > 1 and not xong:
+            o.append(f"<div class=canh>⚠ bộ có {so_khach} khách khác nhau — nên Tách bộ (đang chọn sẵn khách"
+                     " nhiều ảnh nhất)</div>")
+        if len({p["thoi_gian"] for p in hien}) > BO_TOI_DA:
+            o.append(f"<div class=canh>⚠ bộ dài {len({p['thoi_gian'] for p in hien})} tư thế — có thể 2 khách,"
+                     " xem kỹ hoặc Tách bộ</div>")
+        if len(bo) == 1 and dem_giay[bo[0]["thoi_gian"]] >= TRUNG_GIAY:
+            o.append("<div class=small>giờ chụp trùng nhiều ảnh (giờ nhập máy) — ảnh này duyệt riêng</div>")
+        if kt:
+            o.append(f"<div class=small style='color:#b45309'>⚠ không có ngày chụp gốc ({len(kt)} ảnh) — "
+                     f"chọn được cả HĐ {len(LUI_NGAY)} ngày trước</div>")
+        o.append(f"<div class=thumbs>{''.join(thumbs)}</div>")
+        if mau or den_kh:
+            o.append(f"<div class=small>{den_kh}</div>{''.join(mau)}")
+        o.append(f"<div class=quyet><input class=loc placeholder='lọc: tên gọi / mã KH / dịch vụ'>"
+                 f"<select class=hd></select><select class=loai></select><select class=vung></select>"
+                 f"<input class=ghi placeholder='{'ảnh có ghi chú riêng — để trống giữ nguyên' if ghi_rieng else 'ghi chú (tuỳ chọn)'}'"
+                 f" value='{html.escape(chung('ghi_chu'), quote=True)}'>"
+                 f"<div class=nut><button class='p lon' onclick='dungBo({k})'>✓ Đúng khách này (cả bộ {n} ảnh)</button>"
+                 f"<button onclick='boQuaBo({k})'>Không phải ảnh khách (cả bộ)</button>"
+                 f"<button onclick='tachBo({k})'>Tách bộ</button></div></div>"
+                 f"<div class=tach hidden></div></div></div>")
+        if so_can:
+            tong_bo += 1
+            tong_anh += so_can
+        the.append(((hien[0]["dot"] not in dot_cb, luc), "".join(o)))
+    so_an_ngay = sum(1 for p in photos if an(p))
+    loc = (f"<a href='/ngay?d={html.escape(ngay)}&tat_ca=1'>Xem cả {so_an_ngay} ảnh chắc chắn</a>" if not tat_ca
+           else f"<a href='/ngay?d={html.escape(ngay)}'>Chỉ ảnh cần duyệt</a>")
+    o = [f"<header><b>Ngày {html.escape(ngay)}</b> {nav}<span class=dem>còn <b id=conBo>{tong_bo}</b> bộ / "
+         f"<b id=conAnh>{tong_anh}</b> ảnh cần duyệt</span><span class=small>{len(photos)} ảnh · "
+         f"{len(visits)} hóa đơn · {loc} · Enter = Đúng khách này (bộ đang chọn)</span></header><main>"]
+    o.append("<details class=visits><summary><b>Hóa đơn trong ngày</b> "
+             f"<span class=small>({len(visits)})</span></summary>" + (
+                 "<br>".join(dong(v) for v in visits)
+                 or "<span class=small>Không có hóa đơn ngày này.</span>") + (
+        "<br><b>Hóa đơn ngày khác (theo nhãn trên ảnh"
+        + (f"; có ảnh không có ngày chụp gốc -> thêm HĐ {len(LUI_NGAY)} ngày trước" if khong_tin else "")
+        + "):</b><br>" + "<br>".join(dong(v) for v in visits_khac + visits_lui)
+        if visits_khac or visits_lui else "") + "</details>")
+    if not the:
+        o.append("<p>Không còn ảnh nào cần duyệt ngày này.</p>")
+    o += [h for _, h in sorted(the, key=lambda x: x[0])]
+    o.append(f"</main><script type=application/json id=duLieu>"
+             f"{_json_nhung({'hd': js_hd, 'ph': js_ph, 'loai': LOAI_ANH, 'vung': VUNG})}</script>"
+             f"<script>{JS_NGAY}</script>")
     return _trang(f"Ảnh {ngay}", "".join(o))
+
+JS_NGAY = r"""
+const DL=JSON.parse(document.getElementById('duLieu').textContent);
+const HD=DL.hd, PH=DL.ph, CHI={};HD.forEach((v,i)=>CHI[v.c]=i);
+let CUR=null;
+function kd(s){return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[đĐ]/g,'d').toLowerCase()}
+function chuHd(v){return v.t+' — '+v.d+' — '+(v.n?v.n+' ':'')+v.g+' — '+v.m}
+function dienHd(sel,thuTu,chon,loc){
+  const q=kd(loc);sel.textContent='';sel.add(new Option('— chọn khách —',''));
+  let dau=null;
+  for(const i of thuTu){const v=HD[i];if(!v)continue;const t=chuHd(v);
+    if(q&&!kd(t+' '+v.f+' '+v.c).includes(q))continue;
+    const o=new Option(t,v.c);o.title=v.f+' · HĐ '+v.c;sel.add(o);if(dau===null)dau=v.c;}
+  sel.value=(q&&dau!==null)?dau:(chon||'');
+}
+function dienDs(sel,ds,chon,trong){sel.textContent='';
+  for(const x of ds){const o=new Option(x||trong,x);sel.add(o)} sel.value=chon||'';}
+function thuTu(b){return b.dataset.o?b.dataset.o.split(',').map(Number):[]}
+function ganLoc(loc,sel,tt,chon){
+  loc.addEventListener('input',()=>dienHd(sel,tt,chon(),loc.value));
+  loc.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sel.focus()}});
+}
+function chonBo(b){if(CUR)CUR.classList.remove('cur');CUR=b;if(b)b.classList.add('cur')}
+function demLai(b){const n=+b.dataset.can||0;if(!n)return;b.dataset.can=0;
+  const x=document.getElementById('conBo'),y=document.getElementById('conAnh');
+  x.textContent=Math.max(0,+x.textContent-1);y.textContent=Math.max(0,+y.textContent-n);}
+function keTiep(b){const ds=[...document.querySelectorAll('.bo:not(.xong)')];
+  const sau=ds.find(x=>b.compareDocumentPosition(x)&Node.DOCUMENT_POSITION_FOLLOWING)||ds[0];
+  chonBo(sau||null);if(sau)sau.scrollIntoView({behavior:'smooth',block:'start'});}
+function xongBo(b,chu){b.classList.add('xong');b.querySelector('.daluu b').textContent=chu;demLai(b);keTiep(b);}
+async function guiBo(k,boQua){
+  const b=document.getElementById('b'+k),ids=b.dataset.ids.split(','),q=b.querySelector('.quyet');
+  const hd=q.querySelector('.hd').value;
+  if(!boQua&&!hd){alert('Chọn khách trước');return}
+  if(boQua&&!confirm('Cả bộ '+ids.length+' ảnh KHÔNG phải ảnh khách (ảnh cá nhân, giấy tờ, chụp màn hình)?'))return;
+  const ghi=q.querySelector('.ghi').value;
+  const d={ids,hd:boQua?'':hd,loai:q.querySelector('.loai').value,vung:q.querySelector('.vung').value,
+           ghi:(ghi===''&&b.dataset.gr==='1')?null:ghi,bo_qua:boQua?1:0};
+  const r=await fetch('/luu_bo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+  if(!r.ok){alert('Lưu lỗi: '+await r.text());return}
+  const j=await r.json();
+  for(const id of ids){const t=document.getElementById('p'+id);if(t)t.className='t '+j.st;if(PH[id]){PH[id].s=j.st;PH[id].h=d.hd}}
+  b.dataset.hd=d.hd;b.querySelector('.tach').hidden=true;b.querySelector('.tach').textContent='';
+  xongBo(b,boQua?'Không phải ảnh khách':(j.ten+' — '+j.dv));
+}
+function dungBo(k){guiBo(k,false)}
+function boQuaBo(k){guiBo(k,true)}
+function suaBo(k){const b=document.getElementById('b'+k);b.classList.remove('xong');chonBo(b)}
+async function luu(id,extra){
+  const el=document.getElementById('q'+id);
+  const d={id,hd:el.querySelector('.hd').value,loai:el.querySelector('.loai').value,
+           vung:el.querySelector('.vung').value,ghi:el.querySelector('.ghi').value,...extra};
+  const r=await fetch('/luu',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+  if(!r.ok){alert('Lưu lỗi: '+await r.text());return}
+  const st=(await r.json()).st;el.className='ph '+st;
+  const t=document.getElementById('p'+id);if(t)t.className='t '+st;
+  PH[id].s=st;PH[id].h=d.bo_qua?'':d.hd;
+  const b=el.closest('.bo'),ids=b.dataset.ids.split(',');
+  if(ids.every(x=>PH[x]&&PH[x].s)){
+    const kh=new Set(ids.filter(x=>PH[x].s==='ok').map(x=>PH[x].h));
+    xongBo(b,kh.size?('theo từng ảnh ('+kh.size+' khách)'):'Không phải ảnh khách');}
+}
+function boQua(id){if(confirm('Ảnh này KHÔNG phải ảnh khách (ảnh cá nhân, giấy tờ, chụp màn hình)?'))luu(id,{bo_qua:1})}
+const TAG={chac:'Chắc chắn',goi_y:'Gợi ý',chua_ro:'Chưa rõ',khong_hd:'Không HĐ'};
+function tachBo(k){
+  const b=document.getElementById('b'+k),w=b.querySelector('.tach');
+  if(!w.hidden){w.hidden=true;return}
+  w.textContent='';const tt=thuTu(b);
+  for(const id of b.dataset.ids.split(',')){const p=PH[id];if(!p)continue;
+    const c=document.createElement('div');c.className='ph '+(p.s||'');c.id='q'+id;
+    if(p.i){const im=document.createElement('img');im.loading='lazy';im.src='/anh/'+encodeURIComponent(id);
+      im.onclick=()=>zoom(im.src);c.append(im)}
+    const m=document.createElement('div');m.className='small';
+    m.textContent=p.g+' · '+p.f+' · '+(TAG[p.t]||'')+(p.k?' · ⚠ thiếu ngày chụp gốc':'');c.append(m);
+    const l=document.createElement('div');l.className='small';l.textContent=p.l+(p.u?' · '+p.u:'');c.append(l);
+    const loc=document.createElement('input');loc.className='loc';loc.placeholder='lọc khách';
+    const s=document.createElement('select');s.className='hd';dienHd(s,tt,p.h,'');
+    ganLoc(loc,s,tt,()=>p.h);
+    const sl=document.createElement('select');sl.className='loai';dienDs(sl,DL.loai,p.a,'— trước/sau —');
+    const sv=document.createElement('select');sv.className='vung';dienDs(sv,DL.vung,p.v,'— vùng —');
+    const g=document.createElement('input');g.className='ghi';g.placeholder='ghi chú';g.value=p.n;
+    const n=document.createElement('div');n.className='nut';
+    const b1=document.createElement('button');b1.className='p';b1.textContent='✓ Lưu ảnh này';b1.onclick=()=>luu(id,{});
+    const b2=document.createElement('button');b2.textContent='Không phải ảnh khách';b2.onclick=()=>boQua(id);
+    n.append(b1,b2);c.append(loc,s,sl,sv,g,n);w.append(c);}
+  w.hidden=false;
+}
+function khoiTao(){
+  for(const b of document.querySelectorAll('.bo')){
+    const q=b.querySelector('.quyet'),sel=q.querySelector('.hd'),tt=thuTu(b);
+    dienHd(sel,tt,b.dataset.hd,'');ganLoc(q.querySelector('.loc'),sel,tt,()=>b.dataset.hd);
+    dienDs(q.querySelector('.loai'),DL.loai,b.dataset.loai,'— trước/sau —');
+    dienDs(q.querySelector('.vung'),DL.vung,b.dataset.vung,'— vùng (tuỳ chọn) —');
+    b.addEventListener('focusin',()=>chonBo(b));b.addEventListener('click',()=>chonBo(b));
+  }
+  chonBo(document.querySelector('.bo:not(.xong)'));
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Enter'||!CUR||CUR.classList.contains('xong'))return;
+    if(['INPUT','SELECT','TEXTAREA','BUTTON'].includes(document.activeElement.tagName))return;
+    e.preventDefault();dungBo(CUR.dataset.k);});
+}
+khoiTao();
+"""
 
 
 _MA_MAT = re.compile(r"(?:khuôn mặt thuộc|mặt giống|mặt thuộc|theo khuôn mặt) khách (?:khác \()?([^\s,()]+)")
@@ -2412,6 +2713,40 @@ def _xem_jpeg(pid: str, path: str) -> str:
     return dich
 
 
+BO_ANH_TOI_DA = 900  # /luu_bo: tối đa ảnh 1 lần (giới hạn tham số SQLite)
+
+
+def luu_bo(conn, d: dict) -> tuple[int, dict]:
+    """POST /luu_bo {ids, hd, loai, vung, ghi, bo_qua}: 1 quyết định cho cả bộ chụp. Ghi các cột như /luu
+    (xn_hd, bo_qua, loai_anh, vung, ghi_chu, xn_luc) cho ĐÚNG các id gửi lên. Từ chối cả lô nếu có id không có
+    thật, hd không có trong visits (trừ bỏ qua), loai/vung ngoài danh sách. ghi=None -> giữ ghi chú cũ từng ảnh."""
+    ids = d.get("ids")
+    if (not isinstance(ids, list) or not ids or len(ids) > BO_ANH_TOI_DA
+            or not all(isinstance(x, str) and x for x in ids)):
+        return 400, {"loi": "danh sách ảnh không hợp lệ"}
+    ids = list(dict.fromkeys(ids))
+    co = {r[0] for r in conn.execute(f"SELECT id FROM photos WHERE id IN ({','.join('?' * len(ids))})", ids)}
+    if len(co) != len(ids):
+        return 400, {"loi": f"{len(ids) - len(co)} ảnh không có trong dữ liệu"}
+    bo_qua = 1 if d.get("bo_qua") else 0
+    hd, v = None, None
+    if not bo_qua:
+        hd = d.get("hd")
+        v = conn.execute("SELECT * FROM visits WHERE code=?", (hd,)).fetchone() if isinstance(hd, str) and hd else None
+        if not v:
+            return 400, {"loi": "hóa đơn không có"}
+    loai, vung, ghi = d.get("loai") or "", d.get("vung") or "", d.get("ghi")
+    if loai not in LOAI_ANH or vung not in VUNG or not (ghi is None or isinstance(ghi, str)):
+        return 400, {"loi": "trước/sau, vùng hoặc ghi chú không hợp lệ"}
+    luc = dt.datetime.now().isoformat(timespec="seconds")
+    with conn:
+        conn.executemany(
+            "UPDATE photos SET xn_hd=?, bo_qua=?, loai_anh=?, vung=?, ghi_chu=COALESCE(?, ghi_chu), xn_luc=?"
+            " WHERE id=?", [(hd, bo_qua, loai, vung, None if ghi is None else ghi[:500], luc, i) for i in ids])
+    return 200, {"st": "skip" if bo_qua else "ok", "n": len(ids),
+                 "ten": ten_goi(v["ten_kh"]) if v else "", "dv": _dv_ngan(v["dich_vu"]) if v else ""}
+
+
 class _Handler(BaseHTTPRequestHandler):
     conn: sqlite3.Connection
 
@@ -2451,11 +2786,26 @@ class _Handler(BaseHTTPRequestHandler):
         self._gui(b"not found", "text/plain", 404)
 
     def do_POST(self):
-        if self.path != "/luu":
+        if self.path not in ("/luu", "/luu_bo"):
             return self._gui(b"", "text/plain", 404)
-        d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        dai = int(self.headers.get("Content-Length", 0) or 0)
+        if dai > 1_000_000:
+            return self._gui("quá lớn".encode(), "text/plain; charset=utf-8", 413)
+        try:
+            d = json.loads(self.rfile.read(dai) or b"{}")
+        except ValueError:
+            d = None
+        if not isinstance(d, dict):
+            return self._gui("JSON lỗi".encode(), "text/plain; charset=utf-8", 400)
+        if self.path == "/luu_bo":
+            ma, kq = luu_bo(self.conn, d)
+            return self._gui(json.dumps(kq, ensure_ascii=False).encode(), "application/json; charset=utf-8", ma)
         bo_qua = 1 if d.get("bo_qua") else 0
         hd = None if bo_qua else (d.get("hd") or None)
+        # 16/10: chỉ nhận ảnh có thật và HĐ có thật (trước đây gõ bừa vẫn ghi).
+        if not self.conn.execute("SELECT 1 FROM photos WHERE id=?", (str(d.get("id")),)).fetchone() or (
+                hd and not self.conn.execute("SELECT 1 FROM visits WHERE code=?", (str(hd),)).fetchone()):
+            return self._gui("ảnh hoặc hóa đơn không có".encode(), "text/plain; charset=utf-8", 400)
         self.conn.execute(
             "UPDATE photos SET xn_hd=?, bo_qua=?, loai_anh=?, vung=?, ghi_chu=?, xn_luc=? WHERE id=?",
             (hd, bo_qua, d.get("loai") or "", d.get("vung") or "", d.get("ghi") or "",
