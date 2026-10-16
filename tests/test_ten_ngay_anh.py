@@ -128,6 +128,13 @@ class LuatNgay(Nen):
         self.hd("HD8", N, "K1", "Nguyễn Thị Quyên", "CSD MỤN")
         self.assertEqual(self.khop("Quyên-csd 8/10/26", goc=1)[0], "HD10")
 
+    def test_co_ngay_goc_hai_ngay_hai_khach_khac_chi_goi_y(self):  # âm: không nâng 'chac' khi 2 ngày 2 khách
+        self.hd("HD10", D, "K2", "Lê Văn Quyên", "CSD")
+        self.hd("HD8", N, "K1", "Nguyễn Thị Quyên", "CSD MỤN")
+        hd, d, ly_do = self.khop("Quyên-csd 8/10/26", goc=1)
+        self.assertEqual((hd, d), ("HD10", 50))
+        self.assertIn("có khách khác cùng tên", ly_do)
+
     def test_khong_ngay_goc_theo_nhan(self):  # âm: ngay_goc 0 / NULL -> ngày nhãn như cũ
         self.hd("HD10", D, "K1", "Nguyễn Thị Quyên", "CSD MỤN")
         self.hd("HD8", N, "K1", "Nguyễn Thị Quyên", "CSD MỤN")

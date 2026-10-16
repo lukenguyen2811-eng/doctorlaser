@@ -882,6 +882,11 @@ def _hd_ro_ngay(conn, nhan: dict, kq: tuple, ngay: str) -> bool:
     return _dv_chung(ma) or _dv_khop(ma, v["dich_vu"] or "") or _dv_gan_dung(ma, v["dich_vu"] or "")
 
 
+def _khach_hd(conn, hd: str) -> str:
+    v = conn.execute("SELECT ma_kh FROM visits WHERE code=?", (hd,)).fetchone()
+    return (v["ma_kh"] if v else None) or hd
+
+
 def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None,
                ngay_goc: int | None = None, goc: int | None = None) -> tuple[str | None, int, str]:
     """Khớp 1 nhãn với hóa đơn cùng ngày ghi trên nhãn (không có thì ngày chụp). Không thấy khách tên
@@ -897,11 +902,16 @@ def _khop_nhan(conn, nhan: dict, ngay_anh: str, bo_nho: dict | None = None,
     if goc != 1 or ngay == ngay_anh:
         return _khop_nhan_ngay(conn, nhan, ngay, ngay_anh, bo_nho, ngay_goc, sai)
     chup = _khop_nhan_ngay(conn, nhan, ngay_anh, ngay_anh, bo_nho, ngay_goc, "")
-    if _hd_ro_ngay(conn, nhan, chup, ngay_anh):
-        return chup[0], chup[1], (chup[2] + f" — nhãn ghi ngày {_dd_mm(ngay)} nhưng ảnh chụp ngày"
-                                  f" {_dd_mm(ngay_anh)} (có ngày gốc) — theo ngày chụp")
     theo_nhan = _khop_nhan_ngay(conn, nhan, ngay, ngay_anh, bo_nho, ngay_goc, "")
-    if _hd_ro_ngay(conn, nhan, theo_nhan, ngay):
+    nhan_ro = _hd_ro_ngay(conn, nhan, theo_nhan, ngay)
+    if _hd_ro_ngay(conn, nhan, chup, ngay_anh):
+        hd, d, ly_do = chup[0], chup[1], (chup[2] + f" — nhãn ghi ngày {_dd_mm(ngay)} nhưng ảnh chụp ngày"
+                                          f" {_dd_mm(ngay_anh)} (có ngày gốc) — theo ngày chụp")
+        if nhan_ro and _khach_hd(conn, theo_nhan[0]) != _khach_hd(conn, hd):
+            # Ngày nhãn cũng có KHÁCH KHÁC cùng tên + dịch vụ: theo ngày chụp nhưng không chắc -> chỉ gợi ý.
+            d, ly_do = min(d, 50), ly_do + f" (ngày {_dd_mm(ngay)} có khách khác cùng tên — chỉ gợi ý)"
+        return hd, d, ly_do
+    if nhan_ro:
         hd, d, ly_do = theo_nhan
         ly_do += (f" — ảnh chụp ngày {_dd_mm(ngay_anh)} (có ngày gốc) nhưng nhãn ghi ngày {_dd_mm(ngay)},"
                   " ngày chụp không có HĐ khớp — theo ngày nhãn")
