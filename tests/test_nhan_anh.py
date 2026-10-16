@@ -370,9 +370,11 @@ class BoChup(unittest.TestCase):
         anh = self.bo(10, {0: "Tâm-laser 7/9/26", 5: "Bích-laser 7/9/26"})
         anh[4:] = [(pid, giay + 40, ocr) for pid, giay, ocr in anh[4:]]  # nghỉ dài nhất giữa p3 và p4
         r = self.ghep(anh)
-        self.assertEqual({r[f"p{i}"][:2] for i in (1, 2, 3)}, {("K1", "goi_y")})
-        self.assertEqual({r[f"p{i}"][:2] for i in (4, 6, 7, 8, 9)}, {("K2", "goi_y")})
-        self.assertIn("tách bộ dài theo quãng nghỉ", r["p4"][2])
+        # Soát 16/10 lần 5 (D7054521, E6289B82 đúng): mỗi phần ngắn có nhãn chắc của chính nó, không ảnh khách khác xen
+        # kẽ trong phần -> chắc theo nhãn của phần (trước đây chỉ gợi ý).
+        self.assertEqual({r[f"p{i}"][:2] for i in (1, 2, 3)}, {("K1", "chac")})
+        self.assertEqual({r[f"p{i}"][:2] for i in (4, 6, 7, 8, 9)}, {("K2", "chac")})
+        self.assertIn("tách tại quãng nghỉ", r["p4"][2])
 
     def test_bo_8_mot_nhan_chi_goi_y(self):  # âm: khách sau có thể không viết nhãn
         r = self.ghep(self.bo(8, {0: "Tâm-laser 7/9/26"}))

@@ -39,7 +39,7 @@
     ]
   },
   "prp": {
-    "nghia": "tiêm PRP",
+    "nghia": "tiêm PRP ('prp pre' = PRP premium, 'prp mặt' = PRP — CEO thêm 16/10)",
     "khop": [
       "prp"
     ]
@@ -153,6 +153,28 @@
     "khop": [
       "botox",
       "xoa nhan"
+    ]
+  },
+  "cuoi": {
+    "nghia": "cười hở lợi = botox hở lợi (CEO thêm 16/10 — đồng nghĩa hiển nhiên)",
+    "khop": [
+      "botox",
+      "ho loi"
+    ]
+  },
+  "ho loi": {
+    "nghia": "hở lợi = botox hở lợi (CEO thêm 16/10 — đồng nghĩa hiển nhiên)",
+    "khop": [
+      "botox",
+      "ho loi"
+    ]
+  },
+  "xvm": {
+    "nghia": "xoá vein mặt (CEO thêm 16/10 — đồng nghĩa hiển nhiên)",
+    "khop": [
+      "vein mat",
+      "xoa vein",
+      "vein"
     ]
   },
   "_ocr_sai": {

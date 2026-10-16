@@ -189,6 +189,29 @@ class MatHonBo(MatNen):
         self.assertIn("cảnh báo: khuôn mặt thuộc khách khác", kq[ids[4]][2])  # giữ cảnh báo như c8
         self.assertEqual(kq[ids[2]][:2], ("HX", "chac"))
 
+    def test_hai_anh_mat_k_mat_thang(self):  # ca BDC6E6FD: >= 2 ảnh trong bộ mang mặt K -> mặt thắng nhãn cùng bộ
+        self.cum("K1", "Hồ Văn Hùng")
+        ids = self.bo("P-K")
+        self.c.execute("UPDATE photos SET khuon_mat='P-LA' WHERE id=?", (ids[0],))
+        self.c.execute("UPDATE photos SET khuon_mat='P-K' WHERE id=?", (ids[3],))
+        self.assertEqual(self.ghep()[ids[4]][:2], ("K1-D", "chac"))
+
+    def test_mot_anh_lac_mat_giua_chuoi_nhan_thang(self):  # ca D96ACC42: 1 tấm mặt K giữa chuỗi mặt khách nhãn
+        self.cum("K1", "Hồ Văn Hùng")
+        ids = self.bo("P-LA")
+        for i in (0, 1, 3):
+            self.c.execute("UPDATE photos SET khuon_mat='P-LA' WHERE id=?", (ids[i],))
+        self.c.execute("UPDATE photos SET khuon_mat='P-K' WHERE id=?", (ids[2],))
+        self.assertNotEqual(self.ghep()[ids[2]][:2], ("K1-D", "chac"))
+
+    def test_nhan_chinh_anh_hop_k_mat_thang(self):  # ca 645490B4: nhãn trên chính ảnh hợp K -> nhãn bộ không chặn
+        self.cum("K1", "Hồ Văn Hùng")
+        ids = self.bo("")
+        self.c.execute("UPDATE photos SET khuon_mat='P-LA' WHERE id=?", (ids[0],))
+        self.c.execute("UPDATE visits SET gio='11:00' WHERE code='K1-D'")
+        self.c.execute("UPDATE photos SET khuon_mat='P-K', ocr='Hùng-csd 10/10/26' WHERE id=?", (ids[4],))
+        self.assertEqual(self.ghep()[ids[4]][:2], ("K1-D", "chac"))
+
     def test_anh_nhan_mang_mat_k_thi_mat_thang(self):  # ca 58D8022E: ảnh nhãn có mặt của K (ghi nhầm tên) -> mặt thắng
         self.cum("K1", "Hồ Văn Hùng")
         ids = self.bo("P-K")
@@ -311,6 +334,14 @@ class ChonHdDv(unittest.TestCase):  # CEO 16/10 lần 3: dịch vụ nhãn (sát
         self.assertEqual(self.chon(vs, quanh=["filler"], chu="sau filler"), "a")
         self.assertEqual(self.chon(vs, ma=["filler"], chu="tan filler"), "b")  # nhãn ghi 'tan filler' -> HĐ tan
 
+    def test_pico_picolight_hon_dom_nau(self):  # ca 040983BF: 'pico' ~ 'Picolight' (tên mã) hơn 'đốm nâu' (chỉ định)
+        self.assertEqual(self.chon([("a", "11:59", "LASER ĐỐM NÂU"), ("b", "11:30", "TRẺ HOÁ DA PICOLIGHT")],
+                                   quanh=["pico"]), "b")
+
+    def test_co2_ngang_fractional_thi_gio(self):  # ca E514D8DB: 'co2' ~ 'fractional' ngang 'CO2' -> giờ gần hơn
+        self.assertEqual(self.chon([("a", "11:50", "LASER FRACTIONAL | TIÊM PRP"),
+                                    ("b", "15:01", "LASER CO2 MÀI VIỀN SẸO")], quanh=["co2"]), "a")
+
     def test_pico_sat_hon_chu_nam(self):  # ca C27CEF61
         self.assertEqual(self.chon([("a", "08:21", "Laser Picolight toàn mặt trị nám"),
                                     ("b", "11:50", "MELASMA-REVSKIN | TIÊM MESO SKIN BOOSTER (giảm nám)")],
@@ -399,6 +430,56 @@ class NhanQuanHe(Nen):  # CEO 16/10 lần 4 (ca 7C1078AF): 'Con Chị Châu' = n
         self.assertLess(d, 80)
 
 
+class BoXenKe(Nen):  # ca 849E9318: bộ dài có ảnh nhãn khách khác (chỉ gợi ý) chụp xen kẽ -> phần tách không lên chắc
+    def test_mat_khach_khac_xen_ke_chan(self):  # ca 849E9318: trong phần có 2 tấm mặt cụm mạnh khách khác xen giữa
+        for i, ngay in enumerate(("2026-09-01", "2026-09-15")):
+            self.hd(f"KB-{i}", ngay, "KB", "Lê Thị Thanh Bình", "Pico")
+        for i in range(6):
+            self.anh("2026-09-01" if i % 2 == 0 else "2026-09-15", f"10:{i:02d}:00", km="P-B", do_tin="chac",
+                     goi_y=f"KB-{i % 2}", ly_do="nhãn 'x' khớp")
+        self.hd("H1", D, "K1", "Nguyễn Hoàng Kim", "Tiêm sẹo lồi", "10:04")
+        self.hd("KB-D", D, "KB", "Lê Thị Thanh Bình", "Pico", "13:37")
+        self.hd("H2", D, "K2", "Trần Thị Quỳnh Hoa Mai", "CSD", "10:30")
+        ids = [self.anh(D, "10:07:00", "Quỳnh Hoa- revivio 10/10/26")]
+        ids += [self.anh(D, f"10:07:{5 + i * 5:02d}") for i in range(4)]
+        ids.append(self.anh(D, "10:07:55", "Hoàng Kim- Tiêm sẹo lồi 10/10/26"))
+        ids += [self.anh(D, f"10:07:{57 + i}", km="P-B" if i == 1 else "") for i in range(3)]
+        ids += [self.anh(D, "10:08:01", km="P-B")]
+        kq = self.ghep()
+        self.assertNotEqual(kq[ids[6]][:2], ("H1", "chac"))
+
+    def test_nhan_khach_khac_trong_phan_chan(self):  # nhãn khách khác (chỉ gợi ý) nằm TRONG phần -> không chắc
+        self.hd("H1", D, "K1", "Nguyễn Hoàng Kim", "Tiêm sẹo lồi", "10:04")
+        self.hd("H2", D, "K2", "Trần Thị Quỳnh Hoa Mai", "CSD", "10:30")
+        ids = [self.anh(D, "10:07:00", "Zxq- abc 10/10/26")]
+        ids += [self.anh(D, f"10:07:{5 + i * 5:02d}") for i in range(4)]
+        ids.append(self.anh(D, "10:07:55", "Hoàng Kim- Tiêm sẹo lồi 10/10/26"))
+        ids.append(self.anh(D, "10:07:57"))
+        ids.append(self.anh(D, "10:07:58", "Quỳnh Hoa- revivio 10/10/26"))
+        ids += [self.anh(D, f"10:08:0{i}") for i in range(2)]
+        kq = self.ghep()
+        self.assertNotEqual(kq[ids[6]][:2], ("H1", "chac"))
+
+    def test_nhan_khach_khac_cach_quang_nghi_dai_khong_chan(self):  # âm: nhãn khách khác ở phần kia, nghỉ >= 30s
+        self.hd("H1", D, "K1", "Nguyễn Hoàng Kim", "Tiêm sẹo lồi", "10:04")
+        self.hd("H2", D, "K2", "Trần Thị Quỳnh Hoa Mai", "CSD", "10:30")  # nhãn khách khác chỉ gợi ý
+        ids = [self.anh(D, "10:07:00", "Quỳnh Hoa- revivio 10/10/26")]
+        ids += [self.anh(D, f"10:07:{5 + i * 5:02d}") for i in range(4)]
+        ids.append(self.anh(D, "10:07:55", "Hoàng Kim- Tiêm sẹo lồi 10/10/26"))
+        ids += [self.anh(D, f"10:07:{57 + i}") for i in range(2)] + [self.anh(D, f"10:08:0{i}") for i in range(2)]
+        kq = self.ghep()
+        self.assertEqual({kq[i][:2] for i in ids[6:]}, {("H1", "chac")})
+
+    def test_nhan_chua_khop_khong_chan(self):  # âm: ảnh nhãn KHÔNG khớp ai (chữ rác) không chặn phần có nhãn chắc
+        self.hd("H1", D, "K1", "Nguyễn Hoàng Kim", "Tiêm sẹo lồi", "10:04")
+        ids = [self.anh(D, "10:07:52", "Zxq- abc 10/10/26")]
+        ids += [self.anh(D, f"10:07:{54 + i}") for i in range(3)]
+        ids.append(self.anh(D, "10:08:40", "Hoàng Kim- Tiêm sẹo lồi 10/10/26"))
+        ids += [self.anh(D, f"10:08:{42 + i * 3}") for i in range(4)]
+        kq = self.ghep()
+        self.assertEqual({kq[i][:2] for i in ids[5:]}, {("H1", "chac")})
+
+
 class BoNhanLechDv(Nen):  # ca C5A407E4: bộ 10 ảnh, nhãn đủ họ tên (năm ghi 2029) + nhãn 'Thanh Ngọc Prp' lệch dịch vụ
     def test_bo_dai_phan_dau_chac_phan_sau_khong(self):  # phần đầu sau nhãn đủ họ tên -> chắc; phần sau nhãn khác -> không
         self.hd("H1", D, "K1", "Chung Thanh Ngọc Liên", "Trẻ hoá da picolight", "10:38")
@@ -419,6 +500,58 @@ class BoNhanLechDv(Nen):  # ca C5A407E4: bộ 10 ảnh, nhãn đủ họ tên (n
         ids += [self.anh(D, f"12:17:{25 + i * 6}") for i in range(1, 5)]
         kq = self.ghep()
         self.assertNotIn(("H1", "chac"), {kq[i][:2] for i in ids[6:]})
+
+
+class ThuBac(Nen):  # CEO 16/10 lần 5: nhãn trên chính ảnh khớp tên + dịch vụ thắng mọi luật sau
+    def test_khoa_nhan_thang_canh_bao_mat(self):
+        for i, ngay in enumerate(("2026-09-01", "2026-09-15")):
+            self.hd(f"KX-{i}", ngay, "KX", "Lê Thị Hoa", "Botox")
+        for i in range(6):
+            self.anh("2026-09-01" if i % 2 == 0 else "2026-09-15", f"10:{i:02d}:00", km="P-X", do_tin="chac",
+                     goi_y=f"KX-{i % 2}", ly_do="nhãn 'x' khớp")
+        self.hd("H1", D, "K1", "Trần Thị Lan", "CSD", "15:00")
+        a = self.anh(D, "15:10:00", "Lan-csd 10/10/26", km="P-X")  # mặt giống khách khác (cụm mạnh)
+        k = self.ghep()[a]
+        self.assertEqual(k[:2], ("H1", "chac"))
+
+    def test_ham_khoa(self):
+        kq = {"a": {"khoa_nhan": ("H1", 85, "nhãn"), "hd": "H2", "do_tin": "goi_y", "xn": None, "diem": 40, "ly_do": ""},
+              "b": {"khoa_nhan": ("H1", 85, "nhãn"), "hd": "H2", "do_tin": "goi_y", "xn": "H2", "diem": 40, "ly_do": ""},
+              "c": {"hd": "H2", "do_tin": "goi_y", "xn": None, "diem": 40, "ly_do": ""}}
+        A._khoa_nhan_tren_anh(kq)
+        self.assertEqual((kq["a"]["hd"], kq["a"]["do_tin"]), ("H1", "chac"))
+        self.assertEqual(kq["b"]["hd"], "H2")  # đã duyệt: không đụng
+        self.assertEqual(kq["c"]["hd"], "H2")  # không có nhãn bậc 1: không đụng
+
+
+class NhanKhongGachMa(Nen):  # CEO 16/10 lần 5: nhãn không gạch có mã dịch vụ
+    def test_ma_sau_ngay(self):
+        n = A.doc_nhan("Trần Thái Triều Châu 20/7/2022 prp mặt", 2022)[0]
+        self.assertEqual((n["ten"], n["ma_dv"], n["gach"]), ("thai trieu chau", "prp", True))
+
+    def test_ten_ma_nhieu_chu(self):  # ca CE200A6D
+        n = A.doc_nhan("Phan mỹ tiên Csd mụn+ peel 9-10-2023", 2023)[0]
+        self.assertEqual((n["ten"], n["ma_dv"], n["gach"]), ("phan my tien", "csd", True))
+
+    def test_dai_khong_ma_nhu_cu(self):  # âm: > 3 chữ không mã -> chỉ 3 chữ cuối như cũ
+        n = A.doc_nhan("Ghi chu cho chi Lan Anh Thu 9-10-2023", 2023)[0]
+        self.assertEqual(n["ten"], "lan anh thu")
+
+    def test_minh_ly_pico_chac(self):  # ca 5339B869
+        self.hd("H1", D, "K1", "Võ Lê Minh Lý", "Trẻ hoá da picolight | CSD mụn", "10:05")
+        self.assertEqual(self.khop("Minh Lý Pico 10/10/2026")[:2], ("H1", 85))
+
+    def test_khong_ma_van_chi_goi_y(self):  # âm: nhãn không gạch không mã -> như cũ (chưa đủ họ tên chỉ gợi ý)
+        self.hd("H1", D, "K1", "Võ Lê Minh Lý", "Trẻ hoá da picolight", "10:05")
+        self.assertEqual(self.khop("Minh Lý 10/10/2026")[1], 50)
+
+    def test_dong_nghia_ho_loi(self):  # ca 2B7A8D9D
+        self.hd("H1", D, "K1", "Phan Thị Mỹ Trí", "Dặm botox xoá nhăn", "11:05")
+        self.assertEqual(self.khop("Chị Trí - Cười hở lợi 10/10/26")[:2], ("H1", 85))
+
+    def test_bu_kim_xep_sau(self):  # ca 7CA6F7F8
+        self.assertFalse(A._hd_that("BÙ KIM RF ( HỖ TRỢ KHI LÀM VỚI PRP )"))
+        self.assertTrue(A._hd_that("CSD MỤN"))
 
 
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
