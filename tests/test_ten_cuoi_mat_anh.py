@@ -142,6 +142,14 @@ class TenHoCuoi(Nen):
         self.hd("H1", D, "K1", "Vy Nguyễn", "CSD")
         self.assertLessEqual(self.khop("Nguyễn-csd 10/10/26")[1], 50)
 
+    def test_nhan_ket_thuc_bang_ho_van_khop_ten_3_chu(self):  # âm (đo 16/10: đảo nhãn cho mọi khách hạ 357 ảnh)
+        self.hd("H1", D, "K1", "Nguyễn Thị Thùy Dương", "CSD")
+        self.hd("H2", D, "K2", "Trần Minh Hoàng", "Pico")
+        self.assertEqual(self.khop("Thùy Dương-csd 10/10/26")[:2], ("H1", 85))
+        self.assertEqual(self.khop("Minh Hoàng-pico 10/10/26")[:2], ("H2", 85))
+        self.assertTrue(A._ten_nhan_hop({"ten": "thuy duong", "ten_goc": "thùy dương"}, "Nguyễn Thị Thùy Dương"))
+        self.assertTrue(A._ten_dung_duoi({"ten": "minh hoang", "ten_goc": "minh hoàng"}, "Trần Minh Hoàng"))
+
     def test_ten_nhan_hop_va_mat(self):
         n = {"ten": "vy", "ten_goc": "vy"}
         self.assertTrue(A._ten_nhan_hop(n, "Vy Nguyễn"))

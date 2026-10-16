@@ -508,6 +508,12 @@ def _thu_tu_goi(tu: list) -> list:
     return list(tu)
 
 
+def _dao_ten(ten: str) -> bool:
+    """Tên khách ghi kiểu 'Tên Họ' (đúng 2 chữ, chữ cuối là họ phổ biến) -> _tu_ten_goi đã đảo."""
+    tu = _tu_ten_kh(ten)
+    return len(tu) == 2 and tu[1][1] in HO_PHO_BIEN
+
+
 def _tu_ten_goi(ten: str) -> list[tuple[str, str]]:
     """_tu_ten_kh theo thứ tự tên gọi (_thu_tu_goi): chữ cuối luôn là tên gọi."""
     return _thu_tu_goi(_tu_ten_kh(ten))
@@ -962,8 +968,12 @@ def _khop_nhan_ngay(conn, nhan: dict, ngay: str, ngay_anh: str, bo_nho: dict | N
     # Xưng hô đầu nhãn ('A Vương', 'C Dung', 'Chị Lan') -> bỏ, trừ khi có khách mang đủ các chữ đó.
     if len(w) > 1 and w[0] in XUNG_HO and not any(set(w) <= set(t(v)) for v in visits):
         w, wg = w[1:], wg[1:]
-    w, wg = _thu_tu_goi(w), _thu_tu_goi(wg)  # nhãn 'Vy Nguyễn' -> 'nguyen vy' như tên khách
     v, d, ly_do = _khop_ten(visits, t, T, nhan, w, wg)
+    if _thu_tu_goi(w) != w:  # nhãn 'Vy Nguyễn' (Tên Họ): thử thêm thứ tự 'nguyen vy' như tên khách đã đảo
+        w2, wg2 = _thu_tu_goi(w), _thu_tu_goi(wg)
+        kq = _khop_ten(visits, t, T, nhan, w2, wg2)
+        if kq[0] is not None and (v is None or kq[1] > d):
+            (v, d, ly_do), w, wg = kq, w2, wg2
     if v is not None and d < 50 and nhan["ma_dv"]:
         # Lệch dịch vụ: HĐ có thể nhập hôm trước/hôm sau -> khách cùng tên, dịch vụ khớp ở ngày ±1
         # (đúng 1 ngày có) -> chỉ gợi ý 50.
@@ -1486,7 +1496,8 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
         wg = w
     if len(w) > 1 and w[0] in XUNG_HO and not set(w) <= set(t):
         w, wg = w[1:], wg[1:]
-    w, wg = _thu_tu_goi(w), _thu_tu_goi(wg)
+    if _dao_ten(ten_kh):  # khách 'Vy Nguyễn' (đã đảo thành 'nguyen vy') -> nhãn 'Vy Nguyễn' đảo theo
+        w, wg = _thu_tu_goi(w), _thu_tu_goi(wg)
     if not w:
         return True
     dau_kh = _co_dau([g for g, _ in tg])
@@ -1506,14 +1517,14 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
             and (len(w) < 2 or (len(t) >= len(w) and t[-len(w):-1] == w[:-1])))
 
 
-def _ten_nhan_gon(nhan: dict, t: list[str]) -> list[str]:
+def _ten_nhan_gon(nhan: dict, t: list[str], dao: bool = False) -> list[str]:
     """Chữ tên trên nhãn (không dấu) bỏ xưng hô đầu nhãn (trừ khi khách mang đủ các chữ đó) và chữ chung bên trái."""
     w = nhan["ten"].split()
     if len(w) > 1 and w[0] in XUNG_HO and not set(w) <= set(t):
         w = w[1:]
     while len(w) > 1 and w[0] in _CHU_THUA_TEN:
         w = w[1:]
-    return _thu_tu_goi(w)
+    return _thu_tu_goi(w) if dao else w  # dao: tên khách đã đảo kiểu 'Tên Họ' (_dao_ten)
 
 
 def _gan_chu(x: str, y: str) -> bool:
@@ -1527,7 +1538,7 @@ def _ten_hop_mat(nhan: dict, ten_kh: str) -> bool:
     họ tên K (bất kỳ thứ tự), (b) mỗi chữ khớp 1 chữ của K cho lệch 1 ký tự, (c) >= 2 chữ khớp chữ của K (chữ đệm +
     tên thiếu chữ cuối), hoặc (d) chữ cuối nhãn = tên cuối K (chữ đệm ghi sai: 'Ngọc Mai' ~ 'Trịnh Xuân Mai')."""
     t = [k for _, k in _tu_ten_goi(ten_kh)]
-    w = _ten_nhan_gon(nhan, t)
+    w = _ten_nhan_gon(nhan, t, _dao_ten(ten_kh))
     if not w:
         return True
     if not t:
@@ -1543,7 +1554,7 @@ def _ten_hop_mat(nhan: dict, ten_kh: str) -> bool:
 def _ten_dung_duoi(nhan: dict, ten_kh: str, ocr: bool = True) -> bool:
     """Nhãn khớp ĐÚNG đuôi họ tên (đủ số chữ, không dấu); ocr=True: chữ cuối được lệch 1 ký tự; hoặc tên trong ngoặc."""
     t = [k for _, k in _tu_ten_goi(ten_kh)]
-    w = _ten_nhan_gon(nhan, t)
+    w = _ten_nhan_gon(nhan, t, _dao_ten(ten_kh))
     if not w or len(t) < len(w):
         return False
     if t[-len(w):] == w or any(b == w for b in _bi_danh(ten_kh)):
@@ -2543,7 +2554,7 @@ def _trang_ngay(conn, ngay: str, tat_ca: bool = False) -> bytes:
             muc = ("Chắc chắn", "chac")
         kt = [p for p in bo if p["id"] in khong_tin]
         luc = dt.datetime.fromisoformat(hien[0]["thoi_gian"])
-        thu_tu = _thu_tu_ung_vien(hds, goi_y, [_thu_tu_goi(n["ten"].split()) for n in nhan_ds if n.get("ten")], luc)
+        thu_tu = _thu_tu_ung_vien(hds, goi_y, [x for n in nhan_ds if n.get("ten") for x in (n["ten"].split(), _thu_tu_goi(n["ten"].split()))], luc)
         if not kt:
             thu_tu = [x for x in thu_tu if x not in idx_lui]
         # Ô trước/sau, vùng, ghi chú: giá trị chung của các ảnh; trước/sau lấy từ nhãn nếu ảnh chưa có.
