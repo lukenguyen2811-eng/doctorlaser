@@ -99,7 +99,8 @@ class KhopNhan(unittest.TestCase):
     def test_ten_trong_ho_ten_co_duoi_ghi_chu(self):
         self.assertEqual(self.khop("Vy-csd 9/10/26", "2026-10-09")[:2], ("HD8", 85))  # + dịch vụ khớp
         self.assertEqual(self.khop("Vy-pico 9/10/26", "2026-10-09")[:2], ("HD8", 40))  # dịch vụ lệch: 40, không làm neo
-        self.assertEqual(self.khop("Manami- csd 3/10/26", "2026-10-03")[:2], ("HD6", 85))
+        # CEO 16/10: nhãn 1 chữ chỉ chắc khi = TÊN CUỐI; 'Manami' là chữ đầu của 'Manami Yoshida' -> chỉ gợi ý 50.
+        self.assertEqual(self.khop("Manami- csd 3/10/26", "2026-10-03")[:2], ("HD6", 50))
 
     def test_ocr_sai_mot_chu_chi_goi_y(self):
         self.assertEqual(self.khop("Thann-botox 3/10/26", "2026-10-03")[:2], ("HD7", 50))
@@ -716,14 +717,14 @@ class TenCoGhiChu(unittest.TestCase):
         self.them(("H1", "Võ Minh Anh", "CSD"))
         self.assertEqual(self.khop("Anh-csd 15/6/26")[:2], ("H1", 85))
 
-    def test_lech_dich_vu_tim_khach_khac_ca_khi_khop_mot_phan(self):
-        # Nhãn có chữ thừa ('Laser Thu') -> k < len(w): vẫn tìm khách khác đúng dịch vụ, chỉ gợi ý.
+    def test_lech_dich_vu_khong_lay_khach_chi_co_chu_dem(self):
+        # CEO 16/10 (âm): 'Laser Thu' còn 1 chữ 'Thu' = tên gọi; 'Trần Thu Hiền' chỉ có 'Thu' là chữ đệm và ngày đó
+        # có khách tên cuối 'Thư' -> không lấy HB; HA khớp tên cuối nhưng lệch dịch vụ: 40, không làm neo.
         self.them(("HA", "Phan Ngọc Thư", "Mài viền sẹo"), ("HB", "TRẦN THU (KH TỰ ĐẾN)", "Picolight"))
         self.c.execute("DELETE FROM visits WHERE code='HB'")
         self.them(("HB", "Trần Thu Hiền", "Picolight"))
         hd, d, ly_do = self.khop("Laser Thu-pico 15/6/26")
-        self.assertEqual((hd, d), ("HB", 50))
-        self.assertIn("một phần", ly_do)
+        self.assertEqual((hd, d), ("HA", 40))
 
     def test_diem_dung_ten_da_lam_sach(self):
         v = {"sdt": "", "ma_kh": "KH000001", "ten_kh": "Phạm Văn Vương (KH TỰ ĐẾN)"}

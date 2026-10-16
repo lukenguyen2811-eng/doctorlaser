@@ -1032,7 +1032,9 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
                     and (len(w) < 2 or (len(t(v)) >= len(w) and t(v)[-len(w):-1] == w[:-1])))
 
         ung = [v for v in visits if trong(v)]
-        if len(ung) == 1 and _dv_khop(dv, ung[0]["dich_vu"]):
+        # Nhãn 1 chữ tới đây = không khách nào có TÊN CUỐI khớp, chữ chỉ nằm giữa họ tên (chữ đệm: 'Thảo' ~
+        # 'Phạm Đỗ Thảo Vy') -> không bao giờ 85, rơi xuống gợi ý 50 bên dưới (CEO 16/10).
+        if len(ung) == 1 and len(w) >= 2 and _dv_khop(dv, ung[0]["dich_vu"]):
             return ung[0], 85, "khớp tên + dịch vụ"
         ung, gan_dung = ung or [v for v in visits if lech(v)], True
     loc_dv = False
@@ -1051,7 +1053,9 @@ def _khop_ten(visits, t, T, nhan, w, wg) -> tuple[sqlite3.Row | None, int, str]:
     if len(ung) == 1 and not _dv_chung(dv) and not gan_dung and not _dv_khop(dv, ung[0]["dich_vu"]):
         # Khớp đuôi tên nhưng dịch vụ lệch ('Thu' ~ '... Thư' mài sẹo, trong khi khách 'THU (KH TỰ ĐẾN)'
         # làm pico) -> xét khách có tên nằm trong họ tên + dịch vụ khớp; không có thì chỉ gợi ý.
-        khac = [v for v in visits if v["code"] != ung[0]["code"]
+        # Nhãn 1 chữ (k == 1): đã có khách đúng TÊN CUỐI (ung) -> không lấy khách chỉ chứa chữ đó ở giữa họ tên
+        # (soát 16/10: 'Thảo-csd' lên chắc 'Phạm Đỗ Thảo Vy' trong khi ngày đó có 'Cô Thảo') (CEO 16/10).
+        khac = [v for v in visits if k >= 2 and v["code"] != ung[0]["code"]
                 and set(w[-k:]) <= set(t(v)) and _dv_khop(dv, v["dich_vu"])]
         if len(khac) == 1:
             if k >= 2 and not ngoai(khac[0]):  # tên Việt đủ chữ nhưng không đúng đuôi: chỉ gợi ý (CEO 16/10)
@@ -1468,7 +1472,8 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
             break
         # Đủ mọi chữ nhãn (không kể chữ chung bỏ bên trái) có trong họ tên -> có thể là khách này, kể cả khác thứ
         # tự/vị trí (CEO 16/10); thiếu chữ nào ('Ngọc Anh' vs 'Nguyễn Thị Anh') -> tên khác.
-        if set(w[-k:]) <= set(t):
+        # Nhãn 1 chữ (hoặc còn 1 chữ sau khi bớt chữ chung) chỉ khớp TÊN CUỐI, không khớp chữ đệm (CEO 16/10).
+        if (set(w[-k:]) <= set(t)) if k >= 2 else (bool(t) and w[-1] == t[-1]):
             if not (dau_kh and _co_dau(wg[-k:])) or all(
                     any(khong_dau(a) == kk and _chu_mot_chieu(a, g) for g, kk in tg) for a in wg[-k:]):
                 return True
@@ -1476,6 +1481,51 @@ def _ten_nhan_hop(nhan: dict, ten_kh: str) -> bool:
         return True
     return (bool(t) and len(w[-1]) >= 4 and _lech_1(w[-1], t[-1])
             and (len(w) < 2 or (len(t) >= len(w) and t[-len(w):-1] == w[:-1])))
+
+
+def _ten_nhan_gon(nhan: dict, t: list[str]) -> list[str]:
+    """Chữ tên trên nhãn (không dấu) bỏ xưng hô đầu nhãn (trừ khi khách mang đủ các chữ đó) và chữ chung bên trái."""
+    w = nhan["ten"].split()
+    if len(w) > 1 and w[0] in XUNG_HO and not set(w) <= set(t):
+        w = w[1:]
+    while len(w) > 1 and w[0] in _CHU_THUA_TEN:
+        w = w[1:]
+    return w
+
+
+def _gan_chu(x: str, y: str) -> bool:
+    """Cùng chữ (không dấu) hoặc OCR lệch 1 ký tự (chữ >= 4 ký tự: 'thaor' ~ 'thao')."""
+    return x == y or (max(len(x), len(y)) >= 4 and _lech_1(x, y))
+
+
+def _ten_hop_mat(nhan: dict, ten_kh: str) -> bool:
+    """Luật mặt (CEO 16/10): ảnh có mặt thuộc cụm MẠNH của khách K -> nhãn HỢP với K (so không dấu) khi:
+    nhãn 1 chữ = TÊN CUỐI của K (lệch 1 ký tự OCR được; chữ đệm thì KHÔNG); nhãn >= 2 chữ: (a) mọi chữ có trong
+    họ tên K (bất kỳ thứ tự), (b) mỗi chữ khớp 1 chữ của K cho lệch 1 ký tự, (c) >= 2 chữ khớp chữ của K (chữ đệm +
+    tên thiếu chữ cuối), hoặc (d) chữ cuối nhãn = tên cuối K (chữ đệm ghi sai: 'Ngọc Mai' ~ 'Trịnh Xuân Mai')."""
+    t = [k for _, k in _tu_ten_kh(ten_kh)]
+    w = _ten_nhan_gon(nhan, t)
+    if not w:
+        return True
+    if not t:
+        return False
+    if any(set(w) <= set(b) for b in _bi_danh(ten_kh)):
+        return True
+    if len(w) == 1:
+        return _gan_chu(w[0], t[-1])
+    return (set(w) <= set(t) or all(any(_gan_chu(x, y) for y in t) for x in w)
+            or len(set(w) & set(t)) >= 2 or w[-1] == t[-1])
+
+
+def _ten_dung_duoi(nhan: dict, ten_kh: str, ocr: bool = True) -> bool:
+    """Nhãn khớp ĐÚNG đuôi họ tên (đủ số chữ, không dấu); ocr=True: chữ cuối được lệch 1 ký tự; hoặc tên trong ngoặc."""
+    t = [k for _, k in _tu_ten_kh(ten_kh)]
+    w = _ten_nhan_gon(nhan, t)
+    if not w or len(t) < len(w):
+        return False
+    if t[-len(w):] == w or any(b == w for b in _bi_danh(ten_kh)):
+        return True
+    return ocr and t[-len(w):-1] == w[:-1] and len(w[-1]) >= 4 and _lech_1(w[-1], t[-1])
 
 
 _THANH = {"\u0300", "\u0301", "\u0303", "\u0309", "\u0323"}  # dấu thanh: huyền, sắc, ngã, hỏi, nặng
@@ -1768,7 +1818,7 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
         khác -> 'chac' MAT_DIEM; (b) không HĐ ngày đó nhưng có HĐ (cùng dịch vụ nhãn, nếu nhãn ghi) trong
         GOI_NGAY ngày trước -> gợi ý 50 (ảnh chưa có HĐ); (c) không HĐ nào -> chỉ ghi chú.
     Trả id ảnh vừa lên 'chac' (để lan bộ chụp)."""
-    len_chac = []
+    len_chac, nho = [], {}
     for p in photos:
         r = ket_qua[p["id"]]
         if p["xn_hd"] or p["bo_qua"] or r["do_tin"] == "chac":
@@ -1794,7 +1844,24 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
         vs = _hd_cua_khach(conn, cum, k, ngays)
         if vs:
             v = _chon_hd_mat(vs, ngays, r, ma_dvs)
-            if nhans and not any(_ten_nhan_hop(n, v["ten_kh"]) for n in nhans):
+            manh = c["neo"] >= CUM_MANH  # cụm mạnh: nhãn hợp K theo luật mặt nới (_ten_hop_mat) — CEO 16/10
+            hop = [n for n in nhans if _ten_nhan_hop(n, v["ten_kh"]) or (manh and _ten_hop_mat(n, v["ten_kh"]))]
+            if hop and not any(_ten_dung_duoi(n, v["ten_kh"]) for n in hop):
+                # Nhãn hợp K nhưng không đúng đuôi, mà khớp ĐÚNG đuôi (đủ tên) một khách KHÁC có HĐ cùng ngày ->
+                # ưu tiên khách đó / người chọn, không chắc.
+                kk = [x for x in conn.execute(f"SELECT * FROM visits WHERE ngay IN ({','.join('?' * len(ngays))})"
+                                              " ORDER BY gio", ngays)
+                      if _khoa_hd(conn, cum, x["code"], nho) != k
+                      and any(_ten_dung_duoi(n, x["ten_kh"], ocr=False) for n in hop)]
+                if kk:
+                    if not r["hd"]:
+                        r.update(hd=kk[0]["code"], do_tin="goi_y", diem=40,
+                                 ly_do=f"nhãn khớp đúng tên khách khác ({kk[0]['ma_kh'] or kk[0]['code']}) nhưng"
+                                 f" mặt giống {mo} — người chọn")
+                    else:
+                        r["ly_do"] = (r["ly_do"] or "") + f" — mặt giống {mo}, nhãn khớp đúng tên khách khác"
+                    continue
+            if nhans and not hop:
                 if not r["hd"]:
                     r.update(hd=v["code"], do_tin="goi_y", diem=40,
                              ly_do=f"mặt giống {mo} nhưng nhãn trên ảnh ghi tên khác — người chọn")
