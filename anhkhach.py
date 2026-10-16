@@ -1556,34 +1556,79 @@ def _qua_nghi_khac(b: list[dict], i: int, neo: list[int], tt: list[int]) -> bool
     return bool(mat_neo) and not (mat_neo & mat_ds)
 
 
-def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict) -> None:
+def _ten_that_nhan(n: dict) -> bool:
+    """Nhãn có phần TÊN thật (>= 1 chữ >= 2 ký tự, không phải xưng hô/chữ dịch vụ), không phải nhãn người nhà."""
+    return not n.get("quan_he") and any(w not in XUNG_HO and w not in _chu_dv_nhan() and len(w) >= 2
+                                        for w in n["ten"].split())
+
+
+def _tach_theo_nguoi(ds: list[dict], khoa_hd: dict, conn=None) -> None:
     """Bộ/loạt chụp nhiều khách (CEO 16/10 lần 7, ca 91E9E71A): ảnh chưa chắc có MÃ MẶT (app Ảnh) trùng ảnh neo chắc
     theo chứng cứ riêng (nhãn/tên/SĐT/mã KH) chụp liền (cùng bộ hoặc cách <= CHUOI_GIAY), không trùng mặt ảnh nhãn
-    nào khác HĐ, mặt không thuộc cụm mạnh khách khác -> 'chac' theo neo đó (tách theo người, không hạ cả bộ)."""
+    nào khác HĐ, mặt không thuộc cụm mạnh khách khác -> 'chac' theo neo đó (tách theo người, không hạ cả bộ).
+    CEO 17/10 lần 10:
+    (1) ca 93257B53: mã mặt đó có ảnh nhãn (chụp liền / cùng bộ, kể cả nhãn CHƯA khớp HĐ nào, kể cả chính ảnh) ghi
+        TÊN KHÁC tên khách của HĐ neo -> không nâng chắc (giữ như cũ). Xét trên trạng thái TRƯỚC luật (không tính ảnh
+        vừa được luật này nâng).
+    (2) ca 80587249, 42EC5A61: ảnh chắc CHỈ do luật bộ chụp ('cùng bộ chụp … có nhãn', không nhãn trên chính ảnh,
+        chưa duyệt) mà mã mặt trùng neo chắc của HĐ KHÁC cùng ngày, không trùng mặt ảnh neo nào của HĐ đang gắn ->
+        đổi sang HĐ của neo đó."""
+    truoc = {id(x): x["hd"] for x in ds}  # trạng thái trước luật (tránh lan dây chuyền trong vòng lặp)
     neo = [x for x in ds if x["hd"] and x["diem"] >= 80 and x["do_tin"] == "chac" and x.get("mat_ds")
            and (x["ly_do"] or "").startswith(_NEO_TEN)]
     if not neo:
         return
     nhan_khac = [x for x in ds if x["nhan"] and x.get("mat_ds")]
+    ten_nho: dict = {}
+
+    def ten_kh(hd):
+        if hd not in ten_nho:
+            v = conn.execute("SELECT ten_kh FROM visits WHERE code=?", (hd,)).fetchone() if conn is not None else None
+            ten_nho[hd] = v["ten_kh"] if v else None
+        return ten_nho[hd]
+
+    def gan_nhau(x, r):
+        return (r["bo"] is not None and x["bo"] == r["bo"]) or abs((x["gio"] - r["gio"]).total_seconds()) <= CHUOI_GIAY
+
+    def ten_khac(r, m, hd):  # (1) ảnh nhãn cùng mã mặt, chụp liền, ghi tên không hợp khách của hd
+        t = ten_kh(hd)
+        if not t:
+            return False
+        return any(any(_ten_that_nhan(n) and not _ten_hop_mo(n, t) for n in x.get("nhan_ds") or ())
+                   for x in nhan_khac if m & x["mat_ds"] and (x is r or gan_nhau(x, r)))
+
     for r in ds:
         m = r.get("mat_ds") or set()
-        if r["do_tin"] in ("chac", "khong_hd") or r["xn"] or not m or not 1 <= len(m) <= MAT_TOI_DA:
+        if r["xn"] or not m or not 1 <= len(m) <= MAT_TOI_DA or r["do_tin"] == "khong_hd":
             continue
-        gan = [x for x in neo if x is not r and m & x["mat_ds"] and (
-            (r["bo"] is not None and x["bo"] == r["bo"]) or abs((x["gio"] - r["gio"]).total_seconds()) <= CHUOI_GIAY)]
+        doi = False
+        if r["do_tin"] == "chac":
+            # (2) chắc chỉ do luật bộ chụp, không nhãn trên chính ảnh
+            ly = r["ly_do"] or ""
+            if r["nhan"] or not (ly.startswith("cùng bộ chụp") and "có nhãn" in ly):
+                continue
+            if any(x["hd"] == r["hd"] and m & x["mat_ds"] for x in neo if x is not r and gan_nhau(x, r)):
+                continue
+            doi = True
+        gan = [x for x in neo if x is not r and m & x["mat_ds"] and gan_nhau(x, r)]
         hds = {x["hd"] for x in gan}
         if len(hds) != 1:
             continue
         hd = hds.pop()
-        if any(x["hd"] != hd and m & x["mat_ds"] for x in nhan_khac if x is not r):
+        if doi and hd == r["hd"]:
+            continue
+        if any(truoc[id(x)] != hd and m & x["mat_ds"] for x in nhan_khac if x is not r and truoc[id(x)]):
             continue
         k = khoa_hd.get(hd)
         if r.get("mat_k") and k is not None and r["mat_k"] != k:
             continue
+        if ten_khac(r, m, hd):
+            continue
         x = min(gan, key=lambda x: abs((x["gio"] - r["gio"]).total_seconds()))
+        cu = f" (trước: {r['hd']} theo luật bộ chụp)" if doi else ""
         r.update(hd=hd, do_tin="chac", diem=80,
                  ly_do=f"cùng người (mã mặt app Ảnh) với ảnh khớp chắc chụp cách"
-                 f" {abs((x['gio'] - r['gio']).total_seconds()):.0f}s — tách bộ theo người")
+                 f" {abs((x['gio'] - r['gio']).total_seconds()):.0f}s — tách bộ theo người{cu}")
 
 
 def _xen_ke(phan: list[dict], hd: str, khoa_hd: dict | None) -> bool:
@@ -1660,6 +1705,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         r = ket_qua[p["id"]]
         goc = f"{p['chu_thich']} {p['ocr']} {p['ten_file']}"
         r["nhan"] = bool(nhan_ds[p["id"]])
+        r["nhan_ds"] = nhan_ds[p["id"]]
         if not visits and not r["nhan"]:
             r.update(do_tin="khong_hd", ly_do="ngày này không có hóa đơn")
             continue
@@ -1809,7 +1855,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
     if cum is None:
         cum = cum_khach(conn)
     _lan_bo_theo_mat(ket_qua, _nhan_lai_theo_mat(conn, ngay, photos, ket_qua, nhan_that, cum), conn)
-    _tach_theo_nguoi([ket_qua[p["id"]] for p in photos], khoa_hd)
+    _tach_theo_nguoi([ket_qua[p["id"]] for p in photos], khoa_hd, conn)
     _canh_bao_mat(conn, photos, ket_qua, cum)
 
     _khoa_nhan_tren_anh(ket_qua)

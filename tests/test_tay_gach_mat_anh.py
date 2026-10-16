@@ -740,6 +740,71 @@ class Vong9P1(Nen):  # CEO 16/10 lần 9 phần 4
         self.assertNotEqual(kq[ids[5]][:2], ("H1", "chac"))
 
 
+class Vong10(Nen):  # CEO 17/10 lần 10: tách theo người
+    def nen(self):
+        self.hd("H1", D, "K1", "Cao Ngọc Mai Hương", "Trẻ hoá da picolight", "14:30")
+        self.hd("H2", D, "K2", "Nguyễn Đình Huy", "CSD MỤN", "14:31")
+
+    def test_mat_co_nhan_ten_khac_khong_nang(self):  # (1) ca 93257B53: cùng mã mặt có nhãn tên KHÁC (chưa khớp HĐ)
+        self.nen()
+        ids = [self.anh(D, "14:37:11", "Ngọc Mai Hương- pico 10/10/26", km="P-M"),
+               self.anh(D, "14:37:11", "Thu Trang- csd 10/10/26", km="P-M"),
+               self.anh(D, "14:37:16", km="P-M"), self.anh(D, "14:37:23", km="P-M")]
+        kq = self.ghep()
+        self.assertNotIn(("H1", "chac"), {kq[i][:2] for i in ids[1:]})
+        self.assertEqual(kq[ids[0]][:2], ("H1", "chac"))  # ảnh neo giữ
+
+    def test_mat_nhan_cung_ten_van_nang(self):  # âm (1): nhãn thứ 2 cùng tên (bỏ dấu) với neo -> vẫn tách theo người
+        self.hd("H2", D, "K2", "Nguyễn Đình Huy", "CSD MỤN", "14:31")
+        self.hd("H1", D, "K1", "Cao Ngọc Mai Hương", "Trẻ hoá da picolight", "14:30")
+        ids = [self.anh(D, "14:37:11", "Nguyên Đình Huy- csd 10/10/26", km="P-H"), self.anh(D, "14:37:16", km="P-M"),
+               self.anh(D, "14:37:23", km="P-M"), self.anh(D, "14:37:29", "Ngọc Mai Hương- pico 10/10/26", km="P-M"),
+               self.anh(D, "14:37:30", "Ngoc Mai Huong pico 10/10/26", km="P-M"),
+               self.anh(D, "14:37:37", km="P-M"), self.anh(D, "14:37:42", km="P-H")]
+        kq = self.ghep()
+        self.assertEqual({kq[i][:2] for i in (ids[1], ids[2], ids[5])}, {("H1", "chac")})
+
+    @staticmethod
+    def r(gio, hd=None, do_tin="chua_ro", ly_do="", mat="", bo=1, nhan=None, xn=None, diem=0):
+        import datetime as dt
+        return {"hd": hd, "do_tin": do_tin, "ly_do": ly_do, "diem": diem, "xn": xn, "bo": bo,
+                "gio": dt.datetime.fromisoformat(f"{D}T{gio}"), "mat_ds": set(mat.split()),
+                "nhan": bool(nhan), "nhan_ds": A.doc_nhan(nhan, 2026) if nhan else []}
+
+    def ca_80587249(self, **kw):  # bộ: nhãn H2 (mặt P-H), ảnh mặt P-M chắc theo luật bộ -> H2; neo H1 mặt P-M
+        self.nen()
+        bo = "cùng bộ chụp liền 2 ảnh với ảnh có nhãn 'x'"
+        ds = [self.r("16:46:52", "H2", "chac", "nhãn 'Đình Huy- csd' khớp", "P-H", nhan="Đình Huy- csd 10/10/26", diem=80),
+              self.r("16:46:52", "H2", "chac", bo, kw.get("mat", "P-M"), nhan=kw.get("nhan"), xn=kw.get("xn"), diem=80),
+              self.r("16:46:53", "H1", "chac", "nhãn 'Mai Hương- pico' khớp", "P-M", bo=2,
+                     nhan="Mai Hương- pico 10/10/26", diem=80)]
+        A._tach_theo_nguoi(ds, {}, self.c)
+        return ds
+
+    def test_bo_chup_doi_theo_mat_neo(self):  # (2) ca 80587249 / 42EC5A61: chắc chỉ do luật bộ chụp -> đổi theo mặt
+        ds = self.ca_80587249()
+        self.assertEqual((ds[1]["hd"], ds[1]["do_tin"]), ("H1", "chac"))
+        self.assertIn("trước: H2", ds[1]["ly_do"])
+        self.assertEqual(ds[0]["hd"], "H2")
+
+    def test_bo_chup_khong_doi_anh_nhan(self):  # âm (2): ảnh có nhãn riêng -> không đổi
+        self.assertEqual(self.ca_80587249(nhan="Đình Huy- csd 10/10/26")[1]["hd"], "H2")
+
+    def test_bo_chup_khong_doi_da_duyet(self):  # âm (2): ảnh đã duyệt -> không đổi
+        self.assertEqual(self.ca_80587249(xn="H2")[1]["hd"], "H2")
+
+    def test_bo_chup_khong_doi_khi_mat_trung_neo_dang_gan(self):  # âm (2): mặt cũng trùng ảnh neo HĐ đang gắn
+        self.assertEqual(self.ca_80587249(mat="P-M P-H")[1]["hd"], "H2")
+
+    def test_chac_theo_mat_khong_doi(self):  # âm (2): chắc theo luật mặt / nhãn (không phải luật bộ) -> không đổi
+        self.nen()
+        ds = [self.r("16:46:52", "H2", "chac", "khuôn mặt thuộc khách K2 (cụm 9 ảnh đã xác nhận) + HĐ cùng ngày", "P-M"),
+              self.r("16:46:53", "H1", "chac", "nhãn 'Mai Hương- pico' khớp", "P-M", nhan="Mai Hương- pico 10/10/26",
+                     diem=80)]
+        A._tach_theo_nguoi(ds, {}, self.c)
+        self.assertEqual(ds[0]["hd"], "H2")
+
+
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
     import datetime as _dt
 
