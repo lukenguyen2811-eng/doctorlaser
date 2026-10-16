@@ -114,6 +114,8 @@ class DongBo(unittest.TestCase):
 
     def chay(self, *thamso):
         goi, run = chay_gia()
+        if "--ghi" in thamso:  # lớp này thử đường osascript cũ (dự phòng)
+            thamso = (*thamso, "--applescript")
         with mock.patch.object(M.subprocess, "run", run), mock.patch.object(sys, "argv", ["x", *thamso]), \
                 redirect_stdout(io.StringIO()) as out:
             try:
@@ -180,7 +182,8 @@ class DongBo(unittest.TestCase):
         def hong(cmd, **kw):
             goi.append(cmd)
             return types.SimpleNamespace(returncode=1, stdout="", stderr="Photos got an error")
-        with mock.patch.object(M.subprocess, "run", hong), mock.patch.object(sys, "argv", ["x", "--ghi"]), \
+        with mock.patch.object(M.subprocess, "run", hong), \
+                mock.patch.object(sys, "argv", ["x", "--ghi", "--applescript"]), \
                 redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
             M.main()
         self.assertEqual(len(goi), 3)

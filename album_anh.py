@@ -3,6 +3,7 @@
     .venv/bin/python album_anh.py                    # chạy khan: chỉ đếm, KHÔNG gọi app Ảnh
     .venv/bin/python album_anh.py --ghi              # đồng bộ (chạy trong Terminal của Mac Ảnh)
     .venv/bin/python album_anh.py --ghi --chi khach --toi-da 300   # lô 300 album khách, chạy lại làm tiếp
+    .venv/bin/python album_anh.py --ghi --chi dv --toi-da 1        # thử 1 album trước
 
 Thư mục cha "Doctor Laser" trong app Ảnh, 3 thư mục con:
   - "Dịch vụ":    album "DV · <nhóm>" theo các dòng dịch vụ của HĐ (1 HĐ nhiều dịch vụ -> nhiều album).
@@ -13,9 +14,12 @@ Chỉ ảnh máy ghép CHẮC CHẮN (do_tin='chac') hoặc người ĐÃ DUYỆ
 
 Cách đồng bộ: tập ảnh đúng của từng album so với bảng da_album (lần ghi trước).
   - không đổi -> bỏ qua (không gọi app Ảnh);
-  - đổi -> XOÁ album đó rồi TẠO LẠI đủ ảnh (AppleScript của app Ảnh không gỡ được ảnh khỏi album).
-    XOÁ ALBUM KHÔNG XOÁ ẢNH: ảnh vẫn nằm trong thư viện + các album khác;
-  - album lần trước có mà nay không còn ảnh (đổi tên khách, ảnh bị loại) -> xoá album.
+  - đổi -> PhotoKit (mặc định, nhanh): đọc ảnh đang có trong album, GỠ phần thừa + THÊM phần thiếu
+    (lô LO_PK ảnh / lần ghi), không xoá album -> không bật hộp thoại xác nhận xoá của hệ thống.
+    GỠ ẢNH KHỎI ALBUM KHÔNG XOÁ ẢNH: ảnh vẫn nằm trong thư viện + các album khác;
+  - album lần trước có mà nay không còn ảnh (đổi tên khách, ảnh bị loại) -> gỡ hết ảnh, để album RỖNG
+    (thêm --xoa-rong thì xoá hẳn album rỗng — app Ảnh có thể hỏi xác nhận xoá).
+  - --applescript: đường cũ osascript (XOÁ album rồi TẠO LẠI, lô 200 ảnh ~1,5–2 phút) — dự phòng.
 Chỉ đụng album trong 3 thư mục con trên; album người tạo / album cũ của `xuat --album` không đụng.
 Ghi da_album sau MỖI album xong -> dừng giữa chừng chạy lại được. 3 album lỗi liền -> dừng lượt.
 """
@@ -23,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
 import datetime as dt
 import re
 import sqlite3
@@ -34,6 +39,7 @@ import anhkhach as A
 THU_MUC = A.THU_MUC_ALBUM  # "Doctor Laser"
 TM_DV, TM_THANG, TM_KHACH = "Dịch vụ", "Theo tháng", "Khách"
 LO = 200  # tối đa bấy nhiêu ảnh mỗi lệnh osascript
+LO_PK = 2000  # tối đa bấy nhiêu ảnh mỗi lần ghi PhotoKit (performChangesAndWait)
 HAN_GIAY = 180  # mỗi lệnh osascript có hạn: app Ảnh kẹt thì không treo cả lượt
 LOI_LIEN = 3  # 3 album lỗi liền -> dừng lượt
 KHACH_TOI_THIEU = 2  # album khách khi có ảnh ở >= 2 ngày HĐ khác nhau
@@ -263,8 +269,153 @@ def ghi_album(thu_muc: str, ten: str, ids: list[str]) -> None:
         _osa(_THEM, al, *mi[k:k + LO])
 
 
-def dong_bo(conn, muon: dict, toi_da: int = 0) -> tuple[int, int, int]:
-    """Ghi các album đổi. Trả (xong, lỗi, còn lại chưa làm)."""
+# ---------------------------- app Ảnh (PhotoKit) ----------------------------
+def _photos():
+    import Photos  # pyobjc — có sẵn trong .venv của Mac Ảnh (tai_goc dùng)
+    return Photos
+
+
+def _pool():
+    try:
+        import objc
+    except ImportError:  # máy không có pyobjc (chạy test)
+        return contextlib.nullcontext()
+    return objc.autorelease_pool()
+
+
+def _quyen() -> None:
+    """Quyền Ảnh của Terminal (đã cấp khi chạy tai_goc). Chưa có thì hỏi 1 lần, vẫn không có thì dừng."""
+    from osxphotos.photokit import check_photokit_authorization, request_photokit_authorization
+
+    if not check_photokit_authorization():
+        request_photokit_authorization()
+        if not check_photokit_authorization():
+            sys.exit("Chưa có quyền truy cập Ảnh: Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Ảnh → bật"
+                     " Terminal, rồi chạy lại.")
+
+
+def _ds(kq) -> list:
+    """PHFetchResult -> list."""
+    return [kq.objectAtIndex_(i) for i in range(kq.count())]
+
+
+class AnhKit:
+    """Ghi album app Ảnh qua PhotoKit: tìm/tạo thư mục + album, gỡ ảnh thừa, thêm ảnh thiếu."""
+
+    def __init__(self, P=None):
+        self.P = P if P is not None else _photos()
+        self.lib = self.P.PHPhotoLibrary.sharedPhotoLibrary()
+        self._cha = None
+        self._con: dict[str, object] = {}  # tên thư mục con -> PHCollectionList
+        self._al: dict[str, dict[str, list]] = {}  # tên thư mục con -> {tên album: [PHAssetCollection]}
+
+    def _doi(self, viec) -> None:
+        """Chạy viec() trong performChangesAndWait; lỗi (trong khối hoặc PhotoKit trả) -> RuntimeError."""
+        loi = []
+
+        def khoi():
+            try:
+                viec()
+            except Exception as e:  # noqa: BLE001 — lỗi trong khối không được nuốt mất
+                loi.append(e)
+        ok, err = self.lib.performChangesAndWait_error_(khoi, None)
+        if loi:
+            raise RuntimeError(f"PhotoKit: {loi[0]}")
+        if not ok:
+            mo_ta = err.localizedDescription() if err is not None else "không rõ lỗi"
+            raise RuntimeError(f"PhotoKit: {mo_ta}"[:150])
+
+    def _thu_muc(self, ten: str, cha=None):
+        """Thư mục tên `ten` (trong `cha`, hoặc cấp cao nhất); chưa có thì tạo. Không tạo trùng."""
+        P = self.P
+        kq = (P.PHCollectionList.fetchCollectionsInCollectionList_options_(cha, None) if cha is not None
+              else P.PHCollectionList.fetchTopLevelUserCollectionsWithOptions_(None))
+        for c in _ds(kq):
+            if isinstance(c, P.PHCollectionList) and c.localizedTitle() == ten:
+                return c
+        moi = {}
+
+        def viec():
+            req = P.PHCollectionListChangeRequest.creationRequestForCollectionListWithTitle_(ten)
+            ph = req.placeholderForCreatedCollectionList()
+            moi["id"] = ph.localIdentifier()
+            if cha is not None:
+                P.PHCollectionListChangeRequest.changeRequestForCollectionList_(cha).addChildCollections_([ph])
+        self._doi(viec)
+        c = P.PHCollectionList.fetchCollectionListsWithLocalIdentifiers_options_([moi["id"]], None).firstObject()
+        if c is None:
+            raise RuntimeError(f"tạo thư mục '{ten}' xong mà không thấy")
+        return c
+
+    def thu_muc_con(self, tm: str):
+        if tm not in self._con:
+            if self._cha is None:
+                self._cha = self._thu_muc(THU_MUC)
+            g = self._thu_muc(tm, self._cha)
+            self._con[tm] = g
+            al: dict[str, list] = collections.defaultdict(list)
+            for c in _ds(self.P.PHCollectionList.fetchCollectionsInCollectionList_options_(g, None)):
+                if isinstance(c, self.P.PHAssetCollection):
+                    al[c.localizedTitle()].append(c)
+            self._al[tm] = al
+        return self._con[tm]
+
+    def _tao_album(self, tm: str, ten: str):
+        P, g, moi = self.P, self.thu_muc_con(tm), {}
+
+        def viec():
+            req = P.PHAssetCollectionChangeRequest.creationRequestForAssetCollectionWithTitle_(ten)
+            ph = req.placeholderForCreatedAssetCollection()
+            moi["id"] = ph.localIdentifier()
+            P.PHCollectionListChangeRequest.changeRequestForCollectionList_(g).addChildCollections_([ph])
+        self._doi(viec)
+        a = P.PHAssetCollection.fetchAssetCollectionsWithLocalIdentifiers_options_([moi["id"]], None).firstObject()
+        if a is None:
+            raise RuntimeError(f"tạo album '{ten}' xong mà không thấy")
+        self._al[tm][ten].append(a)
+        return a
+
+    def ghi(self, tm: str, ten: str, ids: list[str], xoa_rong: bool = False) -> tuple[int, int, int]:
+        """Album `ten` trong thư mục con `tm` có ĐÚNG tập `ids`. Trả (thêm, gỡ, không thấy trong thư viện)."""
+        P = self.P
+        self.thu_muc_con(tm)
+        ds = self._al[tm].get(ten) or []
+        if len(ds) > 1:
+            print(f"  ? {tm}/{ten}: có {len(ds)} album trùng tên — chỉ ghi album đầu", flush=True)
+        if not ds:
+            if not ids:
+                return 0, 0, 0
+            a = self._tao_album(tm, ten)
+        else:
+            a = ds[0]
+        hien = {}  # uuid -> PHAsset đang có trong album
+        for x in _ds(P.PHAsset.fetchAssetsInAssetCollection_options_(a, None)):
+            hien[x.localIdentifier().split("/")[0]] = x
+        muon = set(ids)
+        thua = [x for u, x in hien.items() if u not in muon]
+        thieu = [u for u in ids if u not in hien]
+        for k in range(0, len(thua), LO_PK):
+            lo = thua[k:k + LO_PK]
+            self._doi(lambda lo=lo: P.PHAssetCollectionChangeRequest.changeRequestForAssetCollection_(a)
+                      .removeAssets_(lo))
+        them = khong_thay = 0
+        for k in range(0, len(thieu), LO_PK):
+            lo = thieu[k:k + LO_PK]
+            kq = P.PHAsset.fetchAssetsWithLocalIdentifiers_options_([f"{u}/L0/001" for u in lo], None)
+            khong_thay += len(lo) - kq.count()  # ảnh đã xoá khỏi thư viện -> bỏ qua ảnh đó
+            if kq.count():
+                self._doi(lambda kq=kq: P.PHAssetCollectionChangeRequest.changeRequestForAssetCollection_(a)
+                          .addAssets_(kq))
+                them += kq.count()
+        if not ids and xoa_rong:  # xoá album rỗng (KHÔNG xoá ảnh) — app Ảnh có thể hỏi xác nhận
+            self._doi(lambda: P.PHAssetCollectionChangeRequest.deleteAssetCollections_([a]))
+            self._al[tm][ten].remove(a)
+        return them, len(thua), khong_thay
+
+
+def dong_bo(conn, muon: dict, toi_da: int = 0, ghi=None) -> tuple[int, int, int]:
+    """Ghi các album đổi. ghi(thư mục con, tên, ids) — mặc định osascript. Trả (xong, lỗi, còn lại chưa làm)."""
+    ghi = ghi or ghi_album
     _bang(conn)
     doi = can_doi(muon, da_ghi(conn))
     if toi_da:
@@ -278,7 +429,8 @@ def dong_bo(conn, muon: dict, toi_da: int = 0) -> tuple[int, int, int]:
             # Xoá dấu cũ TRƯỚC: lỡ hỏng giữa chừng thì lần sau thấy khác và làm lại album này.
             conn.execute("DELETE FROM da_album WHERE thu_muc=? AND album=?", (tm, al))
             conn.commit()
-            ghi_album(tm, al, ids)
+            with _pool():
+                ghi(tm, al, ids)
             conn.executemany("INSERT OR IGNORE INTO da_album VALUES (?,?,?)", [(tm, al, i) for i in ids])
             conn.commit()
             xong += 1
@@ -316,7 +468,7 @@ def in_dem(conn, rows, muon: dict, cu: dict) -> None:
     for d, so in bo.most_common(10):
         print(f"  {so:>7}  {d}")
     doi = can_doi(muon, cu)
-    print(f"\nSo với lần ghi trước (da_album): {len(doi)} album cần xoá + tạo lại / xoá,"
+    print(f"\nSo với lần ghi trước (da_album): {len(doi)} album cần đồng bộ,"
           f" {len(muon) - sum(1 for k in doi if k in muon)} album không đổi.")
     for tm in (TM_DV, TM_THANG, TM_KHACH):
         print(f"  {tm}: {sum(1 for k in doi if k[0] == tm)}")
@@ -327,7 +479,11 @@ def main() -> None:
     ap.add_argument("--ghi", action="store_true", help="đồng bộ vào app Ảnh (mặc định chỉ đếm)")
     ap.add_argument("--chi", choices=["dv", "thang", "khach"], help="chỉ 1 thư mục con")
     ap.add_argument("--toi-da", type=int, default=0, help="tối đa bấy nhiêu album đổi mỗi lượt (0 = hết)")
+    ap.add_argument("--applescript", action="store_true", help="ghi bằng osascript cũ (chậm) thay PhotoKit")
+    ap.add_argument("--xoa-rong", action="store_true", help="PhotoKit: xoá hẳn album hết ảnh (có thể hỏi xác nhận)")
     a = ap.parse_args()
+    if hasattr(sys.stdout, "reconfigure"):  # chạy qua tee: in từng dòng ngay, không đợi đầy bộ đệm
+        sys.stdout.reconfigure(line_buffering=True)
     if a.ghi:
         conn = A.ket_noi()
     else:  # chạy khan: mở CHỈ ĐỌC, không tạo bảng
@@ -346,8 +502,21 @@ def main() -> None:
         return
     if chon:  # chỉ đồng bộ thư mục được chọn: album thư mục khác coi như không đổi
         muon = {**{k: sorted(v) for k, v in da_ghi(conn).items() if k[0] != chon}, **muon}
-    xong, loi, con = dong_bo(conn, muon, a.toi_da)
-    print(f"Xong: {xong} album đã xoá + tạo lại / xoá, lỗi {loi}, còn {con} album chờ lượt sau.")
+    if a.applescript:
+        ghi = None
+    else:
+        _quyen()
+        kit = AnhKit()
+        dem = collections.Counter()
+
+        def ghi(tm, al, ids):
+            them, go, khong = kit.ghi(tm, al, ids, a.xoa_rong)
+            dem.update(them=them, go=go, khong=khong)
+    xong, loi, con = dong_bo(conn, muon, a.toi_da, ghi)
+    if not a.applescript:
+        print(f"PhotoKit: thêm {dem['them']} ảnh, gỡ {dem['go']} ảnh,"
+              f" {dem['khong']} ảnh không còn trong thư viện.")
+    print(f"Xong: {xong} album đã đồng bộ, lỗi {loi}, còn {con} album chờ lượt sau.")
     if loi or con:
         sys.exit(1)
 
