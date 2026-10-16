@@ -113,6 +113,9 @@ def ket_noi() -> sqlite3.Connection:
         # (gửi qua Zalo/Messenger, chụp màn hình...: ngày trên ảnh có thể là NGÀY NHẬN, trễ 1–2 ngày);
         # NULL = chưa quét lại từ khi có cột -> ghép như cũ.
         conn.execute("ALTER TABLE photos ADD COLUMN ngay_goc INTEGER")
+    for c_ in ("may_hd", "may_ly_do", "may_luc"):  # TỰ DUYỆT (CEO 16/10 lần 7): tách riêng khỏi xn_hd của người
+        if c_ not in cot:
+            conn.execute(f"ALTER TABLE photos ADD COLUMN {c_} TEXT")
     return conn
 
 
@@ -1780,6 +1783,12 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         if r["trung_giay"] and not r["hd"] and r["do_tin"] != "khong_hd":
             r["ly_do"] = r["ly_do"] or "giờ ảnh trùng từng giây với nhiều ảnh khác (giờ nhập, không phải giờ chụp) — người chọn"
 
+    # TỰ DUYỆT (lệnh tu_duyet --ghi): ảnh người chưa duyệt, ghép chưa chắc -> chắc theo máy duyệt, ly_do 'tự duyệt: …'.
+    for p in photos:
+        r = ket_qua[p["id"]]
+        may = p["may_hd"] if "may_hd" in p.keys() else None
+        if may and not p["xn_hd"] and not p["bo_qua"] and r["do_tin"] != "chac":
+            r.update(hd=may, do_tin="chac", diem=80, ly_do="tự duyệt: " + (p["may_ly_do"] or ""))
     for pid, r in ket_qua.items():
         conn.execute(
             "UPDATE photos SET dot=?, goi_y_hd=?, do_tin=?, ly_do=? WHERE id=?",
@@ -2578,6 +2587,246 @@ def mau_thuan_da_duyet(conn, cum: dict) -> list[tuple]:
         if c["neo"] >= CUM_MANH and _khoa_hd(conn, cum, r["xn_hd"], nho) != c["khach"]:
             ra.append((r["id"], r["xn_hd"], c["ma"]))
     return ra
+
+
+# ---------------- TỰ DUYỆT (CEO 16/10 lần 7, Lượng giao) ----------------
+# Máy tự duyệt ảnh gợi ý/chưa rõ bằng suy luận + loại trừ trên từng NGÀY: đơn vị = đoạn chụp liền (bộ chụp cắt tại quãng
+# nghỉ >= NGHI_GIAY) chưa có ảnh chắc/đã duyệt; ứng viên = khách có HĐ ngày chụp. Điểm từng cặp (đơn vị, khách) từ 4 nguồn
+# độc lập: MẶT (cụm mặt đã gắn + mặt học được từ vòng trước), NHÃN (tên + dịch vụ), GIỜ (giờ chụp vs giờ HĐ), GỢI Ý của ghép.
+# Nhận khi: khách hạng 1 không bị bằng chứng nào phản bác, điểm >= TD_DIEM, hơn hạng 2 >= TD_BIEN, có >= 2 nguồn dương, và
+# bỏ bớt từng nguồn (leave-one-out) vẫn hạng 1. Lặp: đơn vị vừa nhận thành mặt học mới -> chạy lại tới khi không đổi
+# (<= TD_VONG vòng); chạy 2 chiều ngày (xuôi/ngược), chỉ nhận cặp ra giống nhau. Ghi vào may_hd/may_ly_do/may_luc (không
+# đụng xn_hd); ghép áp vào do_tin='chac' + ly_do 'tự duyệt: …'; gỡ: tu_duyet --go.
+TD_DIEM, TD_BIEN, TD_VONG = 3.0, 2.0, 4
+TD_MAT_CO, TD_MAT_PHAN = 3.0, -5.0
+TD_NHAN_CO, TD_NHAN_DV, TD_NHAN_PHAN = 2.5, 1.0, -4.0
+TD_GOI_Y = 0.5
+
+
+def _td_don_vi(photos) -> list[list]:
+    """Đơn vị tự duyệt: bộ chụp (_gom_bo) cắt tiếp tại quãng nghỉ >= NGHI_GIAY."""
+    ra = []
+    for bo in _gom_bo(photos):
+        cur = [bo[0]]
+        for a, b in zip(bo, bo[1:]):
+            if (dt.datetime.fromisoformat(b["thoi_gian"]) - dt.datetime.fromisoformat(a["thoi_gian"])).total_seconds() \
+                    >= NGHI_GIAY:
+                ra.append(cur)
+                cur = []
+            cur.append(b)
+        ra.append(cur)
+    return ra
+
+
+def _td_nhan_that(p) -> list[dict]:
+    """Nhãn thật trên ảnh (không giấy tờ, có chữ tên không phải chữ dịch vụ/xưng hô)."""
+    if _la_giay_to(p):
+        return []
+    ra = []
+    for n in _nhan_that(p, int(p["ngay"][:4])):
+        ten = [w for w in n["ten"].split() if w not in XUNG_HO and w not in _chu_dv_nhan() and len(w) >= 2]
+        if ten:
+            ra.append(n)
+    return ra
+
+
+def _td_chu_mat(cum: dict, hoc: dict, u: str, nhan_mat: dict | None = None) -> set:
+    """Các chủ (khoá khách) của mã mặt u: cụm mặt đã gắn; mặt học được (>= 2 đơn vị, 1 chủ); và (CEO 16/10 lần 8, ca
+    B9F837F3) mọi khách có >= 2 ảnh 1 mặt chắc THEO NHÃN đúng tên mang mặt này (ngày khác) — mặt có chủ khác K thì K bị
+    phản bác."""
+    ra = set()
+    if u in cum["cum"]:
+        ra.add(cum["cum"][u]["khach"])
+    h = hoc.get(u)
+    if h and len(h) == 1:
+        k, n = next(iter(h.items()))
+        if n >= 2:
+            ra.add(k)
+    for k, n in ((nhan_mat or {}).get(u) or {}).items():
+        if n >= 2:
+            ra.add(k)
+    return ra
+
+
+def _td_nhan_mat(conn, cum: dict) -> dict:
+    """Mã mặt -> {khoá khách: số ảnh 1 mặt chắc theo NHÃN (ly_do 'nhãn …') hoặc người đã duyệt}."""
+    nho: dict = {}
+    ra: dict = {}
+    for r in conn.execute("SELECT khuon_mat, goi_y_hd, xn_hd, do_tin, ly_do FROM photos WHERE bo_qua=0"
+                          " AND COALESCE(khuon_mat,'') != '' AND (xn_hd IS NOT NULL OR (do_tin='chac' AND ly_do LIKE 'nhãn%'))"):
+        mat = _doc_mat(r["khuon_mat"])
+        if len(mat) != 1:
+            continue
+        k = _khoa_hd(conn, cum, r["xn_hd"] or r["goi_y_hd"], nho)
+        if k:
+            ra.setdefault(mat[0], {}).setdefault(k, 0)
+            ra[mat[0]][k] += 1
+    return ra
+
+
+def _td_hop(n: dict, ten_kh: str) -> bool:
+    """Nhãn hợp tên khách (_ten_nhan_hop); riêng khớp kiểu lệch 1 ký tự OCR thì chữ cái đầu phải giống ('Linh' không
+    phải 'Minh' — ca B9F837F3)."""
+    if not _ten_nhan_hop(n, ten_kh):
+        return False
+    t = [k for _, k in _tu_ten_goi(ten_kh)]
+    w = _ten_nhan_gon(n, t, _dao_ten(ten_kh))
+    if not w or not t or all(x in t for x in w) or any(set(w) <= set(b) for b in _bi_danh(ten_kh)):
+        return True
+    return w[-1][:1] == t[-1][:1]
+
+
+def _td_diem(dv: list, K: str, vs: list, ctx: dict) -> dict:
+    """Điểm từng nguồn cho cặp (đơn vị dv, khách K có các HĐ vs trong ngày)."""
+    d = {"mat": 0.0, "nhan": 0.0, "gio": 0.0, "goi_y": 0.0}
+    chu = ctx["chu_mat"]
+    if chu:
+        if K in chu and len(chu) == 1:
+            d["mat"] = TD_MAT_CO
+        elif K not in chu:
+            d["mat"] = TD_MAT_PHAN
+        else:
+            d["mat"] = TD_MAT_PHAN  # mặt của >= 2 chủ: đơn vị lẫn người
+    nhans = ctx["nhans"]
+    if nhans:
+        hop = [n for n in nhans if any(_td_hop(n, v["ten_kh"]) for v in vs)]
+        if hop:
+            d["nhan"] = TD_NHAN_CO + (TD_NHAN_DV if any(_ma_ro(n["ma_dv"]) and any(
+                _dv_khop(n["ma_dv"], v["dich_vu"] or "") for v in vs) for n in hop) else 0)
+        else:
+            d["nhan"] = TD_NHAN_PHAN
+    if ctx["co_goc"]:
+        lech = min(_cach_gio(v, ctx["gio"]) for v in vs) / 60
+        d["gio"] = 1.5 if lech <= 30 else (0.5 if lech <= 90 else (-1.5 if lech > 240 else 0.0))
+    if ctx["goi_y"] and ctx["goi_y"] in {v["code"] for v in vs}:
+        d["goi_y"] = TD_GOI_Y
+    return d
+
+
+def _td_quyet(diem: dict) -> tuple[str | None, str]:
+    """diem: K -> {nguồn: điểm}. (K nhận | None, lý do)."""
+    hop_le = {K: x for K, x in diem.items() if x["mat"] > TD_MAT_PHAN and x["nhan"] > TD_NHAN_PHAN}
+    if not hop_le:
+        return None, "không khách nào hợp lệ"
+    tong = {K: sum(x.values()) for K, x in hop_le.items()}
+    xep = sorted(tong, key=lambda K: -tong[K])
+    K = xep[0]
+    hai = tong[xep[1]] if len(xep) > 1 else 0.0
+    if tong[K] < TD_DIEM:
+        return None, f"điểm {tong[K]:.1f} < {TD_DIEM}"
+    if tong[K] - hai < TD_BIEN:
+        return None, f"biên {tong[K] - hai:.1f} < {TD_BIEN}"
+    # 'goi_y' (gợi ý của ghép) suy từ chính nhãn/mặt/giờ -> không tính là nguồn độc lập, chỉ cộng điểm nhỏ.
+    duong = [c for c, x in hop_le[K].items() if x > 0 and c != "goi_y"]
+    if len(duong) < 2:
+        return None, "chưa đủ 2 nguồn độc lập (mặt / nhãn / giờ)"
+    for c in duong:  # leave-one-out: bỏ từng nguồn, K vẫn phải hạng 1
+        t2 = {k: sum(v for cc, v in x.items() if cc != c) for k, x in hop_le.items()}
+        if any(t2[k] >= t2[K] for k in t2 if k != K):
+            return None, f"bỏ nguồn '{c}' thì đổi kết quả"
+    lo = ", ".join(f"{c} {x:+.1f}" for c, x in hop_le[K].items() if x)
+    return K, f"{lo}; tổng {tong[K]:.1f}, hơn hạng 2 {tong[K] - hai:.1f}"
+
+
+def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None) -> list[tuple]:
+    """Tự duyệt 1 ngày (không ghi). Trả [(ids ảnh, mã HĐ, khoá khách, lý do, mã mặt các ảnh 1 mặt)]."""
+    visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
+    if not visits:
+        return []
+    photos = conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,)).fetchall()
+    nho: dict = {}
+    theo_k: dict[str, list] = {}
+    for v in visits:
+        theo_k.setdefault(_khoa_hd(conn, cum, v["code"], nho), []).append(v)
+    ra = []
+    for dv in _td_don_vi(photos):
+        if any(p["xn_hd"] or p["bo_qua"] for p in dv) or any(
+                p["do_tin"] == "chac" and not (p["ly_do"] or "").startswith("tự duyệt") for p in dv):
+            continue
+        cho = [p for p in dv if p["do_tin"] in ("goi_y", "chua_ro")]
+        if not cho:
+            continue
+        mat = {u for p in dv for u in _doc_mat(p["khuon_mat"]) if 1 <= len(_doc_mat(p["khuon_mat"])) <= MAT_TOI_DA}
+        chu = set().union(*(_td_chu_mat(cum, hoc, u, nhan_mat) for u in mat)) if mat else set()
+        nhans = [n for p in dv for n in _td_nhan_that(p)]
+        if len({n["ten"] for n in nhans if not n.get("quan_he")}) >= 2 or any(n.get("quan_he") for n in nhans):
+            continue  # đơn vị có 2 tên / nhãn người nhà: để người duyệt
+        gy = [p["goi_y_hd"] for p in cho if p["goi_y_hd"]]
+        ctx = {"chu_mat": chu, "nhans": nhans, "gio": dt.datetime.fromisoformat(dv[0]["thoi_gian"]),
+               "co_goc": all(p["ngay_goc"] != 0 for p in dv),
+               "goi_y": max(set(gy), key=gy.count) if gy else None}
+        diem = {K: _td_diem(dv, K, vs, ctx) for K, vs in theo_k.items()}
+        K, ly = _td_quyet(diem)
+        if not K:
+            continue
+        vs = theo_k[K]
+        ma = [n["ma_dv"] for n in nhans if n["ma_dv"]]
+        r = {"hd": ctx["goi_y"] if ctx["goi_y"] in {v["code"] for v in vs} else None, "gio": ctx["gio"], "goc": 1}
+        v = _chon_hd_mat(vs, [ngay], r, ma)
+        mat1 = [u for p in dv for u in _doc_mat(p["khuon_mat"]) if len(_doc_mat(p["khuon_mat"])) == 1]
+        ra.append(([p["id"] for p in cho], v["code"], K, ly, mat1))
+    return ra
+
+
+def tu_duyet(conn, ngays: list[str], vong: int = TD_VONG, nguoc: bool = False) -> dict:
+    """Chạy tự duyệt lặp trên các ngày. Trả {id ảnh: (mã HĐ, khoá khách, lý do)}."""
+    cum = cum_khach(conn)
+    nhan_mat = _td_nhan_mat(conn, cum)
+    hoc: dict[str, dict] = {}
+    nhan: dict = {}
+    thu_tu = sorted(ngays, reverse=nguoc)
+    for _ in range(vong):
+        moi = 0
+        for ngay in thu_tu:
+            for ids, hd, K, ly, mat1 in _td_ngay(conn, ngay, cum, hoc, nhan_mat):
+                if ids[0] in nhan:
+                    continue
+                moi += 1
+                for i in ids:
+                    nhan[i] = (hd, K, ly)
+                for u in set(mat1):
+                    hoc.setdefault(u, {}).setdefault(K, 0)
+                    hoc[u][K] += 1
+        if not moi:
+            break
+    return nhan
+
+
+def tu_duyet_on_dinh(conn, ngays: list[str]) -> dict:
+    """Chạy 2 chiều (ngày xuôi / ngược); chỉ giữ ảnh cả 2 lần ra cùng HĐ."""
+    a = tu_duyet(conn, ngays)
+    b = tu_duyet(conn, ngays, nguoc=True)
+    return {i: x for i, x in a.items() if i in b and b[i][0] == x[0]}
+
+
+def cmd_tu_duyet(a) -> None:
+    conn = ket_noi()
+    ngays = []
+    for th in a.thang:
+        y, m = thang(th)
+        tu, den = khoang_thang(y, m)
+        ngays += [r[0] for r in conn.execute("SELECT DISTINCT ngay FROM photos WHERE ngay BETWEEN ? AND ?", (tu, den))]
+    if a.go:
+        n = conn.execute(f"UPDATE photos SET may_hd=NULL, may_ly_do=NULL, may_luc=NULL WHERE may_hd IS NOT NULL"
+                         f" AND ngay IN ({','.join('?' * len(ngays))})", ngays).rowcount
+        cum = cum_khach(conn)
+        for ngay in ngays:
+            ghep_ngay(conn, ngay, cum)
+        conn.commit()
+        print(f"Đã gỡ tự duyệt {n} ảnh, ghép lại {len(ngays)} ngày.")
+        return
+    kq = tu_duyet_on_dinh(conn, ngays)
+    print(f"Tự duyệt được {len(kq)} ảnh (gợi ý/chưa rõ) trong {len(ngays)} ngày" + (" — GHI" if a.ghi else " — chạy khan"))
+    if a.ghi:
+        luc = dt.datetime.now().isoformat(timespec="seconds")
+        for i, (hd, _, ly) in kq.items():
+            conn.execute("UPDATE photos SET may_hd=?, may_ly_do=?, may_luc=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0",
+                         (hd, ly, luc, i))
+        cum = cum_khach(conn)
+        for ngay in sorted({r[0] for r in conn.execute(
+                f"SELECT DISTINCT ngay FROM photos WHERE may_luc=?", (luc,))}):
+            ghep_ngay(conn, ngay, cum)
+        conn.commit()
 
 
 def cmd_ghep(a) -> None:
@@ -3667,6 +3916,11 @@ def main() -> None:
     s = sub.add_parser("ghep", help="máy tự gợi ý ảnh nào của khách nào")
     s.add_argument("thang")
     s.set_defaults(f=cmd_ghep)
+    s = sub.add_parser("tu_duyet", help="máy tự duyệt ảnh gợi ý/chưa rõ (mặc định chạy khan)")
+    s.add_argument("thang", nargs="+")
+    s.add_argument("--ghi", action="store_true", help="ghi kết quả (may_hd), ghép lại để áp")
+    s.add_argument("--go", action="store_true", help="gỡ hết tự duyệt của các tháng này rồi ghép lại")
+    s.set_defaults(f=cmd_tu_duyet)
     s = sub.add_parser("duyet", help="mở trang duyệt trên trình duyệt")
     s.add_argument("--khong-mo", action="store_true", help="không tự mở trình duyệt")
     s.set_defaults(f=cmd_duyet)
