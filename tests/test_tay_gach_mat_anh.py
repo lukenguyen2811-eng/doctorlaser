@@ -699,11 +699,17 @@ class Vong9P1(Nen):  # CEO 16/10 lần 9 phần 4
                      goi_y=f"K1-{i % 2}", ly_do="nhãn 'x-csd' khớp")
         self.hd("K1-D", D, "K1", ten, "CSD", "15:00")
 
-    def test_nhan_ten_khac_cung_mat_chan(self):  # (a): ảnh nhãn CÙNG MÃ MẶT ghi tên khác (chưa khớp HĐ) -> chỉ gợi ý
+    def test_nhan_ten_khac_cung_mat_chan(self):  # (a): ảnh nhãn CÙNG MÃ MẶT (mặt không thuộc cụm K) ghi tên khác -> gợi ý
         self.cum_k()
+        ids = [self.anh(D, "15:18:59", "Hoàng Huy - csd 10/10/26", km="P-X")]
+        ids += [self.anh(D, f"15:19:{5 + i * 6:02d}", km="P-K P-X") for i in range(3)]
+        self.assertNotIn("chac", {self.ghep()[i][1] for i in ids})
+
+    def test_nhan_ten_khac_mat_cum_k_khong_chan(self):  # âm (a), ma18: mặt chung thuộc cụm đã xác nhận của K -> tên gọi
+        self.cum_k()  # khác của K (23833080, D29C3C28, D25620E8, 16E7973E) -> mặt vẫn chắc
         ids = [self.anh(D, "15:18:59", "Hoàng Huy - csd 10/10/26", km="P-K")]
         ids += [self.anh(D, f"15:19:{5 + i * 6:02d}", km="P-K") for i in range(3)]
-        self.assertNotIn("chac", {self.ghep()[i][1] for i in ids})
+        self.assertEqual(self.ghep()[ids[2]][:2], ("K1-D", "chac"))
 
     def test_nhan_ten_khac_khac_mat_khong_chan(self):  # âm (a): ảnh nhãn là NGƯỜI KHÁC (khác mã mặt) -> mặt vẫn chắc
         self.cum_k()

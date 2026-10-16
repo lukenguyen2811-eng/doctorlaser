@@ -2444,18 +2444,23 @@ def _ten_hop_mo(nhan: dict, ten_kh: str) -> bool:
     return any(_ten_nhan_hop(b, ten_kh) for b in bien)
 
 
-def _nhan_la_cung_mat(p, photos, ket_qua, nhan_ds, v) -> str | None:
+def _nhan_la_cung_mat(p, photos, ket_qua, nhan_ds, v, cum=None, k=None) -> str | None:
     """Ảnh KHÁC cùng bộ chụp với p, CHUNG mã mặt với p (cùng người), có nhãn thật (có gạch, mã dịch vụ nhận ra được,
-    tên >= 2 chữ thường) không hợp mờ tên khách của HĐ v, và nhãn đó chưa khớp HĐ nào -> id ảnh nhãn; không thì None."""
+    tên >= 2 chữ thường) không hợp mờ tên khách của HĐ v, và nhãn đó chưa khớp HĐ nào -> id ảnh nhãn; không thì None.
+    Mặt CHUNG thuộc cụm đã xác nhận của chính khách k -> nhãn đó là tên gọi khác của k, KHÔNG tính (đo ma18 lần 9:
+    9 ca soát đúng bị hạ oan — 23833080, D29C3C28, D25620E8, 16E7973E + 5 ảnh lan bộ theo các ảnh đó)."""
     r = ket_qua[p["id"]]
     m = set(_doc_mat(p["khuon_mat"]))
     if r["bo"] is None or not m:
         return None
     for q in photos:
         x = ket_qua[q["id"]]
-        if q["id"] == p["id"] or x["bo"] != r["bo"] or _la_giay_to(q) or x["xn"] or not (m & set(_doc_mat(q["khuon_mat"]))):
+        chung = m & set(_doc_mat(q["khuon_mat"]))
+        if q["id"] == p["id"] or x["bo"] != r["bo"] or _la_giay_to(q) or x["xn"] or not chung:
             continue
         if x.get("nhan_hd"):
+            continue
+        if cum is not None and k is not None and any(cum["cum"].get(u, {}).get("khach") == k for u in chung):
             continue
         for n in nhan_ds[q["id"]]:
             ten = [w for w in n["ten"].split() if w not in XUNG_HO and w not in _chu_dv_nhan() and len(w) >= 2]
@@ -2588,7 +2593,7 @@ def _nhan_lai_theo_mat(conn, ngay: str, photos, ket_qua, nhan_ds, cum: dict) -> 
                 else:
                     r["ly_do"] = (r["ly_do"] or "") + f" — mặt giống {mo}, nhãn ghi tên khác"
                 continue
-            la = _nhan_la_cung_mat(p, photos, ket_qua, nhan_ds, v)
+            la = _nhan_la_cung_mat(p, photos, ket_qua, nhan_ds, v, cum, k)
             if la:
                 # CEO 16/10 lần 9 (bài học a): cùng bộ có ảnh nhãn ghi tên KHÁC mà ảnh nhãn đó CÙNG MÃ MẶT với ảnh này
                 # (cùng người) và nhãn chưa khớp HĐ nào -> mặt không đủ để chắc, chỉ gợi ý.
