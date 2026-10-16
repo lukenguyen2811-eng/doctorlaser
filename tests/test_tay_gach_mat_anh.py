@@ -554,6 +554,97 @@ class NhanKhongGachMa(Nen):  # CEO 16/10 lần 5: nhãn không gạch có mã d�
         self.assertTrue(A._hd_that("CSD MỤN"))
 
 
+class SietVong6(Nen):  # CEO 16/10 lần 6: chỉ siết
+    def test_cat_bo_nghi_ngan_chi_goi_y(self):  # ca ADA0268E: 2 nhãn khác khách, chỗ cắt nghỉ 8s -> phần tách gợi ý
+        self.hd("H1", D, "K1", "Bùi Nguyễn Nhất Anh", "CSD", "16:00")
+        self.hd("H2", D, "K2", "Mai Ngọc Bích", "Laser Revivio", "16:33")
+        ids = [self.anh(D, "16:18:52", "Nhất Anh- csd 10/10/26"), self.anh(D, "16:18:56"),
+               self.anh(D, "16:19:04"), self.anh(D, "16:19:07"), self.anh(D, "16:19:09", "Ngọc Bích-Revivio 10/10/26")]
+        ids += [self.anh(D, f"16:19:{15 + i * 5}") for i in range(4)]
+        kq = self.ghep()
+        self.assertNotEqual(kq[ids[3]][:2], ("H2", "chac"))
+        self.assertNotEqual(kq[ids[2]][1], "chac")
+
+    def test_bo_ngan_qua_nghi_mat_khong_khop_goi_y(self):  # ca 756A1CC3: 3 tấm nhãn có mặt, nghỉ 41s, 3 tấm không mặt
+        self.hd("H1", D, "K1", "Nguyễn Thị Thu Trang", "Tiêm filler", "18:38")
+        ids = [self.anh(D, "16:04:47", "Trang- filler 10/10/26", km="P-T"), self.anh(D, "16:04:49", km="P-T"),
+               self.anh(D, "16:04:50", km="P-T"), self.anh(D, "16:05:31"), self.anh(D, "16:05:41"), self.anh(D, "16:05:43")]
+        kq = self.ghep()
+        self.assertEqual(kq[ids[1]][:2], ("H1", "chac"))
+        self.assertNotEqual(kq[ids[4]][1], "chac")
+
+    def test_bo_ngan_qua_nghi_cung_mat_van_chac(self):  # âm: sau quãng nghỉ vẫn cùng mặt ảnh nhãn -> chắc
+        self.hd("H1", D, "K1", "Nguyễn Thị Thu Trang", "Tiêm filler", "18:38")
+        ids = [self.anh(D, "16:04:47", "Trang- filler 10/10/26", km="P-T"), self.anh(D, "16:04:49", km="P-T"),
+               self.anh(D, "16:04:50", km="P-T"), self.anh(D, "16:05:31", km="P-T"), self.anh(D, "16:05:41")]
+        self.assertEqual(self.ghep()[ids[4]][:2], ("H1", "chac"))
+
+    def test_nhan_ten_du_phay_ocr(self):  # ca 25DD7129: 'Lê Thi Hạnh ein, prp' -> tên + mã (ein = vein)
+        n = A.doc_nhan("Lê Thi Hạnh ein, prp 11/6/2022", 2022)[0]
+        self.assertEqual((n["ten"], n["ma_dv"]), ("le thi hanh", "vein"))
+        self.assertEqual(A.doc_nhan("Gia Hân 13/7/26", 2026)[0]["ten"], "gia han")  # âm: 'Hân' có dấu không đoán mã
+
+    def test_ten_khong_bat_dau_chu_viet_tat(self):  # âm (đo moi5): 'T' (Thị) / 'xăm' không đứng đầu tên
+        for t, ten in [("Lương T Ngọc Thuỳ Pico 18/8/22", "ngoc thuy"), ("Xóa xăm Quốc Đạt XX 7/8/23", "quoc dat"),
+                       ("Nguyễn Hồ g Thảo Vy Pico 14/5/22", "thao vy")]:
+            self.assertEqual(A.doc_nhan(t, 2022)[0]["ten"], ten, t)
+
+    def test_nhan_sau_chu_thich_tieu_de(self):  # ca CBA533E0: chú thích 'HÌNH ẢNH TRƯỚC SAU' trước nhãn
+        n = A.doc_nhan("HÌNH ẢNH TRƯỚC SAU Huynh Lê Hưng 12/4/22 Csd mụn", 2022)[0]
+        self.assertEqual((n["ten"], n["ma_dv"]), ("huynh le hung", "csd"))
+
+    def test_nhan_ngay_khac_khoa_hd_ngay_nhan(self):  # ca CBA533E0: nhãn ngày 12/4 + csd, ảnh 16/4 -> giữ HĐ IPL 12/4
+        self.hd("H1", "2026-10-06", "K1", "Huỳnh Lê Hưng", "Chăm sóc da với IPL ánh sáng", "14:30")
+        self.hd("H2", "2026-10-06", "K1", "Huỳnh Lê Hưng", "Revskin - sữa rửa mặt", "15:01")
+        a = self.anh(D, "10:42:40", "Huynh Lê Hưng 6/10/26 Csd mụn")
+        self.assertEqual(self.ghep()[a][:2], ("H1", "chac"))
+
+    def test_combo_dat_coc_xep_sau(self):  # ca B76B82C7
+        import datetime as dt_
+        vs = [{"code": "a", "ngay": D, "gio": "15:54", "dich_vu": "CSD MỤN ( LẦN LẺ ) | TRIỆT LÔNG MẶT"},
+              {"code": "b", "ngay": D, "gio": "15:56", "dich_vu": "ĐẶT CỌC CSD | COMBO CSD ( 10 LẦN )"}]
+        r = {"hd": None, "gio": dt_.datetime.fromisoformat(f"{D}T15:58:38"), "goc": 1}
+        self.assertEqual(A._chon_hd_mat(vs, [D], r, ["csd"])["code"], "a")
+
+    def test_cat_ngan_anh_truoc_nhan_cung_mat_chac(self):  # ca D65A6555: ảnh trước nhãn cùng mặt ảnh nhãn -> chắc
+        self.hd("H1", D, "K1", "Bùi Nguyễn Nhất Anh", "CSD", "16:00")
+        self.hd("H2", D, "K2", "Mai Ngọc Bích", "Laser Revivio", "16:33")
+        ids = [self.anh(D, "16:18:52", "Nhất Anh- csd 10/10/26", km="P-A"), self.anh(D, "16:18:56", km="P-A"),
+               self.anh(D, "16:19:04", km="P-B"), self.anh(D, "16:19:07", km="P-B"),
+               self.anh(D, "16:19:09", "Ngọc Bích-Revivio 10/10/26", km="P-B")]
+        ids += [self.anh(D, f"16:19:{15 + i * 5}", km="P-B") for i in range(4)]
+        self.assertEqual(self.ghep()[ids[3]][:2], ("H2", "chac"))
+
+    def test_cat_ngan_anh_truoc_nhan_mat_ben_kia_goi_y(self):  # ca ADA0268E: mặt ảnh trước nhãn = mặt nhãn bên kia
+        self.hd("H1", D, "K1", "Bùi Nguyễn Nhất Anh", "CSD", "16:00")
+        self.hd("H2", D, "K2", "Mai Ngọc Bích", "Laser Revivio", "16:33")
+        ids = [self.anh(D, "16:18:52", "Nhất Anh- csd 10/10/26", km="P-A"), self.anh(D, "16:18:56", km="P-A"),
+               self.anh(D, "16:19:04", km="P-A"), self.anh(D, "16:19:07", km="P-A"),
+               self.anh(D, "16:19:09", "Ngọc Bích-Revivio 10/10/26", km="P-B")]
+        ids += [self.anh(D, f"16:19:{15 + i * 5}", km="P-B") for i in range(4)]
+        self.assertNotEqual(self.ghep()[ids[3]][:2], ("H2", "chac"))
+
+    def test_combo_hon_san_pham(self):  # ca DA329CFE: combo CSD mụn hơn HĐ chỉ sữa rửa mặt
+        self.assertLess(A._hang_hd("COMBO CSD MỤN ( 10 LẦN )"), A._hang_hd("REVSKIN - SỬA RỬA MẶT DEEP CLEASER"))
+        self.assertLess(A._hang_hd("CSD MỤN"), A._hang_hd("COMBO CSD MỤN ( 10 LẦN )"))
+
+    def test_cat_ngan_anh_sau_nhan_van_chac(self):  # âm của ADA0268E: ảnh SAU nhãn của phần vẫn chắc
+        self.hd("H1", D, "K1", "Bùi Nguyễn Nhất Anh", "CSD", "16:00")
+        self.hd("H2", D, "K2", "Mai Ngọc Bích", "Laser Revivio", "16:33")
+        ids = [self.anh(D, "16:18:52", "Nhất Anh- csd 10/10/26"), self.anh(D, "16:18:56"),
+               self.anh(D, "16:19:04"), self.anh(D, "16:19:07"), self.anh(D, "16:19:09", "Ngọc Bích-Revivio 10/10/26")]
+        ids += [self.anh(D, f"16:19:{15 + i * 5}") for i in range(4)]
+        kq = self.ghep()
+        self.assertEqual({kq[i][:2] for i in ids[5:]}, {("H2", "chac")})
+
+    def test_peel_la_ma(self):  # ca A1519E26: nhãn cùng bộ 'peel' -> HĐ có peel, không phải HĐ csd gần giờ hơn
+        import datetime as dt_
+        vs = [{"code": "a", "ngay": D, "gio": "11:16", "dich_vu": "CSD MỤN ( LẦN LẺ )"},
+              {"code": "b", "ngay": D, "gio": "14:14", "dich_vu": "TRIỆT LÔNG MÉP/MẶT | PEEL DA MỤN (LẦN LẺ)"}]
+        r = {"hd": None, "gio": dt_.datetime.fromisoformat(f"{D}T11:34:45"), "goc": 1}
+        self.assertEqual(A._chon_hd_mat(vs, [D], r, [], ["peel"])["code"], "b")
+
+
 class GiuHdCu(unittest.TestCase):  # CEO 16/10 lần 4 (ca B2A478A3)
     import datetime as _dt
 
