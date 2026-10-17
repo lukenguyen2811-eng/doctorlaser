@@ -120,3 +120,14 @@ class KhCuKhachKhac(Nen):  # CEO 17/10 lần 16 (G4): nhãn 'Tên kh cũ dd/m d�
         kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "bo": 1, "mat_ds": {"P-X"}, "ly_do": ""}}
         A._goi_y_nhan_khong_nam(self.c, "2026-10-10", self.c.execute("SELECT * FROM photos").fetchall(), kq)
         self.assertEqual(kq[i]["do_tin"], "chac")
+
+
+class KhCuTuDuyet(unittest.TestCase):  # G4: tự duyệt không nhận khách bị nhãn 'kh cũ' phản bác
+    def test_nhan_kn_phan_bac(self):
+        n = A._nhan_khong_nam("Lam t nhung kh cũ 9/10 prp pico", 2026)
+        ctx = {"chu_mat": {"K"}, "chu_nhan_mat": set(), "nhans": [], "gio": A.dt.datetime(2026, 10, 10, 12, 23),
+               "co_goc": False, "goi_y": None, "nhan_kn": n}
+        v = {"code": "H1", "ngay": "2026-10-10", "gio": "16:14", "ten_kh": "Trần Thị Kim Ngân", "dich_vu": "PICO"}
+        self.assertEqual(A._td_diem([], "K", [v], ctx)["nhan"], A.TD_NHAN_PHAN)
+        v2 = dict(v, ten_kh="Lâm Thị Nhung")  # âm: nhãn hợp khách -> không phản bác
+        self.assertEqual(A._td_diem([], "K", [v2], ctx)["nhan"], 0.0)

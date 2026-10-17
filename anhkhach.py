@@ -3379,6 +3379,8 @@ def _td_diem(dv: list, K: str, vs: list, ctx: dict) -> dict:
                 _dv_khop(n["ma_dv"], v["dich_vu"] or "") for v in vs) for n in hop) else 0)
         else:
             d["nhan"] = TD_NHAN_PHAN
+    if any(not any(_td_hop(n, v["ten_kh"]) for v in vs) for n in ctx.get("nhan_kn") or ()):
+        d["nhan"] = min(d["nhan"], TD_NHAN_PHAN)
     if ctx["co_goc"] and all(v["ngay"] == ctx["gio"].date().isoformat() for v in vs):
         lech = min(_cach_gio(v, ctx["gio"]) for v in vs) / 60
         d["gio"] = 1.5 if lech <= 30 else (0.5 if lech <= 90 else (-1.5 if lech > 240 else 0.0))
@@ -3523,7 +3525,10 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
         ctx = {"chu_mat": chu, "chu_nhan_mat": chu_nm, "nhans": nhans, "gio": dt.datetime.fromisoformat(dv[0]["thoi_gian"]),
                "co_goc": all(p["ngay_goc"] != 0 for p in dv),
                "goi_y": max(set(gy), key=gy.count) if gy else None, "chu_mat_yeu": yeu, "bo_chac": bo_chac,
-               "hd_xa": xa}
+               "hd_xa": xa,
+               # CEO lần 16 (G4): nhãn 'Tên kh cũ dd/m' (không gạch, không năm) chỉ dùng để PHẢN BÁC khách không hợp tên
+               "nhan_kn": [n for p in dv for n in _nhan_khong_nam(f"{p['chu_thich'] or ''} {p['ocr'] or ''}",
+                                                                   int(ngay[:4]))]}
         diem = {K: _td_diem(dv, K, vs, ctx) for K, vs in ung.items()}
         K, ly = _td_quyet(diem)
         if not K:
