@@ -2207,7 +2207,7 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
         # nhãn 1 chữ (tên gọi) -> mọi khách có tên gọi đó trong ngày đều hợp (ca 7095980C 'Thảo - csd')
         cuoi = {n["ten"].split()[-1] for n in ns if len([w for w in n["ten"].split() if w not in XUNG_HO]) == 1}
         hop = [v for v in visits if any(_ten_nhan_hop(n, v["ten_kh"]) for n in ns)
-               or khong_dau(ten_goi(v["ten_kh"]) or "").lower() in cuoi]
+               or cuoi & {k for _, k in _tu_ten_kh(v["ten_kh"])}]  # 1 chữ trùng tên gọi HOẶC chữ đệm ('Thảo' ~ 'Phương Thảo Nhi')
         theo_k: dict = {}
         for v in hop:
             theo_k.setdefault(_khoa_hd(conn, cum, v["code"], nho), []).append(v)
