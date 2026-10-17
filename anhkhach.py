@@ -2105,11 +2105,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
                         and n0["hd"] == tim[0][1] and (not mr or not mn or mr & mn) \
                         and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > LIEN_GIAY):
                     # soát 17/10 (D410D78E, EFE65351, 9D3B9431): chụp liền 0–2s ảnh NHÃN khớp chắc, cùng người / không
-                    # mặt -> cùng khách, không hạ vì 'đợt nhiều khách'
-                    r.update(hd=tim[0][1], do_tin="chac", diem=80,
-                             ly_do=f"chụp liền {tim[0][0]:.0f}s với ảnh nhãn khớp chắc (cùng người / không mặt)"
-                             " — đợt có nhiều khách")
-                    continue
+                    # mặt -> ghi nhớ; bước cuối (_nang_lien_neo) nâng chắc nếu vẫn gợi ý đúng HĐ đó (không đổi luật khác)
+                    r["lien_neo"] = (tim[0][0], n0)
                 r.update(hd=tim[0][1], do_tin="goi_y",
                          ly_do=f"lan từ ảnh khớp một phần tên — cùng loạt chụp liền ({cach})" if tim[0][2] < 80
                          else f"đợt có nhiều khách — cùng loạt chụp liền với ảnh đã khớp ({cach})")
@@ -2171,6 +2168,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
             r.update(hd=may, do_tin="chac", diem=80, ly_do="tự duyệt: " + (p["may_ly_do"] or ""))
     if anh_may and "NHAN_MAY" in _BAT:
         _neo_yeu_man_hinh(conn, ngay, anh_may, photos, ket_qua)
+    _nang_lien_neo(ket_qua)
     if nen:
         _chan_theo_nen(ket_qua, nen)
     for pid, r in ket_qua.items():
@@ -2184,6 +2182,19 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         if loai:
             conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
+
+
+def _nang_lien_neo(ket_qua: dict) -> None:
+    """Ảnh 'đợt nhiều khách' chụp liền <= LIEN_GIAY s ảnh NHÃN khớp chắc (cùng người / không mặt), cuối cùng vẫn GỢI Ý
+    đúng HĐ của ảnh nhãn đó, ảnh nhãn vẫn chắc HĐ đó -> chắc (soát 17/10). Chỉ nâng gợi ý, không đổi HĐ ảnh nào."""
+    for r in ket_qua.values():
+        x = r.get("lien_neo")
+        if not x or r["xn"] or r["do_tin"] != "goi_y":
+            continue
+        giay, n0 = x
+        if n0["do_tin"] == "chac" and n0["hd"] == r["hd"]:
+            r.update(do_tin="chac", diem=80, ly_do=f"chụp liền {giay:.0f}s với ảnh nhãn khớp chắc (cùng người / không"
+                     " mặt) — đợt có nhiều khách")
 
 
 def _co_bang(conn, ten: str) -> bool:
