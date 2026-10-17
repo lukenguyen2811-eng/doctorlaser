@@ -131,3 +131,24 @@ class KhCuTuDuyet(unittest.TestCase):  # G4: tự duyệt không nhận khách b
         self.assertEqual(A._td_diem([], "K", [v], ctx)["nhan"], A.TD_NHAN_PHAN)
         v2 = dict(v, ten_kh="Lâm Thị Nhung")  # âm: nhãn hợp khách -> không phản bác
         self.assertEqual(A._td_diem([], "K", [v2], ctx)["nhan"], 0.0)
+
+
+class TruocSau(Nen):  # CEO 17/10 lần 16: ảnh 'HÌNH ẢNH TRƯỚC SAU' ghi ngày khác HĐ -> gợi ý
+    def nen(self, ocr):
+        self.hd("H1", D, "K1", "Phan Thị Lan", "CSD MỤN", "10:00")
+        i = self.anh(D, "10:05:00", "Phan Thị Lan - csd 10/10/26", ngay_goc=1)
+        self.c.execute("UPDATE photos SET chu_thich=? WHERE id=?", (ocr, i))
+        return i, self.ghep()
+
+    def test_ghi_ngay_khac_ha(self):
+        i, kq = self.nen("HÌNH ẢNH TRƯỚC SAU 24/4")
+        self.assertEqual(kq[i][:2], ("H1", "goi_y"))
+        self.assertIn("ảnh trước–sau", kq[i][2])
+
+    def test_khong_ghi_ngay_giu(self):  # âm
+        i, kq = self.nen("HÌNH ẢNH TRƯỚC SAU")
+        self.assertEqual(kq[i][1], "chac")
+
+    def test_ghi_dung_ngay_hd_giu(self):  # âm
+        i, kq = self.nen("HÌNH ẢNH TRƯỚC SAU 10/10")
+        self.assertEqual(kq[i][1], "chac")

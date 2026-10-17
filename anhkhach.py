@@ -2170,6 +2170,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
     if anh_may and "NHAN_MAY" in _BAT:
         _neo_yeu_man_hinh(conn, ngay, anh_may, photos, ket_qua)
     _nang_lien_neo(ket_qua)
+    _ha_truoc_sau(conn, photos, ket_qua)
     if nen:
         _chan_theo_nen(ket_qua, nen)
     for pid, r in ket_qua.items():
@@ -2183,6 +2184,36 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         if loai:
             conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
+
+
+_NGAY_DM = re.compile(r"(?<!\d)(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*\d{2,4})?(?![\d/])")
+
+
+def _ha_truoc_sau(conn, photos, ket_qua) -> None:
+    """CEO 17/10 lần 16 (ca 278D3CCC): ảnh CHẮC (máy) có chú thích/OCR 'HÌNH ẢNH TRƯỚC SAU' mà có chữ ngày dd/mm khác
+    ngày/tháng của HĐ đang gắn -> gợi ý (ảnh trước–sau có thể là ảnh buổi cũ, kể cả có EXIF). Ảnh không ghi ngày: giữ."""
+    nho: dict = {}
+    for p in photos:
+        r = ket_qua[p["id"]]
+        if r["xn"] or r["do_tin"] != "chac" or not r["hd"]:
+            continue
+        chu = f"{p['chu_thich'] or ''} {p['ocr'] or ''}"
+        if "hinh anh truoc sau" not in khong_dau(chu).lower():
+            continue
+        if r["hd"] not in nho:
+            v = conn.execute("SELECT ngay FROM visits WHERE code=?", (r["hd"],)).fetchone()
+            nho[r["hd"]] = v["ngay"] if v else None
+        nh = nho[r["hd"]]
+        if not nh:
+            continue
+        khac = []
+        for m in _NGAY_DM.finditer(chu):
+            d_, m_ = int(m.group(1)), int(m.group(2))
+            if 1 <= d_ <= 31 and 1 <= m_ <= 12 and (d_, m_) != (int(nh[8:10]), int(nh[5:7])):
+                khac.append(f"{d_}/{m_}")
+        if khac:
+            r.update(do_tin="goi_y", diem=40, ly_do=(r["ly_do"] or "") +
+                     f" — ảnh trước–sau có thể là ảnh buổi cũ (ghi ngày {khac[0]} khác ngày HĐ) — người chọn")
 
 
 def _nang_lien_neo(ket_qua: dict) -> None:
