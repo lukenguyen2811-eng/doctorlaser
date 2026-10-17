@@ -278,3 +278,20 @@ class LienGiayTen(LienGiay):  # neo khớp TÊN đầy đủ trên ảnh (không
         ids = [self.anh(D, "16:51:35", "PHAN THỊ LAN", km="P-L"), self.anh(D, gio, km=km),
                self.anh(D, "16:52:30", "Trần Văn Nam - csd 10/10/26", km="P-N")]
         return ids, self.ghep()
+
+
+class SuaNho(DoiNgay):  # soát 16c
+    def test_nguoi_duyet_khong_doi(self):  # ca C28
+        self.nen()
+        i = self.a("2026-10-10", "09:00:00", do_tin="chua_ro")
+        self.c.execute("UPDATE photos SET xn_hd='H1' WHERE id=?", (i,))
+        doi, khong = DN.chon(self.c)
+        self.assertFalse(doi)
+        self.assertEqual([d["ly_do"] for d in khong if d["id"] == i], ["người đã duyệt (xn_hd) — không tự đổi ngày"])
+
+    def test_nen_cho_luat_lien_giay_cung_hd(self):  # đo = thật: nền gợi ý H1, luật 0–2s nâng chắc H1 -> giữ
+        nen = {"a": ("goi_y", "H1"), "b": ("goi_y", "H1")}
+        kq = {"a": {"do_tin": "chac", "hd": "H1", "xn": None, "ly_do": "", "lien_nang": True},
+              "b": {"do_tin": "chac", "hd": "H1", "xn": None, "ly_do": ""}}
+        A._chan_theo_nen(kq, nen)
+        self.assertEqual((kq["a"]["do_tin"], kq["b"]["do_tin"]), ("chac", "goi_y"))

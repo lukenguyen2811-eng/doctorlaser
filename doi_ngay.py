@@ -120,7 +120,9 @@ def chon(conn) -> tuple[list[dict], list[dict]]:
         if tre == 0:
             continue
         d = dict(r, tre=tre)
-        if r["may_loai"]:
+        if r["xn_hd"]:  # CEO 17/10 (ca C28 HD003110): ảnh người duyệt không tự đổi ngày — liệt kê riêng để báo Lượng
+            khong.append(dict(d, ly_do="người đã duyệt (xn_hd) — không tự đổi ngày"))
+        elif r["may_loai"]:
             khong.append(dict(d, ly_do=f"may_loai {r['may_loai']}"))
         elif tre not in TRE:
             khong.append(dict(d, ly_do="trễ > 2 ngày" if tre > 0 else "ngày ảnh TRƯỚC ngày HĐ"))
@@ -389,6 +391,13 @@ def main() -> None:
           f"{len({(d['ngay'], d['code']) for d in doi})} nhóm; không đổi (chỉ liệt kê) {len(khong)}: {dict(dem)}")
     if not a.ghi:
         xuat_tsv(doi, khong, a.xuat, a.xuat_khong)
+        xn = [d for d in khong if d["ly_do"].startswith("người đã duyệt") and d["tre"] in TRE]
+        with open(a.xuat_khong.replace(".tsv", "_nguoi_duyet.tsv"), "w", encoding="utf-8") as f:
+            f.write("uuid\tngay\thd_nguoi_duyet\tngay_hd\ttre\n")
+            for d in xn:
+                f.write(f"{d['id']}\t{d['ngay']}\t{d['code']}\t{d['ngay_hd']}\t{d['tre']}\n")
+        print(f"Ảnh NGƯỜI DUYỆT trễ 1–2 ngày (không đổi, báo Lượng): {len(xn)} — "
+              f"{a.xuat_khong.replace('.tsv', '_nguoi_duyet.tsv')}")
         print(f"CHẠY KHAN — danh sách: {a.xuat}, {a.xuat_khong}. Thêm --ghi để đổi (chạy trong Terminal của Mac Ảnh).")
         return
     xong, bo, lech = ghi(conn, doi, DoiKit())

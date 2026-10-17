@@ -2225,8 +2225,8 @@ def _nang_lien_neo(ket_qua: dict) -> None:
             continue
         giay, n0 = x
         if n0["do_tin"] == "chac" and n0["hd"] == r["hd"]:
-            r.update(do_tin="chac", diem=80, ly_do=f"chụp liền {giay:.0f}s với ảnh nhãn khớp chắc (cùng người / không"
-                     " mặt) — đợt có nhiều khách")
+            r.update(do_tin="chac", diem=80, lien_nang=True,
+                     ly_do=f"chụp liền {giay:.0f}s với ảnh nhãn khớp chắc (cùng người / không mặt) — đợt có nhiều khách")
 
 
 def _co_bang(conn, ten: str) -> bool:
@@ -2257,6 +2257,8 @@ def _chan_theo_nen(ket_qua: dict, nen: dict) -> None:
         b = nen.get(pid)
         if b is None or r["xn"] or r["do_tin"] != "chac":
             continue
+        if r.get("lien_nang") and b[1] == r["hd"]:
+            continue  # luật chụp liền 0–2s nâng gợi ý CÙNG HĐ nền -> không phải do dời ngày, cho giữ (đo = thật)
         if b[0] != "chac" or b[1] != r["hd"]:
             r.update(do_tin="goi_y", diem=40, ly_do=(r["ly_do"] or "") +
                      " — ngày có ảnh dời ngày: không lên chắc mới / không đổi HĐ chắc (doi_ngay)")
