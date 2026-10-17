@@ -141,3 +141,67 @@ class ToiDa(DoiNgay):
         DN.ghi(self.c, DN.gioi_han(doi, 1), self.kit)
         doi2, _ = DN.chon(self.c)  # chạy lại -> nhóm kế
         self.assertEqual({d["id"] for d in DN.gioi_han(doi2, 1)}, set(cu))
+
+
+class Vong16b(DoiNgay):  # CEO 17/10 lần 16 sau soát: kiểm cả bộ, giờ tránh chồng, ảnh dời không làm neo, nền
+    def test_bo_co_nhan_ngay_khac_chan_ca_bo(self):  # G22/G6
+        self.nen()
+        ids = [self.a("2026-10-10", "09:00:00"), self.a("2026-10-10", "09:00:05")]
+        self.a("2026-10-10", "09:00:10", ocr="Lan - csd 10/10/26", do_tin="goi_y")  # ảnh cùng bộ nhãn ngày ảnh
+        doi, khong = DN.chon(self.c)
+        self.assertFalse(doi)
+        self.assertTrue(all("khác ngày HĐ" in d["ly_do"] for d in khong if d["id"] in ids))
+
+    def test_chu_thich_ddmmyyyy_chan(self):
+        self.nen()
+        i = self.a("2026-10-10", "09:00:00")
+        self.c.execute("UPDATE photos SET chu_thich='10102026' WHERE id=?", (i,))
+        self.assertFalse(DN.chon(self.c)[0])
+
+    def test_ocr_nhieu_ngay_bang_ngay_anh_chan(self):  # G19 'CSd 26 02/03/26' -> doc_nhan không đọc
+        self.nen()
+        self.a("2026-10-10", "09:00:00", ocr="CSd 26 10/10/26")
+        self.assertFalse(DN.chon(self.c)[0])
+
+    def test_bo_co_anh_exif_chan(self):  # G19/G4/G8
+        self.nen()
+        self.a("2026-10-10", "09:00:00")
+        self.a("2026-10-10", "09:03:00", goc=1, do_tin="goi_y")
+        doi, khong = DN.chon(self.c)
+        self.assertFalse(doi)
+        self.assertTrue(any("EXIF" in d["ly_do"] for d in khong))
+
+    def test_bo_khach_khac_cach_xa_khong_chan(self):  # âm: ảnh EXIF / nhãn của khách khác ngoài 10' không chặn
+        self.nen()
+        self.hd("H9", "2026-10-10", "K9", "Trần Văn Nam", "CSD MỤN", "15:00")
+        self.a("2026-10-10", "09:00:00")
+        self.a("2026-10-10", "15:00:00", goc=1, hd="H9")
+        self.assertEqual(len(DN.chon(self.c)[0]), 1)
+
+    def test_gio_moi_tranh_chong_bo_co_san(self):  # B03
+        self.nen()
+        self.anh("2026-10-08", "14:30:20", ngay_goc=1)  # bộ có sẵn ở ngày HĐ đúng giờ HĐ
+        self.a("2026-10-10", "09:00:00")
+        d = DN.chon(self.c)[0][0]
+        self.assertGreaterEqual(d["thoi_gian_moi"], "2026-10-08T14:31:21")
+        self.assertIn("tránh chồng", d["ly_do"])
+
+    def test_anh_doi_giu_hd_khong_lam_neo(self):  # ghép ngày mới: ảnh dời giữ HĐ, ảnh khác không được kéo theo
+        self.nen()
+        self.hd("H8", "2026-10-08", "K8", "Lê Thị Hoa", "CSD MỤN", "08:00")
+        i = self.a("2026-10-10", "09:00:00")
+        k = self.anh("2026-10-08", "17:00:00", ngay_goc=0)  # ảnh trống ở ngày mới
+        doi, _ = DN.chon(self.c)
+        DN.ghi(self.c, doi, self.kit)
+        r = self.c.execute("SELECT goi_y_hd, do_tin, ly_do FROM photos WHERE id=?", (i,)).fetchone()
+        self.assertEqual(tuple(r)[:2], ("H1", "chac"))
+        self.assertIn("đã dời ngày", r[2])
+        self.assertNotEqual(self.c.execute("SELECT do_tin FROM photos WHERE id=?", (k,)).fetchone()[0], "chac")
+
+    def test_nen_chan_len_chac_moi_va_doi_hd(self):  # B15
+        nen = {"a": ("goi_y", "H1"), "b": ("chac", "H1"), "c": ("chac", "H1")}
+        kq = {"a": {"do_tin": "chac", "hd": "H1", "xn": None, "ly_do": ""},
+              "b": {"do_tin": "chac", "hd": "H2", "xn": None, "ly_do": ""},
+              "c": {"do_tin": "chac", "hd": "H1", "xn": None, "ly_do": ""}}
+        A._chan_theo_nen(kq, nen)
+        self.assertEqual([kq[x]["do_tin"] for x in "abc"], ["goi_y", "goi_y", "chac"])

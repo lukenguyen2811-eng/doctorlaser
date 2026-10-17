@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import collections
 import datetime as dt
+import re
 import sqlite3
 import sys
 
@@ -44,19 +45,48 @@ GIO_MAC_DINH = "12:00"
 
 def _bang(conn) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS doi_ngay (id TEXT PRIMARY KEY, ngay_cu TEXT, thoi_gian_cu TEXT,"
-                 " ngay_moi TEXT, thoi_gian_moi TEXT, hd TEXT, luc TEXT, trang_thai TEXT)")
+                 " ngay_moi TEXT, thoi_gian_moi TEXT, hd TEXT, luc TEXT, trang_thai TEXT, do_tin_cu TEXT)")
+    if "do_tin_cu" not in {r[1] for r in conn.execute("PRAGMA table_info(doi_ngay)")}:
+        conn.execute("ALTER TABLE doi_ngay ADD COLUMN do_tin_cu TEXT")
+    # NỀN (CEO 17/10 lần 16): trạng thái mọi ảnh của ngày cũ + ngày mới TRƯỚC khi dời -> ghép về sau ở các ngày này
+    # chỉ được hạ / giữ / gợi ý, không lên chắc mới, không đổi HĐ chắc (anhkhach._chan_theo_nen)
+    conn.execute("CREATE TABLE IF NOT EXISTS doi_ngay_nen (id TEXT PRIMARY KEY, ngay TEXT, do_tin TEXT, hd TEXT)")
+
+
+_NGAY_TU_DO = re.compile(r"(?<!\d)(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*(\d{2,4}))?(?![\d/])")
+_NGAY_8 = re.compile(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)")
+BO_PHUT = 10  # 'cả bộ' = ảnh cùng ngày cách nhóm <= 10 phút, cùng khách hoặc cùng mã mặt (CEO 17/10 lần 16)
+
+
+def _ngay(d, m, y, nam):
+    try:
+        y = int(y) if y else nam
+        y = y + 2000 if y < 100 else y
+        return dt.date(y, int(m), int(d)).isoformat() if 2015 <= y <= 2035 else None
+    except ValueError:
+        return None
+
+
+def _ngay_trong(p, nam: int) -> tuple[set, set]:
+    """(ngày trên NHÃN / chú thích / tên file dạng ddmmyyyy, ngày tự do trong OCR+chú thích dd/mm(/yy))."""
+    chu = f"{p['chu_thich'] or ''} {p['ocr'] or ''}"
+    nhan = {n["ngay"] for n in A.doc_nhan(chu, nam) if n.get("ngay")}
+    nhan |= {x for m in _NGAY_8.finditer(f"{p['chu_thich'] or ''} {p['ten_file'] or ''}")
+             if (x := _ngay(m.group(1), m.group(2), m.group(3), nam))}
+    tu_do = {x for m in _NGAY_TU_DO.finditer(chu) if (x := _ngay(m.group(1), m.group(2), m.group(3), nam))}
+    return nhan, tu_do
 
 
 def chon(conn) -> tuple[list[dict], list[dict]]:
-    """(sẽ đổi, không đổi kèm lý do) — chỉ đọc DB."""
+    """(sẽ đổi, không đổi kèm lý do) — chỉ đọc DB. Kiểm theo CẢ BỘ (CEO 17/10 lần 16)."""
     cot = {r[1] for r in conn.execute("PRAGMA table_info(photos)")}
     da = set()
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='doi_ngay'").fetchone():
         da = {r[0] for r in conn.execute("SELECT id FROM doi_ngay WHERE trang_thai='xong'")}
     rows = conn.execute(
-        "SELECT p.id, p.ngay, p.thoi_gian, p.ocr, p.chu_thich, p.do_tin, p.xn_hd, "
-        + ("p.may_loai, " if "may_loai" in cot else "NULL AS may_loai, ") +
-        "v.code, v.ngay AS ngay_hd, v.gio AS gio_hd FROM photos p JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
+        "SELECT p.*, " + ("" if "may_loai" in cot else "NULL AS may_loai, ") +
+        "v.code, v.ma_kh AS ma_kh_hd, v.ngay AS ngay_hd, v.gio AS gio_hd FROM photos p"
+        " JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
         " WHERE p.bo_qua=0 AND p.nguon='photos' AND p.ngay_goc=0 AND (p.xn_hd IS NOT NULL OR p.do_tin='chac')"
         " ORDER BY p.ngay, p.thoi_gian, p.id").fetchall()
     doi, khong = [], []
@@ -69,32 +99,79 @@ def chon(conn) -> tuple[list[dict], list[dict]]:
         d = dict(r, tre=tre)
         if r["may_loai"]:
             khong.append(dict(d, ly_do=f"may_loai {r['may_loai']}"))
-            continue
-        if tre not in TRE:
+        elif tre not in TRE:
             khong.append(dict(d, ly_do="trễ > 2 ngày" if tre > 0 else "ngày ảnh TRƯỚC ngày HĐ"))
-            continue
-        ngay_nhan = {n["ngay"] for n in A.doc_nhan(f"{r['chu_thich'] or ''} {r['ocr'] or ''}", int(r["ngay"][:4]))
-                     if n.get("ngay")}
-        if ngay_nhan and r["ngay_hd"] not in ngay_nhan:
-            khong.append(dict(d, ly_do=f"nhãn ghi ngày {sorted(ngay_nhan)[0]} khác ngày HĐ"))
-            continue
-        d["ly_do"] = (f"không EXIF, trễ {tre} ngày so với HĐ"
-                      + (" — nhãn ghi đúng ngày HĐ" if ngay_nhan else ""))
-        doi.append(d)
-    # Ngày giờ mới: theo nhóm (ngày ảnh, HĐ) — ảnh đầu = giờ HĐ, ảnh sau + chênh lệch gốc
+        else:
+            doi.append(d)
     nhom = collections.defaultdict(list)
     for d in doi:
         nhom[(d["ngay"], d["code"])].append(d)
-    for ds in nhom.values():
+    ngay_cache: dict = {}
+
+    def anh_ngay(ngay):
+        if ngay not in ngay_cache:
+            ngay_cache[ngay] = conn.execute(
+                "SELECT p.*, v.ma_kh AS ma_kh_hd FROM photos p LEFT JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
+                " WHERE p.ngay=? ORDER BY p.thoi_gian", (ngay,)).fetchall()
+        return ngay_cache[ngay]
+    ra = []
+    da_xep: dict = collections.defaultdict(list)  # ngày mới -> [(bắt đầu, kết thúc)] các nhóm đã xếp trong lượt này
+    for (ngay, code), ds in sorted(nhom.items()):
         ds.sort(key=lambda d: (d["thoi_gian"], d["id"]))
-        t0 = dt.datetime.fromisoformat(ds[0]["thoi_gian"])
+        ngay_hd, nam = ds[0]["ngay_hd"], int(ngay[:4])
+        ma = ds[0]["ma_kh_hd"]
+        mat = {u for d in ds for u in A._doc_mat(d["khuon_mat"])}
+        t_dau = dt.datetime.fromisoformat(ds[0]["thoi_gian"])
+        t_cuoi = dt.datetime.fromisoformat(ds[-1]["thoi_gian"])
+        ids = {d["id"] for d in ds}
+        bo = [q for q in anh_ngay(ngay) if q["id"] in ids or (
+            t_dau - dt.timedelta(minutes=BO_PHUT) <= dt.datetime.fromisoformat(q["thoi_gian"])
+            <= t_cuoi + dt.timedelta(minutes=BO_PHUT)
+            and ((ma and q["ma_kh_hd"] == ma) or (mat & set(A._doc_mat(q["khuon_mat"])))))]
+        ly = None
+        for q in bo:
+            nhan, tu_do = _ngay_trong(q, nam)
+            lech = sorted(x for x in nhan if x != ngay_hd)
+            if lech:
+                ly = f"bộ có nhãn / chú thích / tên file ghi ngày {lech[0]} khác ngày HĐ (ảnh {q['id'][:8]})"
+                break
+            if ngay in tu_do and ngay != ngay_hd:
+                ly = f"OCR ảnh {q['id'][:8]} có ngày {ngay} = ngày ảnh (khác ngày HĐ)"
+                break
+            if q["ngay_goc"] == 1:
+                ly = f"bộ có ảnh EXIF ngày {ngay} (ảnh {q['id'][:8]}) — ngày cũ có thể là thật, người xem"
+                break
+        if ly:
+            khong += [dict(d, ly_do=ly) for d in ds]
+            continue
+        # Giờ mới: ảnh đầu = giờ HĐ, giữ chênh lệch; chồng khung bộ chụp có sẵn của ngày mới (±BO_GIAY) -> dời sang
+        # ngay sau ảnh cuối của ngày, không được thì trước ảnh đầu (B03).
         g = (ds[0]["gio_hd"] or GIO_MAC_DINH)[:5]
-        moc = dt.datetime.fromisoformat(f"{ds[0]['ngay_hd']}T{g}:00")
+        dai = t_cuoi - t_dau
+        moc = dt.datetime.fromisoformat(f"{ngay_hd}T{g}:00")
+        co_san = sorted(dt.datetime.fromisoformat(q["thoi_gian"]) for q in anh_ngay(ngay_hd)) 
+        khung = [(t, t) for t in co_san] + da_xep[ngay_hd]
+        dem = dt.timedelta(seconds=A.BO_GIAY + 1)
+
+        def chong(m):
+            return any(a - dem <= m + dai and m <= b + dem for a, b in khung)
+        if chong(moc):
+            sau = max(b for _, b in khung) + dem
+            truoc = min(a for a, _ in khung) - dem - dai
+            moc = sau if (sau + dai).date().isoformat() == ngay_hd else (
+                truoc if truoc.date().isoformat() == ngay_hd else None)
+        if moc is None:
+            khong += [dict(d, ly_do="không còn giờ trống trong ngày HĐ (chồng bộ chụp có sẵn)") for d in ds]
+            continue
+        da_xep[ngay_hd].append((moc, moc + dai))
         for d in ds:
-            t = moc + (dt.datetime.fromisoformat(d["thoi_gian"]) - t0)
+            t = moc + (dt.datetime.fromisoformat(d["thoi_gian"]) - t_dau)
             d["thoi_gian_moi"] = t.isoformat(timespec="seconds")
             d["ngay_moi"] = t.date().isoformat()
-    return doi, khong
+            d["ly_do"] = f"không EXIF, trễ {d['tre']} ngày so với HĐ" + (
+                "" if t.strftime("%H:%M") == g else f" — giờ dời sang {t:%H:%M} tránh chồng bộ có sẵn")
+            ra.append(d)
+    return ra, khong
 
 
 def gioi_han(doi: list[dict], toi_da: int) -> list[dict]:
@@ -182,9 +259,14 @@ def ghi(conn, doi: list[dict], kit) -> tuple[int, int, list]:
     ngays = set()
     for k in range(0, len(doi), LO):
         lo = doi[k:k + LO]
+        for n in {d["ngay"] for d in lo} | {d["ngay_moi"] for d in lo}:  # NỀN của ngày cũ + ngày mới (1 lần / ngày)
+            conn.execute("INSERT OR IGNORE INTO doi_ngay_nen SELECT id, ngay, do_tin, COALESCE(xn_hd, goi_y_hd)"
+                         " FROM photos WHERE ngay=?", (n,))
         for d in lo:  # lưu ngày cũ TRƯỚC khi đổi
-            conn.execute("INSERT OR REPLACE INTO doi_ngay VALUES (?,?,?,?,?,?,?,?)",
-                         (d["id"], d["ngay"], d["thoi_gian"], d["ngay_moi"], d["thoi_gian_moi"], d["code"], luc, "cho"))
+            conn.execute("INSERT OR REPLACE INTO doi_ngay (id, ngay_cu, thoi_gian_cu, ngay_moi, thoi_gian_moi, hd, luc,"
+                         " trang_thai, do_tin_cu) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (d["id"], d["ngay"], d["thoi_gian"], d["ngay_moi"], d["thoi_gian_moi"], d["code"], luc, "cho",
+                          d["do_tin"]))
         conn.commit()
         tim = kit.tim([d["id"] for d in lo])
         cap = [(tim[d["id"]], dt.datetime.fromisoformat(d["thoi_gian_moi"])) for d in lo if d["id"] in tim]

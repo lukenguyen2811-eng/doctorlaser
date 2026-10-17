@@ -98,3 +98,25 @@ class Ghep(Nen):
         ids = {r["id"] for r in album_anh.anh_dung(self.c)}
         self.assertIn(i, ids)
         self.assertNotIn(j, ids)
+
+
+class KhCuKhachKhac(Nen):  # CEO 17/10 lần 16 (G4): nhãn 'Tên kh cũ dd/m dịch vụ' chỉ khách khác -> hạ chắc cả bộ
+    def test_ha_chac_theo_nhan_kh_cu(self):
+        self.hd("H1", "2026-10-10", "K1", "Trần Thị Kim Ngân", "PICO", "16:14")
+        self.hd("H2", "2026-10-09", "K2", "Lâm Thị Nhung", "PICO", "16:56")
+        ids = [self.anh("2026-10-10", "12:23:00", "Lam t nhung kh cũ 9/10 prp pico", km="P-X", do_tin="chac"),
+               self.anh("2026-10-10", "12:23:05", km="P-X")]
+        self.c.execute("UPDATE photos SET goi_y_hd='H1'")
+        # giả lập ghép đã cho chắc H1 (bộ theo 1 HĐ trong ngày) rồi chạy luật
+        kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "bo": 1, "mat_ds": {"P-X"}, "ly_do": ""} for i in ids}
+        ps = self.c.execute("SELECT * FROM photos ORDER BY thoi_gian").fetchall()
+        A._goi_y_nhan_khong_nam(self.c, "2026-10-10", ps, kq)
+        self.assertEqual({(kq[i]["hd"], kq[i]["do_tin"]) for i in ids}, {("H2", "goi_y")})
+
+    def test_cung_khach_khong_ha(self):  # âm: nhãn chỉ đúng khách của HĐ đang gắn (HĐ khác ngày) -> giữ
+        self.hd("H1", "2026-10-10", "K2", "Lâm Thị Nhung", "PICO", "16:14")
+        self.hd("H2", "2026-10-09", "K2", "Lâm Thị Nhung", "PICO", "16:56")
+        i = self.anh("2026-10-10", "12:23:00", "Lam t nhung kh cũ 9/10 prp pico", km="P-X")
+        kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "bo": 1, "mat_ds": {"P-X"}, "ly_do": ""}}
+        A._goi_y_nhan_khong_nam(self.c, "2026-10-10", self.c.execute("SELECT * FROM photos").fetchall(), kq)
+        self.assertEqual(kq[i]["do_tin"], "chac")

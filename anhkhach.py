@@ -1738,21 +1738,48 @@ NGAY_NHAN_LECH = 7  # ngày trên nhãn lệch ngày ảnh > 7 ngày = ảnh cũ
 def _goi_y_nhan_khong_nam(conn, ngay: str, photos, ket_qua) -> None:
     """CEO 17/10 lần 14 (ca 2F1DF9D9): ảnh CHƯA chắc có nhãn 'Tên kh mới dd/mm …' (không gạch, không năm) mà tên khớp
     ĐÚNG 1 khách có HĐ đúng ngày nhãn (<= ngày ảnh, trong 60 ngày) -> gợi ý HĐ đó. Không đưa vào doc_nhan (không kéo bộ,
-    không đổi luật đợt), không bao giờ lên chắc."""
+    không đổi luật đợt), không bao giờ lên chắc.
+    CEO lần 16 (ca G4 'kh cũ 31/8 prp+pico'): ảnh CHẮC (máy, không nhãn bậc 1) mà chính ảnh mang nhãn đó chỉ KHÁCH KHÁC
+    khách của HĐ đang gắn -> hạ gợi ý HĐ trên nhãn; ảnh cùng bộ cùng người (cùng mã mặt / không mặt) đang chắc CÙNG HĐ
+    đó cũng hạ theo."""
     d0 = dt.date.fromisoformat(ngay)
+    ma_hd: dict = {}
+
+    def ma(code):
+        if code not in ma_hd:
+            v = conn.execute("SELECT ma_kh FROM visits WHERE code=?", (code,)).fetchone()
+            ma_hd[code] = (v["ma_kh"] if v else None) or code
+        return ma_hd[code]
     for p in photos:
         r = ket_qua[p["id"]]
-        if r["xn"] or r["do_tin"] in ("chac", "khong_hd"):
+        if r["xn"] or r["do_tin"] == "khong_hd" or (r["do_tin"] == "chac" and r.get("khoa_nhan")):
             continue
         for n in _nhan_khong_nam(f"{p['chu_thich'] or ''} {p['ocr'] or ''}", int(ngay[:4])):
             dn = dt.date.fromisoformat(n["ngay"])
             if not 0 < (d0 - dn).days <= 60:
                 continue
             vs = [v for v in conn.execute("SELECT * FROM visits WHERE ngay=?", (n["ngay"],)) if _ten_nhan_hop(n, v["ten_kh"])]
-            if len({v["ma_kh"] or v["code"] for v in vs}) == 1 and r["hd"] != vs[0]["code"]:
-                r.update(hd=vs[0]["code"], do_tin="goi_y", diem=45,
-                         ly_do=f"nhãn (không gạch, không năm) ghi tên khách có HĐ ngày {_dd_mm(n['ngay'])} — người chọn")
+            if len({v["ma_kh"] or v["code"] for v in vs}) != 1 or r["hd"] == vs[0]["code"]:
+                continue
+            v = vs[0]
+            ly = f"nhãn (không gạch, không năm) ghi tên khách có HĐ ngày {_dd_mm(n['ngay'])} — người chọn"
+            if r["do_tin"] != "chac":
+                r.update(hd=v["code"], do_tin="goi_y", diem=45, ly_do=ly)
                 break
+            if r["hd"] and ma(r["hd"]) == (v["ma_kh"] or v["code"]):
+                break  # cùng khách (HĐ khác) -> không hạ
+            cu, mp = r["hd"], r.get("mat_ds") or set()
+            for q in photos:
+                x = ket_qua[q["id"]]
+                if x is not r and (x["bo"] is None or x["bo"] != r["bo"] or x["hd"] != cu or x["do_tin"] != "chac"
+                                   or x["xn"] or x.get("khoa_nhan")):
+                    continue
+                mq = x.get("mat_ds") or set()
+                if x is not r and mp and mq and not (mp & mq):
+                    continue
+                x.update(hd=v["code"], do_tin="goi_y", diem=45,
+                         ly_do=ly + f" (trước: chắc {cu} — nhãn trong bộ chỉ khách khác)")
+            break
 
 
 def _ha_ngay_nhan_lech(conn, ngay: str, ds: list[dict]) -> None:
@@ -1917,6 +1944,15 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
             if p["id"] not in khong_luu and p["may_loai"]:
                 conn.execute("UPDATE photos SET may_loai=NULL, may_loai_ly_do=NULL WHERE id=?", (p["id"],))
     photos = [p for p in photos if p["id"] not in khong_luu]
+    # doi_ngay.py (CEO 17/10 lần 16): ảnh ĐÃ DỜI NGÀY giữ HĐ đã dời, KHÔNG làm neo (bộ / đợt / nhãn / mặt) cho ảnh khác
+    da_doi = _da_doi_ngay(conn, ngay)
+    for p in photos:
+        if p["id"] in da_doi:
+            hd, dt_cu = da_doi[p["id"]]
+            conn.execute("UPDATE photos SET goi_y_hd=?, do_tin=?, ly_do=? WHERE id=?",
+                         (hd, dt_cu or "chac", f"đã dời ngày theo HĐ {hd} (doi_ngay) — giữ HĐ", p["id"]))
+    photos = [p for p in photos if p["id"] not in da_doi]
+    nen = _nen_doi_ngay(conn, ngay)
     if not photos:
         return
     if cum is None:
@@ -2123,6 +2159,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
             r.update(hd=may, do_tin="chac", diem=80, ly_do="tự duyệt: " + (p["may_ly_do"] or ""))
     if anh_may and "NHAN_MAY" in _BAT:
         _neo_yeu_man_hinh(conn, ngay, anh_may, photos, ket_qua)
+    if nen:
+        _chan_theo_nen(ket_qua, nen)
     for pid, r in ket_qua.items():
         conn.execute(
             "UPDATE photos SET dot=?, goi_y_hd=?, do_tin=?, ly_do=? WHERE id=?",
@@ -2134,6 +2172,39 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         if loai:
             conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
+
+
+def _co_bang(conn, ten: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (ten,)).fetchone() is not None
+
+
+def _da_doi_ngay(conn, ngay: str) -> dict:
+    """Ảnh đã dời ngày (doi_ngay.py, trang_thai 'xong') đang nằm ở ngày này -> {id: (HĐ, do_tin cũ)}."""
+    if not _co_bang(conn, "doi_ngay"):
+        return {}
+    cot = {r[1] for r in conn.execute("PRAGMA table_info(doi_ngay)")}
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT id, hd, " + ("do_tin_cu" if "do_tin_cu" in cot else "NULL") +
+        " FROM doi_ngay WHERE trang_thai='xong' AND ngay_moi=?", (ngay,))}
+
+
+def _nen_doi_ngay(conn, ngay: str) -> dict:
+    """Trạng thái NỀN (trước khi dời ảnh) của các ảnh ngày này nếu ngày có ảnh dời ra / dời vào -> {id: (do_tin, HĐ)}."""
+    if not _co_bang(conn, "doi_ngay_nen"):
+        return {}
+    return {r[0]: (r[1], r[2]) for r in conn.execute("SELECT id, do_tin, hd FROM doi_ngay_nen WHERE ngay=?", (ngay,))}
+
+
+def _chan_theo_nen(ket_qua: dict, nen: dict) -> None:
+    """CEO 17/10 lần 16 (B15): ngày có ảnh dời ngày ra/vào -> ảnh khác chỉ được hạ / giữ / gợi ý so với NỀN: lên chắc mới
+    hoặc chắc đổi HĐ -> gợi ý."""
+    for pid, r in ket_qua.items():
+        b = nen.get(pid)
+        if b is None or r["xn"] or r["do_tin"] != "chac":
+            continue
+        if b[0] != "chac" or b[1] != r["hd"]:
+            r.update(do_tin="goi_y", diem=40, ly_do=(r["ly_do"] or "") +
+                     " — ngày có ảnh dời ngày: không lên chắc mới / không đổi HĐ chắc (doi_ngay)")
 
 
 def _neo_yeu_man_hinh(conn, ngay: str, anh_may, photos, ket_qua) -> None:
@@ -2532,7 +2603,8 @@ def cum_khach(conn) -> dict:
     for r in conn.execute(
             "SELECT p.khuon_mat, p.ngay, p.xn_hd, p.do_tin, p.ly_do, v.ma_kh, v.code FROM photos p JOIN visits v"
             " ON v.code = COALESCE(p.xn_hd, CASE WHEN p.do_tin='chac' THEN p.goi_y_hd END)"
-            " WHERE p.bo_qua=0 AND COALESCE(p.khuon_mat,'') != ''"):
+            " WHERE p.bo_qua=0 AND COALESCE(p.khuon_mat,'') != ''"
+            + (" AND p.id NOT IN (SELECT id FROM doi_ngay WHERE trang_thai='xong')" if _co_bang(conn, "doi_ngay") else "")):
         mat = _doc_mat(r["khuon_mat"])
         if not 1 <= len(mat) <= MAT_TOI_DA:
             continue
@@ -3370,8 +3442,9 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
     visits = conn.execute("SELECT * FROM visits WHERE ngay=?", (ngay,)).fetchall()
     if not visits:
         return []
+    da_doi = _da_doi_ngay(conn, ngay)
     photos = [p for p in conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,))
-              if not loai_khong_luu(p["ocr"])[0]]  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
+              if not loai_khong_luu(p["ocr"])[0] and p["id"] not in da_doi]  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
     nho: dict = {}
     theo_k: dict[str, list] = {}
     for v in visits:
