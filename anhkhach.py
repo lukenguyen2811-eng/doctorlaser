@@ -2187,6 +2187,9 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
 
 
+_MOC_TRUNG_TEN = "khách cùng tên trong ngày"
+
+
 def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: dict) -> None:
     """CEO 17/10 lần 17 (ca 7095980C, 26258E81, 995EB43C): ảnh CHẮC (máy) có nhãn mà tên nhãn hợp >= 2 KHÁCH cùng tên
     gọi có HĐ trong ngày; ảnh 1 mặt, mặt có lịch sử ảnh neo ở NGÀY KHÁC thuộc khách khác và KHÔNG lần nào thuộc khách
@@ -2201,7 +2204,10 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
         m = r.get("mat_ds") or set()
         if r["xn"] or r["do_tin"] != "chac" or not r["hd"] or not ns or len(m) != 1:
             continue
-        hop = [v for v in visits if any(_ten_nhan_hop(n, v["ten_kh"]) for n in ns)]
+        # nhãn 1 chữ (tên gọi) -> mọi khách có tên gọi đó trong ngày đều hợp (ca 7095980C 'Thảo - csd')
+        cuoi = {n["ten"].split()[-1] for n in ns if len([w for w in n["ten"].split() if w not in XUNG_HO]) == 1}
+        hop = [v for v in visits if any(_ten_nhan_hop(n, v["ten_kh"]) for n in ns)
+               or khong_dau(ten_goi(v["ten_kh"]) or "").lower() in cuoi]
         theo_k: dict = {}
         for v in hop:
             theo_k.setdefault(_khoa_hd(conn, cum, v["code"], nho), []).append(v)
@@ -2702,19 +2708,30 @@ def cum_khach(conn) -> dict:
     phieu: dict[str, dict] = {}  # uuid -> khoá -> [điểm, số ảnh, số ảnh duyệt, {ngày}, {mã KH: số ảnh}]
     for r in conn.execute(
             "SELECT p.khuon_mat, p.ngay, p.xn_hd, p.do_tin, p.ly_do, v.ma_kh, v.code FROM photos p JOIN visits v"
-            " ON v.code = COALESCE(p.xn_hd, CASE WHEN p.do_tin='chac' THEN p.goi_y_hd END)"
+            " ON v.code = COALESCE(p.xn_hd, CASE WHEN p.do_tin='chac' THEN p.goi_y_hd"
+            " WHEN p.do_tin='goi_y' AND p.ly_do LIKE '%' || ? || '%' THEN p.goi_y_hd END)"
             " WHERE p.bo_qua=0 AND COALESCE(p.khuon_mat,'') != ''"
-            + (" AND p.id NOT IN (SELECT id FROM doi_ngay WHERE trang_thai='xong')" if _co_bang(conn, "doi_ngay") else "")):
+            + (" AND p.id NOT IN (SELECT id FROM doi_ngay WHERE trang_thai='xong')" if _co_bang(conn, "doi_ngay") else ""),
+            (_MOC_TRUNG_TEN,)):
         mat = _doc_mat(r["khuon_mat"])
         if not 1 <= len(mat) <= MAT_TOI_DA:
             continue
         if r["xn_hd"]:
             w = CUM_W_XN
+        elif r["do_tin"] == "goi_y":
+            # ảnh bị luật trùng tên hạ (lần 17): vẫn phiếu như trước khi hạ — không làm đổi cụm mặt dây chuyền
+            if not _la_neo_mat("chac", r["ly_do"].split(" — nhãn hợp")[0]) and "(trước: chắc" not in r["ly_do"]:
+                continue
+            w = CUM_W_CHAC
         elif _la_neo_mat(r["do_tin"], r["ly_do"]):
             w = CUM_W_CHAC
         else:
             continue
         ma = r["ma_kh"] or r["code"]
+        if r["do_tin"] == "goi_y" and "(trước: chắc " in (r["ly_do"] or ""):  # phiếu về HĐ TRƯỚC khi hạ
+            cu = r["ly_do"].split("(trước: chắc ")[1].split(")")[0]
+            v = conn.execute("SELECT ma_kh FROM visits WHERE code=?", (cu,)).fetchone()
+            ma = (v["ma_kh"] if v else None) or cu
         k = khoa.get(ma, ma)
         for u in mat:
             x = phieu.setdefault(u, {}).setdefault(k, [0, 0, 0, set(), {}])
