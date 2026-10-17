@@ -3426,12 +3426,20 @@ def _td_nhan_mat(conn, cum: dict) -> dict:
     nho: dict = {}
     ra: dict = {}
     for r in conn.execute("SELECT khuon_mat, goi_y_hd, xn_hd, do_tin, ly_do FROM photos WHERE bo_qua=0"
-                          " AND COALESCE(khuon_mat,'') != '' AND (xn_hd IS NOT NULL OR do_tin='chac')"):
+                          " AND COALESCE(khuon_mat,'') != '' AND (xn_hd IS NOT NULL OR do_tin='chac'"
+                          " OR (do_tin='goi_y' AND ly_do LIKE '%' || ? || '%'))", (_MOC_TRUNG_TEN,)):
         mat = _doc_mat(r["khuon_mat"])
+        ly, hd = r["ly_do"] or "", r["xn_hd"] or r["goi_y_hd"]
+        if r["do_tin"] == "goi_y":  # ảnh bị luật trùng tên hạ: đếm như trước khi hạ (không đổi dây chuyền)
+            if "(trước: chắc " in ly:
+                hd = ly.split("(trước: chắc ")[1].split(")")[0]
+            neo = _la_neo_mat("chac", ly.split(" — nhãn hợp")[0]) or "(trước: chắc" in ly
+        else:
+            neo = bool(r["xn_hd"]) or _la_neo_mat(r["do_tin"], ly)
         # Neo theo nhãn như cụm mặt (_la_neo_mat: nhãn/tên/SĐT trên ảnh, hoặc cùng bộ ngắn với ảnh có nhãn) hoặc người duyệt
-        if len(mat) != 1 or not (r["xn_hd"] or _la_neo_mat(r["do_tin"], r["ly_do"])):
+        if len(mat) != 1 or not neo:
             continue
-        k = _khoa_hd(conn, cum, r["xn_hd"] or r["goi_y_hd"], nho)
+        k = _khoa_hd(conn, cum, hd, nho)
         if k:
             ra.setdefault(mat[0], {}).setdefault(k, 0)
             ra[mat[0]][k] += 1
@@ -3565,7 +3573,8 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
         return []
     da_doi = _da_doi_ngay(conn, ngay)
     photos = [p for p in conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,))
-              if not loai_khong_luu(p["ocr"])[0] and p["id"] not in da_doi]  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
+              if not loai_khong_luu(p["ocr"])[0] and p["id"] not in da_doi
+              and _MOC_TRUNG_TEN not in (p["ly_do"] or "")]  # ảnh trùng tên bị hạ: để người chọn, không tự duyệt  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
     nho: dict = {}
     theo_k: dict[str, list] = {}
     for v in visits:
