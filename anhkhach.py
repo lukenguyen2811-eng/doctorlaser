@@ -2190,6 +2190,17 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
 _MOC_TRUNG_TEN = "khách cùng tên trong ngày"
 
 
+def _nhan_hop_khoa(conn, ns, khoa: str) -> bool:
+    """Nhãn (trên ảnh) hợp tên của khách khoá `khoa` (mã KH): _ten_nhan_hop, hoặc nhãn 1 chữ trùng 1 chữ trong họ tên."""
+    for (t,) in conn.execute("SELECT DISTINCT ten_kh FROM visits WHERE ma_kh=? OR code=?", (khoa, khoa)):
+        tk = {k for _, k in _tu_ten_kh(t)}
+        for n in ns:
+            w = [x for x in n["ten"].split() if x not in XUNG_HO]
+            if _ten_nhan_hop(n, t) or (len(w) == 1 and w[0] in tk):
+                return True
+    return False
+
+
 def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: dict) -> None:
     """CEO 17/10 lần 17 (ca 7095980C, 26258E81, 995EB43C): ảnh CHẮC (máy) có nhãn mà tên nhãn hợp >= 2 KHÁCH cùng tên
     gọi có HĐ trong ngày; ảnh 1 mặt, mặt có lịch sử ảnh neo ở NGÀY KHÁC thuộc khách khác và KHÔNG lần nào thuộc khách
@@ -2216,8 +2227,13 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
             continue
         # dịch vụ trên nhãn phân định được (chỉ HĐ của khách được gắn có dịch vụ đó) -> nhãn không còn mơ hồ (kiểm toán
         # 17/10 DEB408D6 'căng chỉ' đúng)
-        chu = {kk for kk, ng in (lich.get(next(iter(m))) or {}).items() if ng - {ngay}}
+        u = next(iter(m))
+        chu = {kk for kk, ng in (lich.get(u) or {}).items() if ng - {ngay}}
         if not chu or k in chu:
+            continue
+        # vòng 18 (ca 7749626F): mặt có dấu GỘP 2 người (cụm lẫn) mà nhãn trên chính ảnh không hợp tên chủ nào của mặt
+        # -> bằng chứng mặt không tin được, bỏ
+        if u in (cum or {}).get("lan", ()) and not any(_nhan_hop_khoa(conn, ns, kk) for kk in chu):
             continue
         khac = [kk for kk in chu if kk in theo_k and kk != k]
         # dịch vụ trên nhãn phân định được (chỉ HĐ khách được gắn có dịch vụ đó) -> giữ (kiểm toán DEB408D6), TRỪ khi mặt
@@ -2679,8 +2695,9 @@ def _la_neo_mat(do_tin: str | None, ly_do: str | None) -> bool:
 
 
 def _khoa_khach(conn) -> dict[str, str]:
-    """mã KH -> khoá người. Hai mã KHÁC HỆ ('CU-KH…' mã cũ vs 'KH…' mã mới, 'CU-…') mà CÙNG SĐT = 1 người.
-    Hai mã cùng hệ cùng SĐT (người nhà dùng chung số) vẫn là 2 người."""
+    """mã KH -> khoá người. Hai mã KHÁC HỆ ('CU-KH…' mã cũ vs 'KH…' mã mới, 'CU-…') mà CÙNG SĐT hoặc CÙNG HỌ TÊN ĐẦY
+    ĐỦ (>= 3 chữ, sạch ghi chú, bỏ dấu — vòng 18) = 1 người. Hai mã cùng hệ (người nhà dùng chung số / trùng tên) vẫn
+    là 2 người; chỉ trùng 2 chữ cuối không gộp."""
     cha: dict[str, str] = {}
 
     def goc(x):
@@ -2689,12 +2706,16 @@ def _khoa_khach(conn) -> dict[str, str]:
         return x
 
     theo_sdt: dict[str, set] = {}
-    for ma, sdt in conn.execute("SELECT DISTINCT ma_kh, sdt FROM visits WHERE COALESCE(ma_kh,'') != ''"):
+    theo_ten: dict[str, set] = {}
+    for ma, sdt, ten in conn.execute("SELECT DISTINCT ma_kh, sdt, ten_kh FROM visits WHERE COALESCE(ma_kh,'') != ''"):
         cha.setdefault(ma, ma)
         s = chuan_sdt(sdt)
         if len(s) >= 9:
             theo_sdt.setdefault(s[-9:], set()).add(ma)
-    for mas in theo_sdt.values():
+        t = " ".join(k for _, k in _tu_ten_kh(ten))
+        if len(t.split()) >= 3:  # vòng 18: 1 người 2 mã — cùng HỌ TÊN ĐẦY ĐỦ (sạch, bỏ dấu), khác hệ mã (CU-KH… / KH…)
+            theo_ten.setdefault(t, set()).add(ma)
+    for mas in list(theo_sdt.values()) + list(theo_ten.values()):
         ds = sorted(mas)
         for i, a in enumerate(ds):
             for b in ds[i + 1:]:

@@ -242,3 +242,43 @@ class TrungTenDichVu(TrungTen):  # âm (kiểm toán DEB408D6): dịch vụ trê
         self.assertEqual((r["hd"], r["do_tin"]), ("H2", "goi_y"))
 
     test_mat_khach_ngoai_ha_giu_hd = None
+
+
+class MotNguoiHaiMa(Nen):  # vòng 18: 1 người 2 mã KH
+    def test_cung_ho_ten_khac_he_gop(self):  # ca 20F1A53F
+        self.hd("A1", "2020-01-01", "CU-KH000798", "Võ Thị Mỹ Lệ", "CSD")
+        self.hd("A2", "2026-01-01", "KH004655", "VÕ THỊ MỸ LỆ (BS LƯƠNG)", "CSD")
+        k = A._khoa_khach(self.c)
+        self.assertEqual(k["CU-KH000798"], k["KH004655"])
+
+    def test_cung_he_hoac_2_chu_cuoi_khong_gop(self):  # âm
+        self.hd("A1", "2026-01-01", "KH000001", "Võ Thị Mỹ Lệ", "CSD")
+        self.hd("A2", "2026-01-02", "KH000002", "Võ Thị Mỹ Lệ", "CSD")  # cùng hệ
+        self.hd("A3", "2020-01-02", "CU-KH000003", "Trần Văn Mỹ Lệ", "CSD")  # chỉ trùng 2 chữ cuối
+        k = A._khoa_khach(self.c)
+        self.assertEqual(len({k["KH000001"], k["KH000002"], k["CU-KH000003"]}), 3)
+
+
+class TrungTenGop(TrungTen):  # vòng 18 (ca 7749626F): mặt có dấu gộp 2 người, nhãn không hợp tên chủ mặt -> bỏ bằng chứng mặt
+    def chay2(self, lan, ten_chu="Hoàng Văn Bình"):
+        self.hd("X9", "2026-09-01", "K9", ten_chu, "CSD")
+        import datetime as dt
+        self.hd("H1", D, "K1", "Nguyễn Thị Lan", "CSD MỤN", "10:00")
+        self.hd("H2", D, "K2", "Trần Thị Lan", "CSD MỤN", "10:30")
+        i = self.anh(D, "10:05:00", "Lan - csd 10/10/26", km="P-X")
+        visits = self.c.execute("SELECT * FROM visits WHERE ngay=?", (D,)).fetchall()
+        photos = self.c.execute("SELECT * FROM photos WHERE ngay=?", (D,)).fetchall()
+        kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "ly_do": "nhãn khớp", "gio": dt.datetime(2026, 10, 10, 10, 5),
+                  "mat_ds": {"P-X"}, "bo": 1}}
+        cum = {"lich": {"P-X": {"K9": {"2026-09-01"}}}, "khoa": {}, "cum": {}, "nhom": {}, "lan": {"P-X"} if lan else set()}
+        A._ha_trung_ten(self.c, D, visits, photos, kq, cum, {i: A.doc_nhan("Lan - csd 10/10/26", 2026)})
+        return kq[i]
+
+    def test_gop_nhan_khong_hop_chu_giu(self):
+        self.assertEqual(self.chay2(True)["do_tin"], "chac")
+
+    def test_khong_gop_van_ha(self):  # âm
+        self.assertEqual(self.chay2(False)["do_tin"], "goi_y")
+
+    def test_gop_nhan_hop_chu_van_ha(self):  # âm: chủ mặt có tên hợp nhãn ('Lan')
+        self.assertEqual(self.chay2(True, "Phạm Thị Lan")["do_tin"], "goi_y")
