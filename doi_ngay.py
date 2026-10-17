@@ -2,6 +2,7 @@
 
     .venv/bin/python doi_ngay.py                 # chạy khan: chỉ đếm + xuất danh sách, KHÔNG gọi app Ảnh
     .venv/bin/python doi_ngay.py --ghi           # đổi ngày trong app Ảnh (chạy trong Terminal của Mac Ảnh)
+    .venv/bin/python doi_ngay.py --ghi --toi-da 1   # chạy thử 1 nhóm mới nhất (chạy lại làm tiếp nhóm kế)
     .venv/bin/python doi_ngay.py --go            # đặt lại NGÀY CŨ cho mọi ảnh đã đổi (bảng doi_ngay)
 
 Chỉ đổi ảnh:
@@ -94,6 +95,18 @@ def chon(conn) -> tuple[list[dict], list[dict]]:
             d["thoi_gian_moi"] = t.isoformat(timespec="seconds")
             d["ngay_moi"] = t.date().isoformat()
     return doi, khong
+
+
+def gioi_han(doi: list[dict], toi_da: int) -> list[dict]:
+    """Chỉ giữ toi_da NHÓM (ngày ảnh, HĐ) mới nhất (theo ngày ảnh rồi giờ ảnh đầu nhóm); 0 = tất cả."""
+    if not toi_da:
+        return doi
+    nhom: dict = {}
+    for d in doi:
+        k = (d["ngay"], d["code"])
+        nhom[k] = min(nhom.get(k, d["thoi_gian"]), d["thoi_gian"])
+    giu = set(sorted(nhom, key=lambda k: (k[0], nhom[k], k[1]), reverse=True)[:toi_da])
+    return [d for d in doi if (d["ngay"], d["code"]) in giu]
 
 
 def xuat_tsv(doi, khong, f_doi: str, f_khong: str) -> None:
@@ -222,6 +235,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ghi", action="store_true", help="đổi ngày trong app Ảnh (chạy trong Terminal của Mac Ảnh)")
     ap.add_argument("--go", action="store_true", help="đặt lại ngày cũ cho mọi ảnh đã đổi")
+    ap.add_argument("--toi-da", type=int, default=0, metavar="N",
+                    help="chỉ N NHÓM (ngày ảnh, HĐ) mới nhất — chạy thử 1 nhóm: --toi-da 1 (0 = tất cả)")
     ap.add_argument("--xuat", default="doi_ngay_khan.tsv", help="file danh sách sẽ đổi (chạy khan)")
     ap.add_argument("--xuat-khong", default="doi_ngay_khong.tsv", help="file danh sách không đổi")
     a = ap.parse_args()
@@ -234,6 +249,10 @@ def main() -> None:
         print(f"Đã đặt lại ngày cũ cho {go(conn, DoiKit())} ảnh.")
         return
     doi, khong = chon(conn)
+    tong = len(doi)
+    doi = gioi_han(doi, a.toi_da)
+    if a.toi_da:
+        print(f"--toi-da {a.toi_da}: lấy {len(doi)}/{tong} ảnh của {a.toi_da} nhóm mới nhất")
     dem = collections.Counter(d["ly_do"].split(" —")[0] if "trễ" in d["ly_do"] and "EXIF" not in d["ly_do"]
                               else d["ly_do"].split(" ")[0] for d in khong)
     print(f"Sẽ đổi ngày {len(doi)} ảnh (không EXIF, trễ 1–2 ngày so với HĐ) ở "

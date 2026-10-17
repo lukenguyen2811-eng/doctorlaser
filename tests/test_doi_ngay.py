@@ -127,3 +127,17 @@ class DoiNgay(Nen):
         self.hd("H1", "2026-10-08", "K1", "Phan Thị Lan", "CSD MỤN", "")
         self.a("2026-10-09", "09:00:00")
         self.assertEqual(DN.chon(self.c)[0][0]["thoi_gian_moi"], "2026-10-08T12:00:00")
+
+
+class ToiDa(DoiNgay):
+    def test_toi_da_nhom_moi_nhat(self):
+        self.nen()
+        self.hd("H2", "2026-09-01", "K2", "Trần Văn Nam", "CSD MỤN", "10:00")
+        cu = [self.a("2026-09-02", "09:00:00", hd="H2"), self.a("2026-09-02", "09:00:05", hd="H2")]
+        moi = [self.a("2026-10-09", "09:00:00"), self.a("2026-10-09", "09:00:05")]
+        doi, _ = DN.chon(self.c)
+        self.assertEqual({d["id"] for d in DN.gioi_han(doi, 1)}, set(moi))  # đủ cả nhóm, nhóm mới nhất
+        self.assertEqual({d["id"] for d in DN.gioi_han(doi, 0)}, set(cu + moi))
+        DN.ghi(self.c, DN.gioi_han(doi, 1), self.kit)
+        doi2, _ = DN.chon(self.c)  # chạy lại -> nhóm kế
+        self.assertEqual({d["id"] for d in DN.gioi_han(doi2, 1)}, set(cu))
