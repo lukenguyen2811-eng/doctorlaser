@@ -2101,7 +2101,8 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
                 cach = f"cách {tim[0][0] / 60:.0f}'"
                 n0 = tim[0][3]
                 mr, mn = r.get("mat_ds") or set(), n0.get("mat_ds") or set()
-                if tim[0][0] <= LIEN_GIAY and tim[0][2] >= 80 and n0["nhan"] and n0["do_tin"] == "chac" \
+                if tim[0][0] <= LIEN_GIAY and tim[0][2] >= 80 and n0["do_tin"] == "chac" \
+                        and (n0["nhan"] or (n0["ly_do"] or "").startswith(_NEO_TEN)) \
                         and n0["hd"] == tim[0][1] and (not mr or not mn or mr & mn) \
                         and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > LIEN_GIAY):
                     # soát 17/10 (D410D78E, EFE65351, 9D3B9431): chụp liền 0–2s ảnh NHÃN khớp chắc, cùng người / không

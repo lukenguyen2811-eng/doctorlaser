@@ -271,3 +271,10 @@ class LienGiay(Nen):  # soát 17/10: đợt nhiều khách không hạ ảnh ch�
         self.nen()
         ids, kq = self.bo("16:51:36", km="P-Z")
         self.assertNotEqual(kq[ids[1]][1], "chac")
+
+
+class LienGiayTen(LienGiay):  # neo khớp TÊN đầy đủ trên ảnh (không gạch) cũng tính (ca D410D78E)
+    def bo(self, gio, km=""):
+        ids = [self.anh(D, "16:51:35", "PHAN THỊ LAN", km="P-L"), self.anh(D, gio, km=km),
+               self.anh(D, "16:52:30", "Trần Văn Nam - csd 10/10/26", km="P-N")]
+        return ids, self.ghep()
