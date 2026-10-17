@@ -248,14 +248,16 @@ class MotNguoiHaiMa(Nen):  # vòng 18: 1 người 2 mã KH
     def test_cung_ho_ten_khac_he_gop(self):  # ca 20F1A53F
         self.hd("A1", "2020-01-01", "CU-KH000798", "Võ Thị Mỹ Lệ", "CSD")
         self.hd("A2", "2026-01-01", "KH004655", "VÕ THỊ MỸ LỆ (BS LƯƠNG)", "CSD")
-        k = A._khoa_khach(self.c)
+        k = A._khoa_khach(self.c, theo_ten=True)
         self.assertEqual(k["CU-KH000798"], k["KH004655"])
+        k0 = A._khoa_khach(self.c)  # mặc định (luật mặt): chỉ SĐT
+        self.assertNotEqual(k0["CU-KH000798"], k0["KH004655"])
 
     def test_cung_he_hoac_2_chu_cuoi_khong_gop(self):  # âm
         self.hd("A1", "2026-01-01", "KH000001", "Võ Thị Mỹ Lệ", "CSD")
         self.hd("A2", "2026-01-02", "KH000002", "Võ Thị Mỹ Lệ", "CSD")  # cùng hệ
         self.hd("A3", "2020-01-02", "CU-KH000003", "Trần Văn Mỹ Lệ", "CSD")  # chỉ trùng 2 chữ cuối
-        k = A._khoa_khach(self.c)
+        k = A._khoa_khach(self.c, theo_ten=True)
         self.assertEqual(len({k["KH000001"], k["KH000002"], k["CU-KH000003"]}), 3)
 
 
@@ -282,3 +284,11 @@ class TrungTenGop(TrungTen):  # vòng 18 (ca 7749626F): mặt có dấu gộp 2 
 
     def test_gop_nhan_hop_chu_van_ha(self):  # âm: chủ mặt có tên hợp nhãn ('Lan')
         self.assertEqual(self.chay2(True, "Phạm Thị Lan")["do_tin"], "goi_y")
+
+
+class TrungTenHaiMa(TrungTen):  # vòng 18 (20F1A53F): mặt lịch sử thuộc mã KHÁC HỆ cùng họ tên đầy đủ = cùng người -> giữ
+    def test_mat_khach_ngoai_ha_giu_hd(self):
+        self.hd("Z1", "2020-01-01", "CU-KH1", "Nguyễn Thị Lan", "CSD")
+        self.assertEqual(self.chay({"P-X": {"CU-KH1": {"2026-09-01"}}})["do_tin"], "chac")
+
+    test_mat_khach_cung_ten_khac_goi_y_hd_do = None

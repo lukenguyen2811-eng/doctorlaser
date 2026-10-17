@@ -2223,13 +2223,16 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
         for v in hop:
             theo_k.setdefault(_khoa_hd(conn, cum, v["code"], nho), []).append(v)
         k = _khoa_hd(conn, cum, r["hd"], nho)
-        if len(theo_k) < 2 or k not in theo_k:
+        if "khoa_ten" not in cum:
+            cum["khoa_ten"] = _khoa_khach(conn, theo_ten=True)
+        kt = cum["khoa_ten"]
+        if len({kt.get(x, x) for x in theo_k}) < 2 or k not in theo_k:
             continue
         # dịch vụ trên nhãn phân định được (chỉ HĐ của khách được gắn có dịch vụ đó) -> nhãn không còn mơ hồ (kiểm toán
         # 17/10 DEB408D6 'căng chỉ' đúng)
         u = next(iter(m))
         chu = {kk for kk, ng in (lich.get(u) or {}).items() if ng - {ngay}}
-        if not chu or k in chu:
+        if not chu or kt.get(k, k) in {kt.get(x, x) for x in chu}:  # 1 người 2 mã (cùng họ tên đầy đủ) = cùng người
             continue
         # vòng 18 (ca 7749626F): mặt có dấu GỘP 2 người (cụm lẫn) mà nhãn trên chính ảnh không hợp tên chủ nào của mặt
         # -> bằng chứng mặt không tin được, bỏ
@@ -2694,10 +2697,11 @@ def _la_neo_mat(do_tin: str | None, ly_do: str | None) -> bool:
     return bool(m) and int(m.group(1) or m.group(2)) <= BO_TOI_DA
 
 
-def _khoa_khach(conn) -> dict[str, str]:
-    """mã KH -> khoá người. Hai mã KHÁC HỆ ('CU-KH…' mã cũ vs 'KH…' mã mới, 'CU-…') mà CÙNG SĐT hoặc CÙNG HỌ TÊN ĐẦY
-    ĐỦ (>= 3 chữ, sạch ghi chú, bỏ dấu — vòng 18) = 1 người. Hai mã cùng hệ (người nhà dùng chung số / trùng tên) vẫn
-    là 2 người; chỉ trùng 2 chữ cuối không gộp."""
+def _khoa_khach(conn, theo_ten: bool = False) -> dict[str, str]:
+    """mã KH -> khoá người. Hai mã KHÁC HỆ ('CU-KH…' mã cũ vs 'KH…' mã mới, 'CU-…') mà CÙNG SĐT = 1 người; theo_ten=True
+    (vòng 18, chỉ luật trùng tên): thêm CÙNG HỌ TÊN ĐẦY ĐỦ (>= 3 chữ, sạch ghi chú, bỏ dấu). Hai mã cùng hệ (người nhà
+    dùng chung số / trùng tên) vẫn là 2 người; chỉ trùng 2 chữ cuối không gộp. Gộp theo tên cho MỌI luật mặt làm lên
+    chắc mới 87 ảnh (đo ma26) -> chỉ dùng trong luật trùng tên."""
     cha: dict[str, str] = {}
 
     def goc(x):
@@ -2706,16 +2710,16 @@ def _khoa_khach(conn) -> dict[str, str]:
         return x
 
     theo_sdt: dict[str, set] = {}
-    theo_ten: dict[str, set] = {}
+    ds_ten: dict[str, set] = {}
     for ma, sdt, ten in conn.execute("SELECT DISTINCT ma_kh, sdt, ten_kh FROM visits WHERE COALESCE(ma_kh,'') != ''"):
         cha.setdefault(ma, ma)
         s = chuan_sdt(sdt)
         if len(s) >= 9:
             theo_sdt.setdefault(s[-9:], set()).add(ma)
-        t = " ".join(k for _, k in _tu_ten_kh(ten))
+        t = " ".join(k for _, k in _tu_ten_kh(ten)) if theo_ten else ""
         if len(t.split()) >= 3:  # vòng 18: 1 người 2 mã — cùng HỌ TÊN ĐẦY ĐỦ (sạch, bỏ dấu), khác hệ mã (CU-KH… / KH…)
-            theo_ten.setdefault(t, set()).add(ma)
-    for mas in list(theo_sdt.values()) + list(theo_ten.values()):
+            ds_ten.setdefault(t, set()).add(ma)
+    for mas in list(theo_sdt.values()) + list(ds_ten.values()):
         ds = sorted(mas)
         for i, a in enumerate(ds):
             for b in ds[i + 1:]:
