@@ -68,7 +68,7 @@ def _dhash_file(duong: str | None) -> int | None:
         from PIL import Image
         with Image.open(duong) as im:
             g = im.convert("L").resize((9, 8))
-            px = list(g.getdata())
+            px = list(g.get_flattened_data() if hasattr(g, "get_flattened_data") else g.getdata())
     except Exception:  # noqa: BLE001
         return None
     v = 0
