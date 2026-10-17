@@ -218,3 +218,23 @@ class TrungTenChuDem(TrungTen):  # ca 7095980C: nhãn 1 chữ 'Thảo' trùng ch
 
     test_mat_khach_ngoai_ha_giu_hd = test_chi_lich_su_cung_ngay_giu = test_anh_2_mat_giu = None
     test_nhan_chi_hop_1_khach_giu = None
+
+
+class TrungTenDichVu(TrungTen):  # âm (kiểm toán DEB408D6): dịch vụ trên nhãn chỉ khớp HĐ khách được gắn -> giữ
+    def chay(self, lich, mat="P-X", nhan="Lan - căng chỉ 10/10/26"):
+        import datetime as dt
+        self.hd("H1", D, "K1", "Nguyễn Thị Lan", "CĂNG CHỈ", "10:00")
+        self.hd("H2", D, "K2", "Trần Thị Lan", "CSD MỤN", "10:30")
+        i = self.anh(D, "10:05:00", nhan, km=mat)
+        visits = self.c.execute("SELECT * FROM visits WHERE ngay=?", (D,)).fetchall()
+        photos = self.c.execute("SELECT * FROM photos WHERE ngay=?", (D,)).fetchall()
+        kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "ly_do": "nhãn khớp", "gio": dt.datetime(2026, 10, 10, 10, 5),
+                  "mat_ds": set(mat.split()), "bo": 1}}
+        A._ha_trung_ten(self.c, D, visits, photos, kq, {"lich": lich, "khoa": {}, "cum": {}, "nhom": {}},
+                        {i: A.doc_nhan(nhan, 2026)})
+        return kq[i]
+
+    def test_mat_khach_cung_ten_khac_goi_y_hd_do(self):
+        self.assertEqual(self.chay({"P-X": {"K2": {"2026-09-01"}}})["do_tin"], "chac")
+
+    test_mat_khach_ngoai_ha_giu_hd = None

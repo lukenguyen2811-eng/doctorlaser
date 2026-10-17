@@ -2214,6 +2214,11 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
         k = _khoa_hd(conn, cum, r["hd"], nho)
         if len(theo_k) < 2 or k not in theo_k:
             continue
+        # dịch vụ trên nhãn phân định được (chỉ HĐ của khách được gắn có dịch vụ đó) -> nhãn không còn mơ hồ (kiểm toán
+        # 17/10 DEB408D6 'căng chỉ' đúng)
+        ma = [n["ma_dv"] for n in ns if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
+        if ma and [kk for kk, vs in theo_k.items() if any(_dv_khop(x, v["dich_vu"] or "") for x in ma for v in vs)] == [k]:
+            continue
         chu = {kk for kk, ng in (lich.get(next(iter(m))) or {}).items() if ng - {ngay}}
         if not chu or k in chu:
             continue
