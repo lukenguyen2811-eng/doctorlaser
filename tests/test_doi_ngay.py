@@ -9,7 +9,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_ten_cuoi_mat_anh import A, Nen  # noqa: E402
+from test_ten_cuoi_mat_anh import A, D, Nen  # noqa: E402
 import doi_ngay as DN  # noqa: E402
 
 
@@ -205,3 +205,69 @@ class Vong16b(DoiNgay):  # CEO 17/10 lần 16 sau soát: kiểm cả bộ, giờ
               "c": {"do_tin": "chac", "hd": "H1", "xn": None, "ly_do": ""}}
         A._chan_theo_nen(kq, nen)
         self.assertEqual([kq[x]["do_tin"] for x in "abc"], ["goi_y", "goi_y", "chac"])
+
+
+class Vong16c(DoiNgay):  # soát 16b: bản chép ảnh buổi cũ
+    def test_nhan_khong_nam_khac_ngay_hd_chan(self):  # N17 '2/10', N29 '12/11'
+        self.nen()
+        self.a("2026-10-10", "09:00:00", ocr="cs mv co2 lần1 2/10")
+        self.assertFalse(DN.chon(self.c)[0])
+
+    def test_nhan_khong_nam_dung_ngay_hd_khong_chan(self):  # âm
+        self.nen()
+        self.a("2026-10-10", "09:00:00", ocr="Lan prp 8/10")
+        self.assertEqual(len(DN.chon(self.c)[0]), 1)
+
+    def test_hinh_anh_truoc_sau_chan(self):
+        self.nen()
+        i = self.a("2026-10-10", "09:00:00")
+        self.c.execute("UPDATE photos SET chu_thich='HÌNH ẢNH TRƯỚC SAU' WHERE id=?", (i,))
+        self.assertFalse(DN.chon(self.c)[0])
+
+    def _dhash(self, h_moi, h_exif):
+        self.nen()
+        self.hd("H0", "2025-02-04", "K1", "Phan Thị Lan", "CSD MỤN", "10:00")
+        i = self.a("2026-10-10", "09:00:00")
+        e = self.anh("2025-02-04", "10:05:00", ngay_goc=1, do_tin="chac", goi_y="H0")
+        self.c.execute("UPDATE photos SET anh_xem=id")
+        cu = DN.DHASH
+        DN.DHASH = lambda p: {i: h_moi, e: h_exif}.get(p)
+        try:
+            return DN.chon(self.c)
+        finally:
+            DN.DHASH = cu
+
+    def test_trung_hinh_exif_cung_khach_chan(self):  # N8
+        doi, khong = self._dhash(0b1011, 0b1000)  # lệch 2 bit
+        self.assertFalse(doi)
+        self.assertTrue(any("trùng hình" in d["ly_do"] for d in khong))
+
+    def test_khac_hinh_khong_chan(self):  # âm: lệch > 4 bit
+        doi, _ = self._dhash(0b11111111, 0)
+        self.assertEqual(len(doi), 1)
+
+
+class LienGiay(Nen):  # soát 17/10: đợt nhiều khách không hạ ảnh chụp liền 0–2s ảnh nhãn chắc cùng người/không mặt
+    def nen(self):
+        self.hd("H1", D, "K1", "Phan Thị Lan", "FILLER", "16:00")
+        self.hd("H2", D, "K2", "Trần Văn Nam", "CSD MỤN", "16:10")
+
+    def bo(self, gio, km=""):
+        ids = [self.anh(D, "16:51:35", "Phan Thị Lan - filler 10/10/26", km="P-L"), self.anh(D, gio, km=km),
+               self.anh(D, "16:52:30", "Trần Văn Nam - csd 10/10/26", km="P-N")]
+        return ids, self.ghep()
+
+    def test_lien_1s_khong_mat_chac(self):
+        self.nen()
+        ids, kq = self.bo("16:51:36")
+        self.assertEqual(kq[ids[1]][:2], ("H1", "chac"))
+
+    def test_cach_xa_khong_ap(self):  # âm
+        self.nen()
+        ids, kq = self.bo("16:51:50")
+        self.assertNotEqual(kq[ids[1]][1], "chac")
+
+    def test_mat_khac_khong_ap(self):  # âm
+        self.nen()
+        ids, kq = self.bo("16:51:36", km="P-Z")
+        self.assertNotEqual(kq[ids[1]][1], "chac")

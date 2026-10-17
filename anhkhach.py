@@ -49,6 +49,7 @@ PORT = int(os.environ.get("ANH_PORT", "8765"))
 GIO_TRUOC, GIO_SAU = 30, 45  # hóa đơn trong [đầu đợt - 30', cuối đợt + 45'] coi là gần giờ chụp
 DOT_PHUT = 15  # ảnh cách nhau <= 15 phút coi là cùng một đợt chụp
 CHUOI_GIAY = 60  # đợt có nhiều khách: chỉ lan theo chuỗi ảnh chụp liền, 2 ảnh kề nhau cách <= 60 giây
+LIEN_GIAY = 2  # chụp liền 0–2s với ảnh nhãn khớp chắc, cùng người/không mặt -> cùng khách (soát 17/10)
 TRUNG_GIAY = 3  # >= 3 ảnh cùng giờ đến từng giây = giờ nhập/lưu, không phải giờ chụp
 BO_GIAY = 60  # bộ chụp: mỗi khách chụp mặt 5 kiểu liên tục, 2 ảnh kề nhau cách <= 60 giây
 BO_TOI_DA = 7  # bộ <= 7 tư thế (GIÂY khác nhau) có 1 nhãn khớp chắc = 1 khách; dài hơn có thể là 2 khách
@@ -2092,12 +2093,23 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
                     j += buoc
                     if id(cung[j]) in la_neo:
                         tim.append((abs((cung[j]["gio"] - r["gio"]).total_seconds()), _hd_neo(cung[j]),
-                                    cung[j]["diem"]))
+                                    cung[j]["diem"], cung[j]))
                         break
             tim.sort(key=lambda x: x[0])
             if tim and tim[0][1] and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > tim[0][0]) \
                     and _lan_duoc(r, tim[0][1], hd_lui):
                 cach = f"cách {tim[0][0] / 60:.0f}'"
+                n0 = tim[0][3]
+                mr, mn = r.get("mat_ds") or set(), n0.get("mat_ds") or set()
+                if tim[0][0] <= LIEN_GIAY and tim[0][2] >= 80 and n0["nhan"] and n0["do_tin"] == "chac" \
+                        and n0["hd"] == tim[0][1] and (not mr or not mn or mr & mn) \
+                        and (len(tim) == 1 or tim[1][1] == tim[0][1] or tim[1][0] > LIEN_GIAY):
+                    # soát 17/10 (D410D78E, EFE65351, 9D3B9431): chụp liền 0–2s ảnh NHÃN khớp chắc, cùng người / không
+                    # mặt -> cùng khách, không hạ vì 'đợt nhiều khách'
+                    r.update(hd=tim[0][1], do_tin="chac", diem=80,
+                             ly_do=f"chụp liền {tim[0][0]:.0f}s với ảnh nhãn khớp chắc (cùng người / không mặt)"
+                             " — đợt có nhiều khách")
+                    continue
                 r.update(hd=tim[0][1], do_tin="goi_y",
                          ly_do=f"lan từ ảnh khớp một phần tên — cùng loạt chụp liền ({cach})" if tim[0][2] < 80
                          else f"đợt có nhiều khách — cùng loạt chụp liền với ảnh đã khớp ({cach})")

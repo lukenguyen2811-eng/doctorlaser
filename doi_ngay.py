@@ -56,6 +56,29 @@ def _bang(conn) -> None:
 _NGAY_TU_DO = re.compile(r"(?<!\d)(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*(\d{2,4}))?(?![\d/])")
 _NGAY_8 = re.compile(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)")
 BO_PHUT = 10  # 'cả bộ' = ảnh cùng ngày cách nhóm <= 10 phút, cùng khách hoặc cùng mã mặt (CEO 17/10 lần 16)
+DHASH_LECH = 4  # ảnh không EXIF trùng hình ảnh EXIF (dhash lệch <= 4 bit) = bản chép ảnh buổi cũ (soát N8)
+_TRUOC_SAU = "hinh anh truoc sau"
+
+
+def _dhash_file(duong: str | None) -> int | None:
+    """dHash 64 bit của ảnh xem trước (chỉ đọc file); không mở được -> None."""
+    if not duong:
+        return None
+    try:
+        from PIL import Image
+        with Image.open(duong) as im:
+            g = im.convert("L").resize((9, 8))
+            px = list(g.getdata())
+    except Exception:  # noqa: BLE001
+        return None
+    v = 0
+    for y in range(8):
+        for x in range(8):
+            v = (v << 1) | (px[y * 9 + x] > px[y * 9 + x + 1])
+    return v
+
+
+DHASH = _dhash_file  # tiêm được để test
 
 
 def _ngay(d, m, y, nam):
@@ -129,8 +152,18 @@ def chon(conn) -> tuple[list[dict], list[dict]]:
             <= t_cuoi + dt.timedelta(minutes=BO_PHUT)
             and ((ma and q["ma_kh_hd"] == ma) or (mat & set(A._doc_mat(q["khuon_mat"])))))]
         ly = None
+        dm_hd = ngay_hd[5:]
         for q in bo:
             nhan, tu_do = _ngay_trong(q, nam)
+            chu = A.khong_dau(f"{q['chu_thich'] or ''} {q['ocr'] or ''}").lower()
+            if _TRUOC_SAU in chu:
+                ly = f"bộ có ảnh 'HÌNH ẢNH TRƯỚC SAU' (ảnh {q['id'][:8]}) — ảnh ghép/album trước–sau, không đổi"
+                break
+            # ngày tự do kiểu nhãn 'dd/mm' (kể cả không năm) ghi NGÀY/THÁNG khác ngày HĐ (soát N17 '2/10', N29 '12/11')
+            khac = sorted(x for x in tu_do if x[5:] != dm_hd)
+            if khac:
+                ly = f"bộ có chữ ngày {khac[0][8:10]}/{khac[0][5:7]} khác ngày HĐ (ảnh {q['id'][:8]}) — có thể ảnh buổi cũ"
+                break
             lech = sorted(x for x in nhan if x != ngay_hd)
             if lech:
                 ly = f"bộ có nhãn / chú thích / tên file ghi ngày {lech[0]} khác ngày HĐ (ảnh {q['id'][:8]})"
@@ -141,6 +174,21 @@ def chon(conn) -> tuple[list[dict], list[dict]]:
             if q["ngay_goc"] == 1:
                 ly = f"bộ có ảnh EXIF ngày {ngay} (ảnh {q['id'][:8]}) — ngày cũ có thể là thật, người xem"
                 break
+        if not ly and ma:  # bản chép ảnh EXIF buổi khác của cùng khách (dhash)
+            exif = conn.execute(
+                "SELECT p.id, p.ngay, p.anh_xem FROM photos p JOIN visits v ON v.code=COALESCE(p.xn_hd, p.goi_y_hd)"
+                " WHERE v.ma_kh=? AND p.ngay_goc=1 AND p.ngay != ? AND p.bo_qua=0", (ma, ngay)).fetchall()
+            hx = [(e, DHASH(e["anh_xem"])) for e in exif]
+            hx = [(e, h) for e, h in hx if h is not None]
+            for d in ds:
+                h = DHASH(d["anh_xem"]) if hx else None
+                if h is None:
+                    continue
+                e = next((e for e, he in hx if bin(h ^ he).count("1") <= DHASH_LECH), None)
+                if e is not None:
+                    ly = (f"ảnh {d['id'][:8]} trùng hình ảnh EXIF {e['id'][:8]} ngày {e['ngay']} của cùng khách"
+                          " — bản chép ảnh buổi cũ")
+                    break
         if ly:
             khong += [dict(d, ly_do=ly) for d in ds]
             continue
