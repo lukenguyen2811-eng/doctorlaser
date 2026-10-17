@@ -234,7 +234,11 @@ class TrungTenDichVu(TrungTen):  # âm (kiểm toán DEB408D6): dịch vụ trê
                         {i: A.doc_nhan(nhan, 2026)})
         return kq[i]
 
-    def test_mat_khach_cung_ten_khac_goi_y_hd_do(self):
-        self.assertEqual(self.chay({"P-X": {"K2": {"2026-09-01"}}})["do_tin"], "chac")
+    def test_mat_khach_ngoai_giu(self):  # mặt lịch sử là khách NGOÀI (không cùng tên hôm nay) -> dịch vụ thắng, giữ
+        self.assertEqual(self.chay({"P-X": {"K9": {"2026-09-01"}}})["do_tin"], "chac")
+
+    def test_mat_khach_cung_ten_khac_goi_y_hd_do(self):  # ca 995EB43C: mặt là khách cùng tên khác hôm nay -> vẫn hạ
+        r = self.chay({"P-X": {"K2": {"2026-09-01"}}})
+        self.assertEqual((r["hd"], r["do_tin"]), ("H2", "goi_y"))
 
     test_mat_khach_ngoai_ha_giu_hd = None

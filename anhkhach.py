@@ -2216,13 +2216,16 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
             continue
         # dịch vụ trên nhãn phân định được (chỉ HĐ của khách được gắn có dịch vụ đó) -> nhãn không còn mơ hồ (kiểm toán
         # 17/10 DEB408D6 'căng chỉ' đúng)
-        ma = [n["ma_dv"] for n in ns if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
-        if ma and [kk for kk, vs in theo_k.items() if any(_dv_khop(x, v["dich_vu"] or "") for x in ma for v in vs)] == [k]:
-            continue
         chu = {kk for kk, ng in (lich.get(next(iter(m))) or {}).items() if ng - {ngay}}
         if not chu or k in chu:
             continue
         khac = [kk for kk in chu if kk in theo_k and kk != k]
+        # dịch vụ trên nhãn phân định được (chỉ HĐ khách được gắn có dịch vụ đó) -> giữ (kiểm toán DEB408D6), TRỪ khi mặt
+        # là của đúng 1 khách cùng tên KHÁC có HĐ hôm nay (ca 995EB43C)
+        ma = [n["ma_dv"] for n in ns if _ma_ro(n["ma_dv"]) and not _dv_chung(n["ma_dv"])]
+        if len(khac) != 1 and ma and [kk for kk, vs in theo_k.items()
+                                      if any(_dv_khop(x, v["dich_vu"] or "") for x in ma for v in vs)] == [k]:
+            continue
         cu = r["hd"]
         # ảnh cùng bộ lan CHẮC theo ảnh nhãn này (cùng HĐ, luật bộ chụp, cùng mặt / không mặt) hạ theo
         theo = [x for x in ket_qua.values() if x is not r and r["bo"] is not None and x["bo"] == r["bo"]
