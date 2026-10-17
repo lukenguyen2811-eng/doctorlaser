@@ -2212,15 +2212,21 @@ def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: 
         if not chu or k in chu:
             continue
         khac = [kk for kk in chu if kk in theo_k and kk != k]
-        if len(khac) == 1:
-            v = min(theo_k[khac[0]], key=lambda v: _cach_gio(v, r["gio"]))
-            r.update(hd=v["code"], do_tin="goi_y", diem=40,
-                     ly_do=f"nhãn hợp {len(theo_k)} khách cùng tên trong ngày; mặt là của khách cùng tên khác (ảnh ngày khác)"
-                     f" — gợi ý HĐ {v['code']} (trước: chắc {r['hd']}) — người chọn")
-        else:
-            r.update(do_tin="goi_y", diem=40,
-                     ly_do=(r["ly_do"] or "") + f" — nhãn hợp {len(theo_k)} khách cùng tên trong ngày, mặt trên ảnh ngày khác"
-                     " thuộc khách khác — người chọn")
+        cu = r["hd"]
+        # ảnh cùng bộ lan CHẮC theo ảnh nhãn này (cùng HĐ, luật bộ chụp, cùng mặt / không mặt) hạ theo
+        theo = [x for x in ket_qua.values() if x is not r and r["bo"] is not None and x["bo"] == r["bo"]
+                and x["do_tin"] == "chac" and not x["xn"] and x["hd"] == cu and (x["ly_do"] or "").startswith("cùng bộ chụp")
+                and (not x.get("mat_ds") or x["mat_ds"] & m)]
+        for x in [r] + theo:
+            if len(khac) == 1:
+                v = min(theo_k[khac[0]], key=lambda v: _cach_gio(v, x["gio"]))
+                x.update(hd=v["code"], do_tin="goi_y", diem=40,
+                         ly_do=f"nhãn hợp {len(theo_k)} khách cùng tên trong ngày; mặt là của khách cùng tên khác (ảnh ngày"
+                         f" khác) — gợi ý HĐ {v['code']} (trước: chắc {cu}) — người chọn")
+            else:
+                x.update(do_tin="goi_y", diem=40,
+                         ly_do=(x["ly_do"] or "") + f" — nhãn hợp {len(theo_k)} khách cùng tên trong ngày, mặt trên ảnh ngày"
+                         " khác thuộc khách khác — người chọn")
 
 
 _NGAY_DM = re.compile(r"(?<!\d)(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*\d{2,4})?(?![\d/])")

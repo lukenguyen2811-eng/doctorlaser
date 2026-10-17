@@ -162,15 +162,21 @@ class TrungTen(Nen):  # CEO 17/10 lần 17: nhãn hợp >= 2 khách cùng tên, 
         i = self.anh(D, "10:05:00", nhan, km=mat)
         visits = self.c.execute("SELECT * FROM visits WHERE ngay=?", (D,)).fetchall()
         photos = self.c.execute("SELECT * FROM photos WHERE ngay=?", (D,)).fetchall()
+        j = self.anh(D, "10:05:05", km=mat)
         kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "ly_do": "nhãn khớp", "gio": dt.datetime(2026, 10, 10, 10, 5),
-                  "mat_ds": set(mat.split())}}
+                  "mat_ds": set(mat.split()), "bo": 1},
+              j: {"hd": "H1", "do_tin": "chac", "xn": None, "ly_do": "cùng bộ chụp liền 2 ảnh với ảnh có nhãn",
+                  "gio": dt.datetime(2026, 10, 10, 10, 5, 5), "mat_ds": set(mat.split()), "bo": 1}}
+        self.j = j
         cum = {"lich": lich, "khoa": {}, "cum": {}, "nhom": {}}
-        A._ha_trung_ten(self.c, D, visits, photos, kq, cum, {i: A.doc_nhan(nhan, 2026)})
+        A._ha_trung_ten(self.c, D, visits, photos, kq, cum, {i: A.doc_nhan(nhan, 2026), j: []})
+        self.kq = kq
         return kq[i]
 
     def test_mat_khach_cung_ten_khac_goi_y_hd_do(self):
         r = self.chay({"P-X": {"K2": {"2026-09-01"}}})
         self.assertEqual((r["hd"], r["do_tin"]), ("H2", "goi_y"))
+        self.assertEqual(self.kq[self.j]["do_tin"], "goi_y")  # ảnh cùng bộ lan theo nhãn hạ theo
 
     def test_mat_khach_ngoai_ha_giu_hd(self):
         r = self.chay({"P-X": {"K9": {"2026-09-01"}}})
