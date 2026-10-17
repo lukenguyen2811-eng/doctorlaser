@@ -152,3 +152,38 @@ class TruocSau(Nen):  # CEO 17/10 lần 16: ảnh 'HÌNH ẢNH TRƯỚC SAU' ghi
     def test_ghi_dung_ngay_hd_giu(self):  # âm
         i, kq = self.nen("HÌNH ẢNH TRƯỚC SAU 10/10")
         self.assertEqual(kq[i][1], "chac")
+
+
+class TrungTen(Nen):  # CEO 17/10 lần 17: nhãn hợp >= 2 khách cùng tên, mặt (ngày khác) thuộc khách khác
+    def chay(self, lich, mat="P-X", nhan="Lan - csd 10/10/26"):
+        import datetime as dt
+        self.hd("H1", D, "K1", "Nguyễn Thị Lan", "CSD MỤN", "10:00")
+        self.hd("H2", D, "K2", "Trần Thị Lan", "CSD MỤN", "10:30")
+        i = self.anh(D, "10:05:00", nhan, km=mat)
+        visits = self.c.execute("SELECT * FROM visits WHERE ngay=?", (D,)).fetchall()
+        photos = self.c.execute("SELECT * FROM photos WHERE ngay=?", (D,)).fetchall()
+        kq = {i: {"hd": "H1", "do_tin": "chac", "xn": None, "ly_do": "nhãn khớp", "gio": dt.datetime(2026, 10, 10, 10, 5),
+                  "mat_ds": set(mat.split())}}
+        cum = {"lich": lich, "khoa": {}, "cum": {}, "nhom": {}}
+        A._ha_trung_ten(self.c, D, visits, photos, kq, cum, {i: A.doc_nhan(nhan, 2026)})
+        return kq[i]
+
+    def test_mat_khach_cung_ten_khac_goi_y_hd_do(self):
+        r = self.chay({"P-X": {"K2": {"2026-09-01"}}})
+        self.assertEqual((r["hd"], r["do_tin"]), ("H2", "goi_y"))
+
+    def test_mat_khach_ngoai_ha_giu_hd(self):
+        r = self.chay({"P-X": {"K9": {"2026-09-01"}}})
+        self.assertEqual((r["hd"], r["do_tin"]), ("H1", "goi_y"))
+
+    def test_mat_dung_khach_giu(self):  # âm
+        self.assertEqual(self.chay({"P-X": {"K1": {"2026-09-01"}, "K2": {"2026-08-01"}}})["do_tin"], "chac")
+
+    def test_chi_lich_su_cung_ngay_giu(self):  # âm: lịch sử chỉ ở chính ngày này
+        self.assertEqual(self.chay({"P-X": {"K2": {D}}})["do_tin"], "chac")
+
+    def test_nhan_chi_hop_1_khach_giu(self):  # âm
+        self.assertEqual(self.chay({"P-X": {"K2": {"2026-09-01"}}}, nhan="Nguyễn Thị Lan - csd 10/10/26")["do_tin"], "chac")
+
+    def test_anh_2_mat_giu(self):  # âm
+        self.assertEqual(self.chay({"P-X": {"K2": {"2026-09-01"}}}, mat="P-X P-Y")["do_tin"], "chac")

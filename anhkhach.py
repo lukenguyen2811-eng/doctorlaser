@@ -2171,6 +2171,7 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         _neo_yeu_man_hinh(conn, ngay, anh_may, photos, ket_qua)
     _nang_lien_neo(ket_qua)
     _ha_truoc_sau(conn, photos, ket_qua)
+    _ha_trung_ten(conn, ngay, visits, photos, ket_qua, cum, nhan_ds)
     if nen:
         _chan_theo_nen(ket_qua, nen)
     for pid, r in ket_qua.items():
@@ -2184,6 +2185,42 @@ def ghep_ngay(conn: sqlite3.Connection, ngay: str, cum: dict | None = None) -> N
         if loai:
             conn.execute("UPDATE photos SET loai_anh=? WHERE id=? AND xn_hd IS NULL AND bo_qua=0"
                          " AND COALESCE(loai_anh,'')=''", (loai, p["id"]))
+
+
+def _ha_trung_ten(conn, ngay: str, visits, photos, ket_qua, cum: dict, nhan_ds: dict) -> None:
+    """CEO 17/10 lần 17 (ca 7095980C, 26258E81, 995EB43C): ảnh CHẮC (máy) có nhãn mà tên nhãn hợp >= 2 KHÁCH cùng tên
+    gọi có HĐ trong ngày; ảnh 1 mặt, mặt có lịch sử ảnh neo ở NGÀY KHÁC thuộc khách khác và KHÔNG lần nào thuộc khách
+    được gắn -> hạ gợi ý. Mặt thuộc ĐÚNG 1 khách cùng tên khác có HĐ hôm đó -> gợi ý HĐ của khách đó. Không lên chắc."""
+    lich = (cum or {}).get("lich") or {}
+    if not lich:
+        return
+    nho: dict = {}
+    for p in photos:
+        r = ket_qua[p["id"]]
+        ns = nhan_ds.get(p["id"]) or []
+        m = r.get("mat_ds") or set()
+        if r["xn"] or r["do_tin"] != "chac" or not r["hd"] or not ns or len(m) != 1:
+            continue
+        hop = [v for v in visits if any(_ten_nhan_hop(n, v["ten_kh"]) for n in ns)]
+        theo_k: dict = {}
+        for v in hop:
+            theo_k.setdefault(_khoa_hd(conn, cum, v["code"], nho), []).append(v)
+        k = _khoa_hd(conn, cum, r["hd"], nho)
+        if len(theo_k) < 2 or k not in theo_k:
+            continue
+        chu = {kk for kk, ng in (lich.get(next(iter(m))) or {}).items() if ng - {ngay}}
+        if not chu or k in chu:
+            continue
+        khac = [kk for kk in chu if kk in theo_k and kk != k]
+        if len(khac) == 1:
+            v = min(theo_k[khac[0]], key=lambda v: _cach_gio(v, r["gio"]))
+            r.update(hd=v["code"], do_tin="goi_y", diem=40,
+                     ly_do=f"nhãn hợp {len(theo_k)} khách cùng tên trong ngày; mặt là của khách cùng tên khác (ảnh ngày khác)"
+                     f" — gợi ý HĐ {v['code']} (trước: chắc {r['hd']}) — người chọn")
+        else:
+            r.update(do_tin="goi_y", diem=40,
+                     ly_do=(r["ly_do"] or "") + f" — nhãn hợp {len(theo_k)} khách cùng tên trong ngày, mặt trên ảnh ngày khác"
+                     " thuộc khách khác — người chọn")
 
 
 _NGAY_DM = re.compile(r"(?<!\d)(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*\d{2,4})?(?![\d/])")
@@ -2692,7 +2729,9 @@ def cum_khach(conn) -> dict:
         if du_neo and diem >= CUM_TY_LE * tong and len(ngays) >= CUM_NGAY:
             cum[u] = {"khach": k, "ma": max(mas, key=lambda m: (mas[m], m)), "neo": so, "xn": xn,
                       "ngay": len(ngays)}
-    return {"cum": cum, "lan": lan, "khoa": khoa, "nhom": nhom}
+    # lich: mã mặt -> khoá khách -> {ngày} có ảnh NEO (người duyệt / chắc theo nhãn-tên-SĐT) — luật trùng tên (lần 17)
+    lich = {u: {k: x[3] for k, x in ks.items()} for u, ks in phieu.items()}
+    return {"cum": cum, "lan": lan, "khoa": khoa, "nhom": nhom, "lich": lich}
 
 
 def _khach_cua_mat(cum: dict, km) -> dict | None:
