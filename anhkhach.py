@@ -3573,16 +3573,15 @@ def _td_ngay(conn, ngay: str, cum: dict, hoc: dict, nhan_mat: dict | None = None
         return []
     da_doi = _da_doi_ngay(conn, ngay)
     photos = [p for p in conn.execute("SELECT * FROM photos WHERE ngay=? ORDER BY thoi_gian", (ngay,))
-              if not loai_khong_luu(p["ocr"])[0] and p["id"] not in da_doi
-              and _MOC_TRUNG_TEN not in (p["ly_do"] or "")]  # ảnh trùng tên bị hạ: để người chọn, không tự duyệt  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
+              if not loai_khong_luu(p["ocr"])[0] and p["id"] not in da_doi]  # Lượng 17/10: biên lai / màn hình máy không tự duyệt, không vào đơn vị
     nho: dict = {}
     theo_k: dict[str, list] = {}
     for v in visits:
         theo_k.setdefault(_khoa_hd(conn, cum, v["code"], nho), []).append(v)
     ra = []
     for dv in _td_don_vi(photos):
-        if any(p["xn_hd"] or p["bo_qua"] for p in dv):
-            continue
+        if any(p["xn_hd"] or p["bo_qua"] for p in dv) or any(_MOC_TRUNG_TEN in (p["ly_do"] or "") for p in dv):
+            continue  # đơn vị có ảnh trùng tên bị hạ (lần 17): để người chọn — như khi ảnh đó còn chắc, không tự duyệt
         chac_dv = [p for p in dv if p["do_tin"] == "chac" and not (p["ly_do"] or "").startswith("tự duyệt")]
         bo_chac = None
         if chac_dv:
