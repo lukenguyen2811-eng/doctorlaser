@@ -105,7 +105,6 @@ WELCOME = (
     "/kiemtradata - xem data ngày vừa chốt (bản 19h để sale rà trước)\n"
     "/stats - tổng data CRM (rác/quan tâm/lead) + trạng thái\n"
     "/doanhthu - doanh thu tháng này (KiotViet)\n"
-    "/anh - ảnh điều trị của khách (vd /anh 0909123456, /anh KH000123, /anh HD012345)\n"
     "/chienluoc - phân tích chiến lược (hỏi khoảng tháng, kế hoạch theo tuần & tháng)\n"
     "/refresh - tải lại dữ liệu mới nhất\n"
     "/help - hướng dẫn"
@@ -190,29 +189,6 @@ async def cmd_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as e:  # noqa: BLE001
         log.exception("refresh failed")
         await update.message.reply_text(f"Lỗi khi tải dữ liệu: {e}")
-
-
-async def cmd_anh(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Tra ảnh điều trị theo SĐT / mã KH / mã hóa đơn (chỉ mục lưu trên KIOT)."""
-    if not _allowed(update):
-        return
-    q = " ".join(context.args).strip()
-    if not q:
-        await update.message.reply_text(
-            "Gõ kèm SĐT, mã khách hoặc mã hóa đơn, ví dụ:\n/anh 0909123456\n/anh KH000123"
-        )
-        return
-    import anhkiot
-
-    try:
-        items = await asyncio.to_thread(anhkiot.tra_cuu, q)
-    except Exception as e:  # noqa: BLE001
-        log.exception("tra ảnh lỗi")
-        await update.message.reply_text(f"Không tra được ảnh: {e}")
-        return
-    await update.message.reply_text(
-        anhkiot.dinh_dang(items), parse_mode=ParseMode.HTML, disable_web_page_preview=True
-    )
 
 
 async def cmd_doanhthu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -477,6 +453,37 @@ async def cmd_capnhatchot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as e:  # noqa: BLE001
         await status.delete()
         await update.message.reply_text(f"Lỗi cập nhật chốt: {e}")
+
+
+async def cmd_baocaov3(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Thử báo cáo v3 (đọc KIOT, ngày KD 17:30→17:29): /baocaov3 [d/m] [d/m]."""
+    if not _allowed(update):
+        return
+    import datetime as _dt
+    import io as _io
+
+    import report3
+    import report_image
+
+    ngay = []
+    for a in context.args[:2]:
+        m = re.match(r"(\d{1,2})[/-](\d{1,2})$", a)
+        if m:
+            ngay.append(_dt.date(_dt.date.today().year, int(m.group(2)), int(m.group(1))))
+    tu, den = (ngay[0], ngay[-1]) if ngay else report3.ky_mac_dinh()
+    status = await update.message.reply_text("⏳ Đang dựng báo cáo v3 từ KIOT...")
+    try:
+        text = await asyncio.to_thread(report3.build, tu, den)
+        await status.delete()
+        try:
+            png = await asyncio.to_thread(report_image.render, text)
+            await update.message.reply_photo(_io.BytesIO(png), caption="🧪 Báo cáo v3 (thử) — đọc từ KIOT")
+        except Exception:  # noqa: BLE001
+            log.exception("v3 image failed")
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi báo cáo v3: {e}")
 
 
 async def cmd_baocaomoi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1131,7 +1138,6 @@ def main() -> None:
     app.add_handler(CommandHandler("refresh", cmd_refresh))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("doanhthu", cmd_doanhthu))
-    app.add_handler(CommandHandler("anh", cmd_anh))
     app.add_handler(CommandHandler("ads", cmd_ads))
     app.add_handler(CommandHandler("baocaoads", cmd_baocaoads))
     app.add_handler(CommandHandler("adsnow", cmd_adsnow))
@@ -1145,6 +1151,7 @@ def main() -> None:
     app.add_handler(CommandHandler("datacu", cmd_datacu))
     app.add_handler(CommandHandler("capnhatchot", cmd_capnhatchot))
     app.add_handler(CommandHandler("baocaomoi", cmd_baocaomoi))
+    app.add_handler(CommandHandler("baocaov3", cmd_baocaov3))
     app.add_handler(CommandHandler("cohort", cmd_cohort))
     app.add_handler(CommandHandler("adsfeed", cmd_adsfeed))
     app.add_handler(CommandHandler("saletuan", cmd_saletuan))

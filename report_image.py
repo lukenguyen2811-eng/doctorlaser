@@ -139,7 +139,12 @@ def parse(text: str) -> dict:
     d["lk_ads"] = _n(_m(r"Tổng chi ads: ([\d.]+)đ \(FB", text))
     d["lk_ads_pct"] = _m(r"— ([\d.]+)% doanh thu", text)
     d["lk_lead"] = _m(r"- Lead hợp lệ: (\d+) \| Chốt", text)
-    d["lk_chot"] = _m(r"Chốt \(bot đối chiếu hóa đơn\): (\d+ \(\d+%\))", text)
+    d["lk_chot"] = _m(r"Chốt (?:\(bot đối chiếu hóa đơn\)|khách mới): (\d+ \(\d+%\))", text)
+    d["ngay_kd"] = _m(r"Ngày kinh doanh: ([^|]+)", text).strip()
+    d["xn_da"] = _m(r"Đã xác nhận: (\d+)", text)
+    d["xn_chua"] = _m(r"Chưa xác nhận: (\d+)", text)
+    d["doi_chieu"] = _m(r"Đối chiếu KIOT: ([^\n]+)", text).strip()
+    d["kq_line"] = _m(r"- Kết quả: (lịch đặt mới[^\n]+)", text).strip()
 
     d["canh_bao"] = re.findall(r"🚨.*\n((?:\s+- .+\n)+)", text)
     d["status_ok"] = text.count(": OK")
@@ -197,7 +202,8 @@ def render(text: str) -> bytes:
     c.ax.add_patch(FancyBboxPatch((0, 0), 1080, 150, boxstyle="square,pad=0", fc=NAVY, ec="none"))
     c.text(48, 34, "DOCTOR LASER · BÁO CÁO ĐIỀU HÀNH", 22, True, "#9FD8CD")
     c.text(48, 72, d["title_day"], 40, True, "white")
-    c.text(1032, 44, "Chốt đến 23:59", 18, False, "#B9C6D6", ha="right")
+    c.text(1032, 44, ("Ngày KD " + d["ngay_kd"].replace("→", "–")) if d["ngay_kd"] else "Chốt đến 23:59",
+           17, False, "#B9C6D6", ha="right")
     y = 180
 
     # Cảnh báo
@@ -214,7 +220,7 @@ def render(text: str) -> bytes:
     tiles = [
         ("DOANH THU", _tr(d["dt"]), "%d khách · %d HĐ" % (d["khach"], d["hd"]), TEAL),
         ("THỰC THU", _tr(_n(d["thucthu"])) if _n(d["thucthu"]) else "N/A",
-         "TB/HĐ %s · hủy %s" % (_tr(d["tbhd"]), d["huy"] or "0"), NAVY),
+         "TB/HĐ %s · hủy %s" % (_tr(d["tbhd"]), re.sub(r" hóa đơn hủy.*", "", d["huy"] or "0")), NAVY),
         ("CHI ADS", _tr(d["ads"]), "DT/ads cùng ngày %s lần" % d["tyso"], AMBER),
         ("LEAD HỢP LỆ", str(d["hople"]), "%s data sạch" % d["pct_sach"], FB),
     ]
@@ -228,7 +234,9 @@ def render(text: str) -> bytes:
         c.text(x + 22, y + 126, sub, 14, False, MUTED)
     y += 200
     if d["giamtru"] and d["giamtru"].startswith("N/A"):
-        c.text(48, y - 14, "Giảm trừ/trả hàng: " + d["giamtru"], 14, False, MUTED)
+        c.text(48, y - 14, "Giảm trừ/trả hàng: " + d["giamtru"]
+               + (("   ·   Đối chiếu KIOT–KiotViet: " + d["doi_chieu"].replace("✓", "").replace("⚠️", "").strip())
+                  if d["doi_chieu"] else ""), 14, False, MUTED)
         y += 16
 
     # Top dịch vụ
@@ -274,7 +282,7 @@ def render(text: str) -> bytes:
     y += hm + 30
 
     # CRM
-    y = c.section(y, "Data & lead (00:00–23:59)")
+    y = c.section(y, "Data & lead (ngày kinh doanh)" if d.get("ngay_kd") else "Data & lead (00:00–23:59)")
     c.card(X0, y, WC, 300)
     funnel = [("Tổng data", d["tong_data"], NAVY, ""),
               ("Có số thô", d["tho"], FB, d["pct_tho"] + " tổng data"),
@@ -289,6 +297,9 @@ def render(text: str) -> bytes:
         if sub:
             c.text(x, y + 92, sub, 13, False, MUTED)
     c.text(68, y + 124, "Theo nguồn: tổng data / lead hợp lệ", 16, True, MUTED)
+    if d["kq_line"]:
+        c.text(1012, y + 124, d["kq_line"].replace("lịch đặt mới", "Lịch mới").replace(" | ", " · "),
+               14, True, TEAL, ha="right")
     mx = max([t for _, t, _ in d["nguon"]] or [1])
     for i, (ten, t, l) in enumerate(d["nguon"][:4]):
         yy = y + 152 + 34 * i
@@ -338,7 +349,9 @@ def render(text: str) -> bytes:
         c.text(68, y + 180, "TVTT: " + d["tvtt"][:34], 17, False, INK)
     if d["qua_tai"]:
         c.text(68, y + 220, "Quá tải: " + d["qua_tai"], 17, True, AMBER)
-    c.text(68, y + 254, "Xác nhận lịch: chưa có nguồn", 14, False, MUTED)
+    c.text(68, y + 254, ("Đã xác nhận %s · Chưa xác nhận %s" % (d["xn_da"], d["xn_chua"]))
+           if d["xn_da"] else "Xác nhận lịch: chưa có nguồn", 14 if not d["xn_da"] else 16,
+           d["xn_da"] and (RED if int(d["xn_chua"] or 0) else GREEN) or MUTED, )
     x2 = X0 + half + 20
     c.card(x2, y, half, 290)
     c.text(x2 + 28, y + 22, _tr(d["lk_dt"]), 44, True, TEAL)
