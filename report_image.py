@@ -383,8 +383,8 @@ def render(text: str) -> bytes:
 def parse_kiemtra(text: str) -> dict:
     """Đọc văn bản report.build_data_preview (bản kiểm data 19h cho sale)."""
     d = {}
-    d["tieu_de"] = _m(r"KIỂM TRA DATA — (chốt 18h \S+)", text)
-    d["cua_so"] = _m(r"KIỂM TRA DATA — chốt 18h \S+ \((.+?)\)", text)
+    d["tieu_de"] = _m(r"KIỂM TRA DATA — (chốt \S+ \S+)", text)
+    d["cua_so"] = _m(r"KIỂM TRA DATA — chốt \S+ \S+ \((.+?)\)", text)
     d["tong"] = int(_n(_m(r"TỔNG DATA: (\d+)", text)))
     d["lead"] = int(_n(_m(r"Lead \(đã có SĐT\): (\d+)", text)))
     d["hople"] = _m(r"hợp lệ (\d+), trùng", text) or str(d["lead"])
@@ -408,11 +408,20 @@ def parse_kiemtra(text: str) -> dict:
     d["lich_tong"] = int(_n(_m(r"LỊCH HẸN NGÀY MAI \(\S+\): (\d+)", text, default="0")))
     gio, tvtt = {}, {}
     for m in re.finditer(r"^\s+• (\d{1,2})h\S*\s+.*?(?:\(TVTT: ([^)]+)\))?$", text, re.M):
+        if re.search(r"\dh: \d+ lịch", m.group(0)):
+            continue  # dòng tổng hợp v3, đếm ở vòng dưới
         h = int(m.group(1))
         gio[h] = gio.get(h, 0) + 1
         if m.group(2):
             tvtt[m.group(2).strip()] = tvtt.get(m.group(2).strip(), 0) + 1
+    for m in re.finditer(r"^\s+• (\d{1,2})h: (\d+) lịch", text, re.M):
+        gio[int(m.group(1))] = gio.get(int(m.group(1)), 0) + int(m.group(2))
+    mt = _m(r"LỊCH HẸN NGÀY MAI.*\n(?:.*\n)*?\s+- Theo TVTT: ([^\n]+)", text)
+    for m in re.finditer(r"([^,]+?) (\d+)(?:,|$)", mt):
+        tvtt[m.group(1).strip()] = int(m.group(2))
     d["lich_gio"], d["lich_tvtt"] = gio, tvtt
+    d["xn"] = _m(r"(Đã xác nhận \d+ · Chưa xác nhận \d+)", text)
+    d["kd_line"] = _m(r"Trong ngày KD: ([^\n]+)", text)
     return d
 
 
@@ -426,11 +435,11 @@ def render_kiemtra(text: str) -> bytes:
     c.text(48, 70, d["tieu_de"].capitalize(), 40, True, "white")
     c.text(1032, 44, d["cua_so"].replace("→", "–"), 17, False, "#D9F2EC", ha="right")
     y = 176
-    c.text(48, y, "Sale rà và sửa phân loại tối nay — báo cáo chính thức gửi 8h sáng mai.",
-           16, False, MUTED)
+    c.text(48, y, ("Nguồn: app KIOT · " if "KIOT" in text[:300] else "")
+           + "Sale rà và sửa phân loại tối nay — báo cáo chính thức gửi 8h sáng mai.", 16, False, MUTED)
     y += 40
 
-    tiles = [("TỔNG DATA", str(d["tong"]), "cửa sổ 18h – 18h", NAVY),
+    tiles = [("TỔNG DATA", str(d["tong"]), ("ngày KD 17h30 – 17h29" if "17h29" in text[:120] else "cửa sổ 18h – 18h"), NAVY),
              ("LEAD CÓ SỐ", str(d["lead"]), "hợp lệ %s · trùng/rác %d" % (d["hople"], d["trungrac"]), TEAL),
              ("QUAN TÂM", str(d["qt"]), "chưa có số — cần nuôi", AMBER),
              ("RÁC", str(d["rac"]),
@@ -452,6 +461,8 @@ def render_kiemtra(text: str) -> bytes:
     c.text(68, y + 50, d["chot"] or "0", 30, True, GREEN)
     c.text(330, y + 24, "Đặt lịch", 16, True, MUTED)
     c.text(330, y + 50, d["datlich"] or "0", 30, True, TEAL)
+    if d.get("kd_line"):
+        c.text(68, y + 108, "Trong ngày KD: " + d["kd_line"], 14, False, MUTED)
     pcol = {"Nóng": RED, "Ấm": AMBER, "Lạnh": FB}
     tot = sum(v for _, v in d["phan_loai"]) or 1
     xx = 600
@@ -501,8 +512,10 @@ def render_kiemtra(text: str) -> bytes:
     sang = sum(v for h, v in d["lich_gio"].items() if h < 13)
     c.text(68, y + 104, "Sáng %d · Chiều %d" % (sang, d["lich_tong"] - sang), 18, False, INK)
     if d["lich_tvtt"]:
-        c.text(68, y + 140, "TVTT: " + ", ".join("%s %d" % kv for kv in
-               sorted(d["lich_tvtt"].items(), key=lambda x: -x[1])), 17, False, INK)
+        ds = ["%s %d" % kv for kv in sorted(d["lich_tvtt"].items(), key=lambda x: -x[1])]
+        c.text(68, y + 134, "TVTT: " + ", ".join(ds[:2]), 16, False, INK)
+        if len(ds) > 2:
+            c.text(68, y + 158, ", ".join(ds[2:]), 16, False, INK)
     # biểu đồ theo giờ 8h→19h
     gx, gy, gh = 380, y + 40, 180
     mx = max(d["lich_gio"].values() or [1])
@@ -514,6 +527,8 @@ def render_kiemtra(text: str) -> bytes:
         if v:
             c.text(gx + i * 52 + 19, gy + gh - bh - 26, str(v), 15, True, INK, ha="center")
         c.text(gx + i * 52 + 19, gy + gh + 10, "%dh" % h, 13, False, MUTED, ha="center")
+    if d.get("xn"):
+        c.text(68, y + 196, d["xn"].replace(" · ", "\n"), 15, True, RED if not d["xn"].endswith(" 0") else GREEN)
     c.text(68, y + 250, "Cam = khung giờ có từ 3 lịch trở lên", 14, False, MUTED)
     y += 330
 

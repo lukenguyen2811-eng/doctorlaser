@@ -46,9 +46,12 @@ def _tok():
     return os.environ.get("KIOT_INGEST_TOKEN") or os.environ.get("INGEST_TOKEN") or ""
 
 
-def kiot_bcn(tu, den):
+def kiot_bcn(tu, den, hen_ngay=None):
+    params = {"tu": str(tu), "den": str(den)}
+    if hen_ngay:
+        params["hen_ngay"] = str(hen_ngay)
     r = requests.get(KIOT + "/api/ingest/bao-cao-ngay", headers={"x-ingest-token": _tok()},
-                     params={"tu": str(tu), "den": str(den)}, timeout=60)
+                     params=params, timeout=60)
     if r.status_code != 200 or not (r.json() or {}).get("ok"):
         raise RuntimeError("KIOT bao-cao-ngay trả %s" % r.status_code)
     return r.json()
@@ -387,6 +390,61 @@ def build(tu=None, den=None):
     p += tinh_trang
     if tt and tt.get("rt") is not None:
         p.append("  - TikTok token: còn %.0f ngày tới hạn authorize lại" % tt["rt"])
+    return "\n".join(p)
+
+
+def build_19h(day=None):
+    """Bản KIỂM TRA DATA 19h: ngày KD hôm nay (đã chốt 17:29) + lịch ngày mai.
+
+    Văn bản theo nhãn report_image.render_kiemtra. Không tên/SĐT khách —
+    danh sách chi tiết sale xem trong KIOT.
+    """
+    now = _now()
+    day = day or now.date()
+    mai = day + dt.timedelta(days=1)
+    b = kiot_bcn(day, day, hen_ngay=mai)
+    c, k = b["crm"], b["ket_qua"]
+    t1 = (day - dt.timedelta(days=1)).strftime("%d/%m")
+    hople = int(c.get("lead_hop_le") or 0)
+    st = c.get("theo_trang_thai") or {}
+    p = ["🔎 KIỂM TRA DATA — chốt 17h29 %s (17h30 %s → 17h29 %s)" % (day.strftime("%d/%m"), t1, day.strftime("%d/%m")),
+         "Nguồn: app KIOT. Sale rà & sửa phân loại trong KIOT; báo cáo chính thức gửi 8h sáng mai.", "",
+         "📞 DATA NGÀY KD %s — KIOT (chỉ lead CHAT/MANUAL):" % day.strftime("%d/%m"),
+         "  - TỔNG DATA: %s" % c.get("tong_data"),
+         "      • Lead (đã có SĐT): %s — hợp lệ %s, trùng/rác %d" % (
+             c.get("lead_co_so_tho"), hople, int(c.get("trung") or 0) + int(c.get("rac") or 0)),
+         "      • Quan tâm (chưa SĐT): %s" % c.get("quan_tam_chua_so"),
+         "      • Rác: %s" % c.get("rac")]
+    if st:
+        p.append("  - Trạng thái LEAD: " + ", ".join("%s %s" % x for x in sorted(st.items(), key=lambda x: -x[1])))
+    if c.get("ds_lead_trung"):
+        p.append("  - LEAD TRÙNG/RÁC (%d) — xem trong KIOT:" % len(c["ds_lead_trung"]))
+        p += ["      • %s · trùng" % m for m in c["ds_lead_trung"][:10]]
+    rows = [(n, int(v.get("lead") or 0), int(v.get("tong") or 0)) for n, v in (c.get("theo_nguon") or {}).items()
+            if int(v.get("tong") or 0)]
+    if rows:
+        p.append("  - Theo nguồn (lead/tổng data nguồn):")
+        for n, l_, t_ in sorted(rows, key=lambda x: -x[2]):
+            p.append("      • %s: %d/%d (%s ra lead)" % (n, l_, t_, _pct(l_, t_)))
+    pl = c.get("phan_loai") or {}
+    p.append("  - Phân loại: " + ", ".join("%s %s" % (a, v) for a, v in pl.items() if v))
+    chot, dl = int(st.get("Chốt") or 0), int(st.get("Đặt lịch") or 0)
+    p.append("  - Kết quả: Chốt %d (%s), Đặt lịch %d (%s)" % (chot, _pct(chot, hople), dl, _pct(dl, hople)))
+    p.append("  - Trong ngày KD: lịch đặt mới %s | khách đến %s/%s | chốt khách mới %s" % (
+        k.get("lich_dat_moi"), k.get("da_den"), k.get("lich_hen_trong_ky"), k.get("chot_khach_moi")))
+    h = b["lich_hen"]["hen_hom_nay"]
+    p += ["", "🗓 LỊCH HẸN NGÀY MAI (%s): %s khách" % (mai.strftime("%d/%m"), h.get("tong"))]
+    for g, v in sorted(((int(a), v) for a, v in (h.get("theo_gio") or {}).items())):
+        p.append("  • %dh: %d lịch" % (g, v))
+    tv = h.get("theo_tvtt") or {}
+    if tv:
+        p.append("  - Theo TVTT: " + ", ".join("%s %s" % x for x in sorted(tv.items(), key=lambda x: -x[1])))
+    mc, xn = h.get("moi_cu") or {}, h.get("xac_nhan") or {}
+    p.append("  - Khách mới %s · cũ %s | Đã xác nhận %s · Chưa xác nhận %s" % (
+        mc.get("moi"), mc.get("cu"), xn.get("da"), xn.get("chua")))
+    if h.get("trung_da_bo"):
+        p.append("  - Đã bỏ %s lịch trùng khi đếm" % h["trung_da_bo"])
+    p.append("  Chi tiết từng khách xem trong KIOT: %s/#/appointments" % KIOT)
     return "\n".join(p)
 
 

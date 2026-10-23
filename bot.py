@@ -486,6 +486,30 @@ async def cmd_baocaov3(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"Lỗi báo cáo v3: {e}")
 
 
+async def cmd_kiemtrav3(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Thử bản kiểm data 19h v3 (KIOT, ngày KD hôm nay + lịch ngày mai)."""
+    if not _allowed(update):
+        return
+    import io as _io
+
+    import report3
+    import report_image
+
+    status = await update.message.reply_text("⏳ Đang dựng bản kiểm data v3 từ KIOT...")
+    try:
+        text = await asyncio.to_thread(report3.build_19h)
+        await status.delete()
+        try:
+            png = await asyncio.to_thread(report_image.render_kiemtra, text)
+            await update.message.reply_photo(_io.BytesIO(png), caption="🧪 Kiểm tra data v3 (thử) — đọc từ KIOT")
+        except Exception:  # noqa: BLE001
+            log.exception("kiemtra v3 image failed")
+        await _reply_mono(update, text)
+    except Exception as e:  # noqa: BLE001
+        await status.delete()
+        await update.message.reply_text(f"Lỗi kiểm data v3: {e}")
+
+
 async def cmd_baocaomoi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Preview BÁO CÁO ĐIỀU HÀNH v2 (Đợt 1): /baocaomoi [d/m].
 
@@ -1152,6 +1176,7 @@ def main() -> None:
     app.add_handler(CommandHandler("capnhatchot", cmd_capnhatchot))
     app.add_handler(CommandHandler("baocaomoi", cmd_baocaomoi))
     app.add_handler(CommandHandler("baocaov3", cmd_baocaov3))
+    app.add_handler(CommandHandler("kiemtrav3", cmd_kiemtrav3))
     app.add_handler(CommandHandler("cohort", cmd_cohort))
     app.add_handler(CommandHandler("adsfeed", cmd_adsfeed))
     app.add_handler(CommandHandler("saletuan", cmd_saletuan))
